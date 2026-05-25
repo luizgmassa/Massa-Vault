@@ -1,0 +1,11 @@
+{
+  "refreshToken": "1//056JLKxfFMUNjCgYIARAAGAUSNwF-L9Ir6euKfWnZvV4xUcYD9K1fb-QUB6XxHXalgitagj0iyvGw1h72VxcqlhGfrhve3CP9-Mg",
+  "operations": {
+    "Templates": "create",
+    "Templates/llm-smart-router.md": "create",
+    "Teste.md": "create"
+  },
+  "driveIdToPath": {},
+  "lastSyncedAt": 1779689325063,
+  "changesToken": "184615"
+}
