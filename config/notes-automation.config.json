@@ -1,0 +1,33 @@
+{
+  "enabled": true,
+  "watch_paths": [
+    "."
+  ],
+  "include_globs": [
+    "**/*.md",
+    "templates/**/*.md",
+    ".obsidian/app.json",
+    ".obsidian/community-plugins.json",
+    ".obsidian/core-plugins.json"
+  ],
+  "ignore_globs": [
+    ".git/**",
+    ".automation/**",
+    ".logs/**",
+    ".obsidian/workspace.json",
+    ".obsidian/plugins/**/data.json",
+    ".obsidian/plugins/**/cache/**",
+    ".obsidian/plugins/**/tmp/**",
+    ".litellm/.venv/**",
+    "**/*.png",
+    "**/*.jpg",
+    "**/*.jpeg",
+    "**/*.gif",
+    "**/*.pdf",
+    "**/*.zip"
+  ],
+  "push_interval_min": 10,
+  "remote": "origin",
+  "branch": "master",
+  "debounce_ms": 1500
+}

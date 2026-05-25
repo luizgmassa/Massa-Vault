@@ -1,0 +1,11 @@
+{
+  "port": 27124,
+  "insecurePort": 27123,
+  "enableInsecureServer": false,
+  "apiKey": "SET_A_STRONG_LOCAL_KEY",
+  "crypto": {
+    "cert": "GENERATED_LOCALLY_BY_PLUGIN",
+    "privateKey": "GENERATED_LOCALLY_BY_PLUGIN",
+    "publicKey": "GENERATED_LOCALLY_BY_PLUGIN"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "massa-vault-tools",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "router-gateway": "node tools/router-gateway/src/server.js",
+    "notes-automation": "node tools/notes-automation/src/cli.js",
+    "notes-automation:start": "node tools/notes-automation/src/cli.js start",
+    "notes-automation:stop": "node tools/notes-automation/src/cli.js stop",
+    "notes-automation:status": "node tools/notes-automation/src/cli.js status",
+    "notes-automation:flush-push": "node tools/notes-automation/src/cli.js flush-push",
+    "notes-automation:resume": "node tools/notes-automation/src/cli.js resume",
+    "security:scan": "node tools/security/scan-secrets.js --staged",
+    "security:scan:all": "node tools/security/scan-secrets.js --all",
+    "hooks:install": "bash tools/security/install-hooks.sh",
+    "test": "node --test"
+  }
+}

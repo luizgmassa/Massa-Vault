@@ -1,1 +1,13 @@
 .litellm/.venv
+.env
+.env.*
+!.env.example
+.automation/
+.logs/
+
+# local runtime secrets
+.litellm/litellm.local.env
+.obsidian/plugins/obsidian-local-rest-api/data.json
+
+# OS files
+.DS_Store

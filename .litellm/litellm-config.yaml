@@ -1,77 +1,106 @@
 model_list:
   ###########################################################
-  # 1) MODELOS LOCAIS (via Ollama em http://localhost:11434)
+  # 1) LOCAL MODELS (via Ollama at http://localhost:11434)
   ###########################################################
   - model_name: general_local
     litellm_params:
-      # Modelo generalista local (ajuste pro nome exato do modelo no Ollama)
       model: ollama_chat/qwen3.5:9b
       api_base: http://localhost:11434
       keep_alive: "5m"
 
   - model_name: code_local
     litellm_params:
-      # Modelo de código local (fallback de code_cloud)
       model: ollama_chat/qwen2.5-coder:7b
       api_base: http://localhost:11434
       keep_alive: "5m"
 
   ###########################################################
-  # 2) MODELOS CLOUD via Ollama Cloud (usando o Ollama local)
+  # 2) CLOUD MODELS (via Ollama Cloud from local Ollama)
   ###########################################################
   - model_name: general_cloud
     litellm_params:
-      # Modelo generalista Cloud (deepseek) exposto pelo Ollama
-      # Requer OLLAMA_API_KEY configurado no ambiente
       model: ollama_chat/deepseek-v3.2:cloud
       api_base: http://localhost:11434
-      rpm: 60        # limite aproximado de req/min
-      tpm: 90000     # limite aproximado de tokens/min
+      rpm: 60
+      tpm: 90000
 
   - model_name: code_cloud
     litellm_params:
-      # Modelo de código Cloud (qwen3-coder-next) exposto pelo Ollama
       model: ollama_chat/qwen3-coder-next:cloud
       api_base: http://localhost:11434
       rpm: 60
       tpm: 90000
 
+  - model_name: multimodal_cloud
+    litellm_params:
+      model: ollama_chat/deepseek-v3.2:cloud
+      api_base: http://localhost:11434
+      rpm: 60
+      tpm: 90000
+
   ###########################################################
-  # 3) COMPLEXITY ROUTER (decide simples vs complexo)
+  # 3) PER-LANE COMPLEXITY ROUTERS (used by Node gateway)
   ###########################################################
-  - model_name: smart-router
+  - model_name: smart-router-general
     litellm_params:
       model: auto_router/complexity_router
       complexity_router_config:
         tiers:
-          SIMPLE: general_local     # tarefas simples -> modelo local
-          MEDIUM: general_cloud     # tarefas médias -> generalista Cloud
-          COMPLEX: code_cloud       # tarefas complexas -> code Cloud
-          REASONING: code_cloud     # prompts com muito "think step by step" etc.
+          SIMPLE: general_local
+          MEDIUM: general_cloud
+          COMPLEX: general_cloud
+          REASONING: code_cloud
         token_thresholds:
-          simple: 32    # prompts curtos tendem a ser simples
-          complex: 400  # prompts muito longos ganham boost de complexidade
+          simple: 32
+          complex: 400
       complexity_router_default_model: general_local
 
+  - model_name: smart-router-code
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: code_local
+          MEDIUM: code_cloud
+          COMPLEX: code_cloud
+          REASONING: code_cloud
+        token_thresholds:
+          simple: 24
+          complex: 300
+      complexity_router_default_model: code_local
+
+  - model_name: smart-router-multimodal
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: multimodal_cloud
+          MEDIUM: multimodal_cloud
+          COMPLEX: multimodal_cloud
+          REASONING: multimodal_cloud
+        token_thresholds:
+          simple: 16
+          complex: 200
+      complexity_router_default_model: multimodal_cloud
+
 ###########################################################
-# 4) ROUTER SETTINGS (fallback, rate limit etc.)
+# 4) ROUTER SETTINGS (fallback, retries, rate checks)
 ###########################################################
 router_settings:
-  # Estratégia básica de roteamento entre deployments de um mesmo model_name
   routing_strategy: simple-shuffle
   num_retries: 2
   timeout: 40
-
-  # Se Cloud falhar (429/timeout/etc.), cair para local
   fallbacks:
     - code_cloud:
         - code_local
     - general_cloud:
         - general_local
-
-  # Opcional: transformar rpm/tpm em hard limit (429 antes de bater no provider)
+    - smart-router-general:
+        - general_local
+    - smart-router-code:
+        - code_local
   optional_pre_call_checks:
     - enforce_model_rate_limits
 
 general_settings:
-  master_key: "sk-QR2qbkSTloou-_0c0nh09d0JuBYvw2gvYZwOI1xOiuc"
+  master_key: os.environ/LITELLM_MASTER_KEY

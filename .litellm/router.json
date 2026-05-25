@@ -1,36 +1,43 @@
 {
-  "encoder_type": "ollama",
-  "encoder_name": "bge-m3:latest",
-  "routes": [
-    {
-      "name": "code_cloud",
-      "utterances": [
-        "how to code a program in [language]",
-        "can you explain this [language] code",
-        "refactor this function",
-        "debug this error",
+  "version": 1,
+  "confidenceFloor": 0.55,
+  "lanes": {
+    "code": {
+      "model": "smart-router-code",
+      "phrases": [
+        "stacktrace",
+        "refactor",
+        "debug",
+        "code review",
+        "typescript",
+        "javascript",
+        "python",
+        "sql",
+        "optimize algorithm",
         "melhore esse código",
-        "otimize esse algoritmo",
-        "explique esse stacktrace"
-      ],
-      "description": "Tarefas de programação complexa",
-      "score_threshold": 0.6,
-      "metadata": {}
+        "analise esse erro",
+        "corrija esse bug",
+        "implemente",
+        "escreva testes"
+      ]
     },
-    {
-      "name": "general_cloud",
-      "utterances": [
+    "multimodal": {
+      "model": "smart-router-multimodal",
+      "phrases": [
         "describe this image",
+        "analyze this image",
         "analyze this video",
         "transcribe this audio",
         "what is happening in this picture",
-        "interprete esse áudio",
         "analise essa imagem",
-        "explique o que acontece nesse vídeo"
-      ],
-      "description": "Tarefas multimodais/generalistas com mídia",
-      "score_threshold": 0.6,
-      "metadata": {}
+        "analise esse vídeo",
+        "descreva essa foto",
+        "transcreva esse áudio"
+      ]
+    },
+    "general": {
+      "model": "smart-router-general",
+      "phrases": []
     }
-  ]
+  }
 }

@@ -219,18 +219,18 @@
   "active": "b98e566cf0762405",
   "lastOpenFiles": [
     "README.md",
+    "tests/notes-automation-glob.test.js",
+    "tests/router-gateway-contract.test.js",
+    "tests/router-classifier.test.js",
+    "tests",
+    "tools/security/install-hooks.sh",
+    "tools/security/scan-secrets.js",
+    "tools/security",
+    "tools/notes-automation/src/cli.js",
+    "tools/notes-automation/src/service.js",
+    "tools/notes-automation/src/state.js",
     "Teste.md",
     "Templates/llm-smart-router.md",
-    "Templates",
-    "config/litellm_config.yaml",
-    "SystemSculpt/Extractions",
-    "SystemSculpt/Attachments",
-    "SystemSculpt/System Prompts",
-    "SystemSculpt/Recordings",
-    "SystemSculpt/Web Research",
-    "SystemSculpt/Saved Chats",
-    "SystemSculpt/Chats",
-    "SystemSculpt",
     "Welcome.md"
   ]
 }
