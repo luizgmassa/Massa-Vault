@@ -1,194 +1,157 @@
-# Massa Vault v1.1
+# Massa Vault System (v1.2)
 
-Personal Obsidian vault with a local-first AI routing stack and Git-native note automation.
+Automation system for a personal Obsidian knowledge base with:
 
-This repository is now focused on:
+- semantic + complexity AI routing
+- automated Git sync
+- optional Google Drive sync
+- setup/config CLI
 
-- Semantic lane routing (`code`, `multimodal`, `general`) before complexity routing.
-- LiteLLM per-lane complexity routers.
-- Automatic note commits + batched pushes to GitHub.
-- Security hardening (no tracked runtime secrets).
+This repository now stores **system/tooling files only**.  
+Your actual notes/memories live in an external vault path configured by CLI.
 
-WhatsApp integration is explicitly out of scope for this version.
+## What Changed
 
-## Current Structure
+- Google Drive sync is back (via `rclone`).
+- Git sync remains active (auto-commit + optional auto-push).
+- Vault path is external and configurable (`vault_path`).
+- Sync mode is selectable: `git`, `gdrive`, or `both`.
+- New CLI for install/config/start/stop/status.
 
-```text
-.
-├── .litellm/
-│   ├── litellm-config.yaml
-│   └── router.json
-├── .obsidian/
-├── config/
-│   └── notes-automation.config.json
-├── tools/
-│   ├── router-gateway/
-│   ├── notes-automation/
-│   └── security/
-├── tests/
-├── .githooks/
-└── package.json
-```
+## Architecture
 
-## Routing Architecture (Semantic -> Complexity)
+- `tools/router-gateway`: OpenAI-compatible gateway (`smart-router`) with semantic lane selection.
+- `tools/notes-automation`: file watcher + sync orchestrator for external vault.
+- `tools/security`: secret scanning + git hook installer.
+- `tools/cli.js`: one CLI entrypoint for installation and configuration.
 
-Client still calls one model: `smart-router`.
+## Sync Backends
 
-Flow:
+### Git sync
 
-1. Request hits local Node gateway (`/chat/completions` or `/v1/chat/completions`).
-2. Gateway classifies semantic lane using `.litellm/router.json`:
-   - `code` -> `smart-router-code`
-   - `multimodal` -> `smart-router-multimodal`
-   - `general` -> `smart-router-general`
-3. LiteLLM then applies complexity routing inside the selected lane.
+- Watches vault files.
+- Auto-commits changed note/config files.
+- If `git_mode=remote` and `git_auto_push=true`, pushes every interval.
+- If non-fast-forward occurs, service pauses and waits for manual resolve.
 
-The gateway adds routing headers:
+### Google Drive sync
 
-- `x-router-lane`
-- `x-router-confidence`
-- `x-router-target-model`
+- Uses `rclone` backend.
+- Supported modes:
+  - `copy` (safe backup, no deletes)
+  - `sync` (destination mirrors source, can delete)
+  - `bisync` (two-way sync; first run uses `--resync`)
 
-Optional metadata contract for better routing:
-
-```json
-{
-  "context": {
-    "source": "obsidian",
-    "note_path": "notes/project-x.md",
-    "selection_length": 820
-  }
-}
-```
-
-## Notes Automation
-
-`notes-automation` service:
-
-- Watches vault changes (create/edit/delete).
-- Stages only tracked note/config targets.
-- Commits immediately after debounce.
-- Pushes every 10 minutes.
-- Pushes on graceful shutdown.
-- If push is non-fast-forward: pauses and requires manual resolve.
-
-CLI:
+## CLI Usage
 
 ```bash
-npm run notes-automation:start
-npm run notes-automation:status
-npm run notes-automation:flush-push
-npm run notes-automation:resume
-npm run notes-automation:stop
+npm run vault:install
+npm run vault:configure
+npm run vault:start
+npm run vault:status
+npm run vault:flush-sync
+npm run vault:resume
+npm run vault:stop
 ```
 
-Configuration schema (`config/notes-automation.config.json`):
+### `install`
+
+- checks `node`, `git`, `rclone`
+- installs local git hooks (`.githooks`)
+
+### `configure`
+
+Interactive setup for:
+
+- external vault path
+- sync strategy (`git`, `gdrive`, `both`)
+- git mode (`remote` or `local`)
+- remote URL/branch/auto-push
+- Google Drive remote path and mode
+
+If Git sync is enabled, CLI initializes git repo in vault path if needed and configures remote URL.
+
+## Main Config
+
+File: `config/notes-automation.config.json`
 
 ```json
 {
   "enabled": true,
+  "vault_path": "/absolute/path/to/your/obsidian-vault",
   "watch_paths": ["."],
   "include_globs": ["**/*.md", "templates/**/*.md"],
-  "ignore_globs": [".git/**", ".obsidian/workspace.json", ".obsidian/plugins/**/data.json"],
+  "ignore_globs": [".git/**", ".obsidian/workspace.json"],
   "push_interval_min": 10,
+  "sync_strategy": "both",
+  "git_mode": "remote",
+  "git_repo_url": "git@github.com:you/your-vault.git",
+  "git_auto_push": true,
   "remote": "origin",
   "branch": "master",
+  "gdrive_binary": "rclone",
+  "gdrive_remote_path": "gdrive:massa-vault",
+  "gdrive_mode": "copy",
+  "gdrive_first_run_resync": true,
+  "gdrive_args": ["--exclude", ".git/**"],
   "debounce_ms": 1500
 }
 ```
 
-## Security Hardening
+## Router Gateway
 
-Implemented:
-
-- Removed Google Drive sync plugin from tracked config.
-- Removed tracked Obsidian REST API secret data file.
-- LiteLLM master key moved to environment variable (`LITELLM_MASTER_KEY`).
-- Added local secret scanning:
-  - `tools/security/scan-secrets.js`
-  - git hooks in `.githooks/pre-commit` and `.githooks/pre-push`
-
-Install hook path:
+Start:
 
 ```bash
-npm run hooks:install
+npm run router-gateway
 ```
 
-Run scanners manually:
+Default endpoint:
+
+- `http://127.0.0.1:4100/chat/completions`
+- client model must stay `smart-router`
+
+Gateway classifies into:
+
+- `smart-router-code`
+- `smart-router-multimodal`
+- `smart-router-general`
+
+Then LiteLLM runs complexity routing within that lane.
+
+## Security
+
+- secret scanner in `tools/security/scan-secrets.js`
+- hooks:
+  - `.githooks/pre-commit` (staged scan)
+  - `.githooks/pre-push` (repo scan)
+
+Manual scan:
 
 ```bash
 npm run security:scan
 npm run security:scan:all
 ```
 
-## Setup
-
-1. Copy environment template and set values:
-
-```bash
-cp .env.example .env.local
-```
-
-2. Export required vars in your shell/session:
-
-```bash
-export LITELLM_MASTER_KEY="sk-..."
-export ROUTER_LITELLM_BASE_URL="http://127.0.0.1:4000"
-```
-
-3. Ensure Obsidian Local REST API has local-only runtime config:
-
-```text
-.obsidian/plugins/obsidian-local-rest-api/data.json
-```
-
-Use `.obsidian/plugins/obsidian-local-rest-api/data.example.json` as template and do not commit the real file.
-
-4. Start services:
-
-```bash
-npm run router-gateway
-npm run notes-automation:start
-```
-
-5. Point Obsidian integrations to gateway:
-
-- Base URL: `http://127.0.0.1:4100`
-- Endpoint: `/chat/completions`
-- Model: `smart-router`
-- Header: `Authorization: Bearer <LITELLM_MASTER_KEY>`
-
-## Testing
-
-Run all tests:
+## Tests
 
 ```bash
 npm test
 ```
 
-Current tests cover:
+Covers:
 
-- Semantic lane routing (EN/PT signals + multimodal payload).
-- OpenAI-compatible gateway contract with lane headers.
-- Notes automation glob matching behavior.
+- semantic lane routing
+- gateway forwarding contract
+- glob matching rules
+- sync strategy config parsing
 
-## Mandatory Secret Rotation + History Rewrite
+## Notes
 
-Sensitive values were previously committed. Rotate them immediately:
+- This repo should not store your vault memories/knowledge files.
+- Point `vault_path` to your real Obsidian vault and run automation from this system repo.
+- For `rclone` Google Drive setup, run `rclone config` first and create your remote name/path.
 
-- LiteLLM master key
-- Obsidian Local REST API key/certs
-- Google refresh token (already removed from files, still rotate)
-
-Then purge git history and force re-clone:
-
-```bash
-# example using git-filter-repo (install separately)
-git filter-repo --path .obsidian/plugins/obsidian-local-rest-api/data.json --invert-paths
-git filter-repo --path .obsidian/plugins/google-drive-sync/data.json --invert-paths
-
-git push --force --all
-git push --force --tags
-```
-
-After force-push, all local clones should be recreated to avoid retaining leaked history.
+References:
+- `rclone sync` docs: https://rclone.org/commands/rclone_sync/
+- `rclone bisync` docs: https://rclone.org/commands/rclone_bisync/

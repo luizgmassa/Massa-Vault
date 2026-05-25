@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.js";
-import { gitAdd, gitCachedNames, gitCommit, gitPush } from "./git.js";
+import {
+  gitAdd,
+  gitCachedNames,
+  gitCommit,
+  gitHasRepo,
+  gitInit,
+  gitPush,
+  gitRemoteSetUrl
+} from "./git.js";
+import { syncToGoogleDrive } from "./gdrive.js";
 import { readState, writeState } from "./state.js";
 
 function toPosix(p) {
@@ -38,12 +47,14 @@ function isProcessRunning(pid) {
 export class NotesAutomationService {
   constructor(configPath) {
     this.config = loadConfig(configPath);
+    this.vaultPath = this.config.vaultPath;
     this.changedFiles = new Set();
     this.commitTimer = null;
     this.pushTimer = null;
     this.controlTimer = null;
     this.watchers = [];
     this.paused = false;
+    this.vaultGitReady = false;
   }
 
   updateState(partial) {
@@ -77,21 +88,39 @@ export class NotesAutomationService {
     }, this.config.debounceMs);
   }
 
+  ensureVaultGitRepo() {
+    if (!this.config.git.enabled) return true;
+    if (this.vaultGitReady) return true;
+
+    if (!gitHasRepo(this.vaultPath)) {
+      gitInit(this.vaultPath);
+    }
+
+    if (this.config.git.mode === "remote" && this.config.git.repoUrl) {
+      gitRemoteSetUrl(this.config.git.remote, this.config.git.repoUrl, this.vaultPath);
+    }
+
+    this.vaultGitReady = true;
+    return true;
+  }
+
   commitNow() {
     if (this.paused) return;
+    if (!this.config.git.enabled) return;
     const files = [...this.changedFiles];
     this.changedFiles.clear();
     if (!files.length) return;
 
     try {
+      this.ensureVaultGitRepo();
       for (const relPath of files) {
-        gitAdd(relPath);
+        gitAdd(relPath, this.vaultPath);
       }
-      const staged = gitCachedNames();
+      const staged = gitCachedNames(this.vaultPath);
       if (!staged.length) return;
       const subject = `notes(sync): update ${staged.length} file(s)`;
       const body = [`source=notes-automation`, `files=${staged.slice(0, 10).join(", ")}`];
-      gitCommit(subject, body);
+      gitCommit(subject, body, this.vaultPath);
       this.updateState({
         lastCommitAt: new Date().toISOString(),
         lastCommitFiles: staged
@@ -103,9 +132,13 @@ export class NotesAutomationService {
     }
   }
 
-  flushPush() {
+  flushGitPush() {
+    if (!this.config.git.enabled) return;
+    if (!this.config.git.autoPush) return;
+    if (this.config.git.mode === "local") return;
     if (this.paused) return;
-    const result = gitPush(this.config.remote, this.config.branch);
+    this.ensureVaultGitRepo();
+    const result = gitPush(this.config.git.remote, this.config.git.branch, this.vaultPath);
     if (result.ok) {
       this.updateState({
         lastPushAt: new Date().toISOString(),
@@ -119,7 +152,7 @@ export class NotesAutomationService {
       this.updateState({
         paused: true,
         alert:
-          "Auto-push paused: non-fast-forward detected. Resolve manually (pull/rebase or merge), then run `npm run notes-automation:resume`.",
+          "Auto-push paused: non-fast-forward detected. Resolve manually (pull/rebase or merge), then run `npm run vault:resume`.",
         lastPushError: result.output
       });
       return;
@@ -128,6 +161,29 @@ export class NotesAutomationService {
     this.updateState({
       lastPushError: result.output
     });
+  }
+
+  flushGoogleDriveSync() {
+    if (!this.config.gdrive.enabled) return;
+    if (this.paused) return;
+    const result = syncToGoogleDrive(this.vaultPath, this.config.gdrive);
+    if (result.ok) {
+      this.updateState({
+        lastGDriveSyncAt: new Date().toISOString(),
+        lastGDriveError: null
+      });
+      return;
+    }
+
+    this.updateState({
+      lastGDriveError: result.error || "unknown gdrive sync error"
+    });
+  }
+
+  flushSyncBackends() {
+    this.commitNow();
+    this.flushGitPush();
+    this.flushGoogleDriveSync();
   }
 
   pollControl() {
@@ -146,20 +202,20 @@ export class NotesAutomationService {
       return;
     }
 
-    if (action === "flush-push") {
+    if (action === "flush-push" || action === "flush-sync") {
       this.updateState({ requestedAction: null });
-      this.flushPush();
+      this.flushSyncBackends();
     }
   }
 
   watchOne(watchPath) {
-    const absolute = path.resolve(watchPath);
+    const absolute = path.resolve(this.vaultPath, watchPath);
     const watcher = fs.watch(
       absolute,
       { persistent: true, recursive: true },
       (_eventType, fileName) => {
         if (!fileName) return;
-        const relPath = toPosix(path.relative(process.cwd(), path.resolve(absolute, fileName)));
+        const relPath = toPosix(path.relative(this.vaultPath, path.resolve(absolute, fileName)));
         this.queue(relPath);
       }
     );
@@ -177,8 +233,7 @@ export class NotesAutomationService {
     }
 
     this.pushTimer = setInterval(() => {
-      this.commitNow();
-      this.flushPush();
+      this.flushSyncBackends();
     }, this.config.pushIntervalMin * 60_000);
 
     this.controlTimer = setInterval(() => {
@@ -189,6 +244,7 @@ export class NotesAutomationService {
       running: true,
       paused: false,
       config: this.config,
+      vaultPath: this.vaultPath,
       startedAt: new Date().toISOString()
     });
   }
@@ -201,8 +257,7 @@ export class NotesAutomationService {
       watcher.close();
     }
 
-    this.commitNow();
-    this.flushPush();
+    this.flushSyncBackends();
     this.updateState({
       running: false,
       stoppedAt: new Date().toISOString()

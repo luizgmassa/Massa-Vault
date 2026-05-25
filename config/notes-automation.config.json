@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "vault_path": ".",
   "watch_paths": [
     "."
   ],
@@ -27,7 +28,21 @@
     "**/*.zip"
   ],
   "push_interval_min": 10,
+  "sync_strategy": "git",
+  "git_mode": "remote",
+  "git_repo_url": "",
+  "git_auto_push": true,
   "remote": "origin",
   "branch": "master",
+  "gdrive_binary": "rclone",
+  "gdrive_remote_path": "",
+  "gdrive_mode": "copy",
+  "gdrive_first_run_resync": true,
+  "gdrive_args": [
+    "--exclude",
+    ".git/**",
+    "--exclude",
+    ".obsidian/workspace.json"
+  ],
   "debounce_ms": 1500
 }

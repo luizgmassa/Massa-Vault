@@ -90,6 +90,9 @@ switch (command) {
   case "flush-push":
     requestAction("flush-push");
     break;
+  case "flush-sync":
+    requestAction("flush-sync");
+    break;
   case "resume":
     requestAction("resume");
     break;
@@ -98,7 +101,7 @@ switch (command) {
     break;
   default:
     console.error(
-      "Usage: node tools/notes-automation/src/cli.js [start|stop|status|flush-push|resume]"
+      "Usage: node tools/notes-automation/src/cli.js [start|stop|status|flush-push|flush-sync|resume]"
     );
     process.exit(1);
 }
