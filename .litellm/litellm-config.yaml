@@ -1,0 +1,77 @@
+model_list:
+  ###########################################################
+  # 1) MODELOS LOCAIS (via Ollama em http://localhost:11434)
+  ###########################################################
+  - model_name: general_local
+    litellm_params:
+      # Modelo generalista local (ajuste pro nome exato do modelo no Ollama)
+      model: ollama_chat/qwen3.5:9b
+      api_base: http://localhost:11434
+      keep_alive: "5m"
+
+  - model_name: code_local
+    litellm_params:
+      # Modelo de código local (fallback de code_cloud)
+      model: ollama_chat/qwen2.5-coder:7b
+      api_base: http://localhost:11434
+      keep_alive: "5m"
+
+  ###########################################################
+  # 2) MODELOS CLOUD via Ollama Cloud (usando o Ollama local)
+  ###########################################################
+  - model_name: general_cloud
+    litellm_params:
+      # Modelo generalista Cloud (deepseek) exposto pelo Ollama
+      # Requer OLLAMA_API_KEY configurado no ambiente
+      model: ollama_chat/deepseek-v3.2:cloud
+      api_base: http://localhost:11434
+      rpm: 60        # limite aproximado de req/min
+      tpm: 90000     # limite aproximado de tokens/min
+
+  - model_name: code_cloud
+    litellm_params:
+      # Modelo de código Cloud (qwen3-coder-next) exposto pelo Ollama
+      model: ollama_chat/qwen3-coder-next:cloud
+      api_base: http://localhost:11434
+      rpm: 60
+      tpm: 90000
+
+  ###########################################################
+  # 3) COMPLEXITY ROUTER (decide simples vs complexo)
+  ###########################################################
+  - model_name: smart-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: general_local     # tarefas simples -> modelo local
+          MEDIUM: general_cloud     # tarefas médias -> generalista Cloud
+          COMPLEX: code_cloud       # tarefas complexas -> code Cloud
+          REASONING: code_cloud     # prompts com muito "think step by step" etc.
+        token_thresholds:
+          simple: 32    # prompts curtos tendem a ser simples
+          complex: 400  # prompts muito longos ganham boost de complexidade
+      complexity_router_default_model: general_local
+
+###########################################################
+# 4) ROUTER SETTINGS (fallback, rate limit etc.)
+###########################################################
+router_settings:
+  # Estratégia básica de roteamento entre deployments de um mesmo model_name
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 40
+
+  # Se Cloud falhar (429/timeout/etc.), cair para local
+  fallbacks:
+    - code_cloud:
+        - code_local
+    - general_cloud:
+        - general_local
+
+  # Opcional: transformar rpm/tpm em hard limit (429 antes de bater no provider)
+  optional_pre_call_checks:
+    - enforce_model_rate_limits
+
+general_settings:
+  master_key: "sk-QR2qbkSTloou-_0c0nh09d0JuBYvw2gvYZwOI1xOiuc"

@@ -3,9 +3,10 @@
   "operations": {
     "Templates": "create",
     "Templates/llm-smart-router.md": "create",
-    "Teste.md": "create"
+    "Teste.md": "create",
+    "README.md": "create"
   },
   "driveIdToPath": {},
-  "lastSyncedAt": 1779689325063,
-  "changesToken": "184615"
+  "lastSyncedAt": 1779722096937,
+  "changesToken": "184618"
 }
