@@ -46,6 +46,7 @@ Your actual notes/memories live in an external vault path configured by CLI.
 ## CLI Usage
 
 ```bash
+npm run setup
 npm run vault:install
 npm run vault:configure
 npm run vault:start
@@ -58,6 +59,29 @@ npm run litellm
 npm run router-gateway
 npm run build
 ```
+
+### `setup`
+
+Full local bootstrap:
+
+```bash
+npm run setup
+```
+
+Noninteractive example:
+
+```bash
+./install.sh --yes --vault-path "$HOME/ObsidianVault" --sync-strategy git --git-mode local --no-start --skip-model-pull
+```
+
+Common flags:
+
+- `--check-only` checks tools without writing files.
+- `--start` starts LiteLLM, router-gateway, and notes automation after validation.
+- `--no-start` installs and validates only.
+- `--vault-path`, `--sync-strategy`, `--git-mode`, `--git-repo-url`, `--gdrive-remote-path` configure local sync.
+
+Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`. Both are ignored by git.
 
 ### `chat`
 

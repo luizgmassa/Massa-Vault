@@ -4,6 +4,7 @@
 !.env.example
 .automation/
 .logs/
+config/*.local.json
 
 # local runtime secrets
 .litellm/litellm.local.env

@@ -2,15 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
+const DEFAULT_LOCAL_CONFIG_PATH = path.resolve("config/notes-automation.local.json");
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
-  const raw = fs.readFileSync(configPath, "utf8");
-  const parsed = JSON.parse(raw);
+function readJsonFile(filePath) {
+  const raw = fs.readFileSync(filePath, "utf8");
+  return JSON.parse(raw);
+}
+
+function getLocalConfigPath(configPath, localConfigPath) {
+  if (localConfigPath !== undefined) return localConfigPath;
+  if (path.resolve(configPath) === DEFAULT_CONFIG_PATH) return DEFAULT_LOCAL_CONFIG_PATH;
+  return null;
+}
+
+export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath } = {}) {
+  const baseConfig = readJsonFile(configPath);
+  const localPath = getLocalConfigPath(configPath, localConfigPath);
+  const localConfig = localPath && fs.existsSync(localPath) ? readJsonFile(localPath) : {};
+  const parsed = { ...baseConfig, ...localConfig };
   const syncStrategy = String(parsed.sync_strategy || "git").toLowerCase();
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";

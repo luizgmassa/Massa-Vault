@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "npm test",
+    "setup": "bash install.sh",
     "vault": "node tools/cli.js",
     "vault:install": "node tools/cli.js install",
     "vault:configure": "node tools/cli.js configure",
@@ -18,7 +19,7 @@
     "vault:flush-sync": "node tools/cli.js flush-sync",
     "vault:resume": "node tools/cli.js resume",
     "router-gateway": "node tools/router-gateway/src/server.js",
-    "litellm": "DEBUG=false litellm --config .litellm/litellm-config.yaml --host 127.0.0.1 --port 4000",
+    "litellm": "bash scripts/run-litellm.sh",
     "notes-automation": "node tools/notes-automation/src/cli.js",
     "notes-automation:start": "node tools/notes-automation/src/cli.js start",
     "notes-automation:stop": "node tools/notes-automation/src/cli.js stop",
