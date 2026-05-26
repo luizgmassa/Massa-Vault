@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import {
   gitAdd,
@@ -47,6 +48,14 @@ function isProcessRunning(pid) {
   }
 }
 
+function summarizeCommandOutput(value, { maxLines = 20, maxChars = 4000 } = {}) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const clippedLines = text.split(/\r?\n/).slice(-maxLines).join("\n");
+  if (clippedLines.length <= maxChars) return clippedLines;
+  return clippedLines.slice(-maxChars);
+}
+
 export class NotesAutomationService {
   constructor(configPath) {
     this.config = loadConfig(configPath);
@@ -62,18 +71,57 @@ export class NotesAutomationService {
     this.watchMode = "fswatch";
     this.watchFailures = [];
     this.trackedSnapshot = new Map();
+    this.pollIntervalMs = null;
+    this.runId = randomUUID();
   }
 
-  updateState(partial) {
+  updateState(partial, { force = false } = {}) {
     const current = readState();
-    writeState({
+    const ownerRunId = typeof current.runId === "string" ? current.runId : "";
+    const ownedByThisProcess =
+      !ownerRunId || ownerRunId === this.runId || Number(current.pid) === process.pid;
+    if (!ownedByThisProcess && !force) {
+      return false;
+    }
+
+    const hasRunning = Object.prototype.hasOwnProperty.call(partial, "running");
+    const hasPid = Object.prototype.hasOwnProperty.call(partial, "pid");
+
+    const next = {
       ...current,
-      running: true,
-      pid: process.pid,
       paused: this.paused,
       updatedAt: new Date().toISOString(),
-      ...partial
-    });
+      ...partial,
+      runId: this.runId
+    };
+
+    if (!hasRunning && typeof next.running !== "boolean") {
+      next.running = true;
+    }
+    if (!hasPid) {
+      next.pid = next.running === false ? null : process.pid;
+    }
+
+    writeState(next);
+    return true;
+  }
+
+  assertNoRunningOwner() {
+    const current = readState();
+    const ownerRunId = typeof current.runId === "string" ? current.runId : "";
+    const ownerPid = Number(current.pid);
+    const currentVaultPath = current.vaultPath ? path.resolve(String(current.vaultPath)) : "";
+    const sameVault = !currentVaultPath || currentVaultPath === path.resolve(this.vaultPath);
+    if (
+      sameVault &&
+      ownerRunId &&
+      ownerRunId !== this.runId &&
+      Number.isInteger(ownerPid) &&
+      ownerPid !== process.pid &&
+      isProcessRunning(ownerPid)
+    ) {
+      throw new Error(`another notes-automation instance is already running with pid ${ownerPid}`);
+    }
   }
 
   shouldTrack(relativePath) {
@@ -163,15 +211,15 @@ export class NotesAutomationService {
     if (this.pollTimer) return;
     this.watchMode = "polling";
     this.trackedSnapshot = this.captureTrackedSnapshot();
-    const pollIntervalMs = Math.max(this.config.debounceMs * 2, 5000);
+    this.pollIntervalMs = Math.max(this.config.debounceMs * 2, 5000);
     this.pollTimer = setInterval(() => {
       this.pollForChanges();
-    }, pollIntervalMs);
+    }, this.pollIntervalMs);
     this.updateState({
       watchMode: this.watchMode,
       watchAlert: reason,
       watchFailures: this.watchFailures,
-      pollIntervalMs
+      pollIntervalMs: this.pollIntervalMs
     });
   }
 
@@ -276,17 +324,31 @@ export class NotesAutomationService {
   flushGoogleDriveSync() {
     if (!this.config.gdrive.enabled) return;
     if (this.paused) return;
+
+    const attemptedAt = new Date().toISOString();
     const result = syncToGoogleDrive(this.vaultPath, this.config.gdrive);
+    const nextState = {
+      lastGDriveAttemptAt: attemptedAt,
+      lastGDriveMode: result.command || null,
+      lastGDriveArgs: Array.isArray(result.args) ? result.args : [],
+      lastGDriveDryRun: Boolean(result.dryRun),
+      lastGDriveResyncApplied: Boolean(result.resyncApplied)
+    };
+
     if (result.ok) {
       this.updateState({
+        ...nextState,
         lastGDriveSyncAt: new Date().toISOString(),
-        lastGDriveError: null
+        lastGDriveError: null,
+        lastGDriveOutput: summarizeCommandOutput(result.output)
       });
       return;
     }
 
     this.updateState({
-      lastGDriveError: result.error || "unknown gdrive sync error"
+      ...nextState,
+      lastGDriveError: result.error || "unknown gdrive sync error",
+      lastGDriveOutput: summarizeCommandOutput(result.error || result.output || "")
     });
   }
 
@@ -358,6 +420,7 @@ export class NotesAutomationService {
       this.updateState({ running: false, disabled: true });
       return;
     }
+    this.assertNoRunningOwner();
 
     let attachedWatchers = 0;
     for (const watchPath of this.config.watchPaths) {
@@ -382,12 +445,20 @@ export class NotesAutomationService {
     this.updateState({
       running: true,
       paused: false,
+      alert: null,
+      requestedAction: null,
+      requestedAt: null,
       watchMode: this.watchMode,
       watchFailures: this.watchFailures,
+      watchAlert: this.watchMode === "polling" ? "polling fallback active" : null,
+      pollIntervalMs: this.watchMode === "polling" ? this.pollIntervalMs : null,
+      staleStateRecovered: false,
+      lastError: null,
+      stoppedAt: null,
       config: this.config,
       vaultPath: this.vaultPath,
       startedAt: new Date().toISOString()
-    });
+    }, { force: true });
   }
 
   async shutdown() {
@@ -402,6 +473,7 @@ export class NotesAutomationService {
     this.flushSyncBackends();
     this.updateState({
       running: false,
+      pid: null,
       stoppedAt: new Date().toISOString()
     });
   }

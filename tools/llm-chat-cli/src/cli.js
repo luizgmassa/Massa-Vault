@@ -545,10 +545,8 @@ async function main() {
   });
 }
 
-try {
-  await main();
-} catch (error) {
+main().catch((error) => {
   output.write("\n");
   console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
-}
+});

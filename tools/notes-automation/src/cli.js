@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { loadConfig } from "./config.js";
+import { checkGoogleDriveRemote, syncToGoogleDrive } from "./gdrive.js";
 import { startService, isProcessRunning } from "./service.js";
 import { readPid, removePid, writePid, readState, writeState } from "./state.js";
 import { loadLocalEnv } from "../../shared/env.js";
@@ -11,25 +13,45 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 
+function asPid(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function printStatus() {
-  const pid = readPid();
+  let pid = asPid(readPid());
   let state = readState();
+  const statePid = asPid(state?.pid);
+  const pidRunning = Boolean(pid && isProcessRunning(pid));
+  const statePidRunning = Boolean(statePid && isProcessRunning(statePid));
+
+  if (!pidRunning && statePidRunning) {
+    pid = statePid;
+    writePid(pid);
+  }
+
   const running = Boolean(pid && isProcessRunning(pid));
-  if (!running && state?.running) {
+  const normalizedPid = running ? pid : null;
+  const stateNeedsRecovery =
+    Boolean(state?.running) !== running || asPid(state?.pid) !== normalizedPid;
+  if (stateNeedsRecovery) {
     state = {
       ...state,
-      running: false,
-      pid: null,
+      running,
+      pid: normalizedPid,
       updatedAt: new Date().toISOString(),
       staleStateRecovered: true
     };
     writeState(state);
   }
+  if (!running) {
+    removePid();
+  }
   console.log(
     JSON.stringify(
       {
         running,
-        pid,
+        pid: normalizedPid,
         state
       },
       null,
@@ -116,6 +138,36 @@ function requestAction(action) {
   console.log(`[notes-automation] action requested: ${action}`);
 }
 
+function printGDriveCheck() {
+  const config = loadConfig(CONFIG_PATH);
+  if (!config.gdrive.enabled) {
+    const payload = { ok: false, skipped: true, reason: "gdrive sync is disabled by sync_strategy" };
+    console.log(JSON.stringify(payload, null, 2));
+    process.exit(1);
+  }
+  const result = checkGoogleDriveRemote(config.gdrive);
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.ok) {
+    process.exit(1);
+  }
+}
+
+function printGDriveDryRun() {
+  const config = loadConfig(CONFIG_PATH);
+  if (!config.gdrive.enabled) {
+    const payload = { ok: false, skipped: true, reason: "gdrive sync is disabled by sync_strategy" };
+    console.log(JSON.stringify(payload, null, 2));
+    process.exit(1);
+  }
+  const result = syncToGoogleDrive(config.vaultPath, config.gdrive, {
+    dryRun: true
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.ok) {
+    process.exit(1);
+  }
+}
+
 async function run() {
   writePid(process.pid);
   try {
@@ -134,33 +186,47 @@ async function run() {
   }
 }
 
-const command = process.argv[2] || "status";
+async function main() {
+  const command = process.argv[2] || "status";
 
-switch (command) {
-  case "start":
-    await startDetached();
-    break;
-  case "stop":
-    stopService();
-    break;
-  case "status":
-    printStatus();
-    break;
-  case "flush-push":
-    requestAction("flush-push");
-    break;
-  case "flush-sync":
-    requestAction("flush-sync");
-    break;
-  case "resume":
-    requestAction("resume");
-    break;
-  case "run":
-    await run();
-    break;
-  default:
-    console.error(
-      "Usage: node tools/notes-automation/src/cli.js [start|stop|status|flush-push|flush-sync|resume]"
-    );
-    process.exit(1);
+  switch (command) {
+    case "start":
+      await startDetached();
+      break;
+    case "stop":
+      stopService();
+      break;
+    case "status":
+      printStatus();
+      break;
+    case "flush-push":
+      requestAction("flush-push");
+      break;
+    case "flush-sync":
+      requestAction("flush-sync");
+      break;
+    case "resume":
+      requestAction("resume");
+      break;
+    case "gdrive-check":
+      printGDriveCheck();
+      break;
+    case "gdrive-dry-run":
+      printGDriveDryRun();
+      break;
+    case "run":
+      await run();
+      break;
+    default:
+      console.error(
+        "Usage: node tools/notes-automation/src/cli.js [start|stop|status|flush-push|flush-sync|resume|gdrive-check|gdrive-dry-run]"
+      );
+      process.exit(1);
+  }
 }
+
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[notes-automation] ${message}`);
+  process.exit(1);
+});

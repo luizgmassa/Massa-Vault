@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
@@ -20,6 +20,20 @@ function runTool(command, args = []) {
     stdio: "inherit",
     cwd: process.cwd(),
     env: process.env
+  });
+}
+
+function runToolInteractive(command, args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      cwd: process.cwd(),
+      env: process.env
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve(typeof code === "number" ? code : 1);
+    });
   });
 }
 
@@ -230,9 +244,20 @@ function proxyNotes(command) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
-function proxyChat(args) {
-  const result = runTool(process.execPath, [CHAT_CLI, ...args]);
-  if (result.status !== 0) process.exit(result.status || 1);
+async function proxyChat(args) {
+  const status = await runToolInteractive(process.execPath, [CHAT_CLI, ...args]);
+  if (status !== 0) process.exit(status || 1);
+}
+
+function proxyGDrive(command) {
+  if (command === "check") {
+    return proxyNotes("gdrive-check");
+  }
+  if (command === "dry-run") {
+    return proxyNotes("gdrive-dry-run");
+  }
+  console.error("Usage: npm run vault -- gdrive <check|dry-run>");
+  process.exit(1);
 }
 
 async function main() {
@@ -240,7 +265,16 @@ async function main() {
   if (cmd === "install") return install();
   if (cmd === "configure") return configure();
   if (cmd === "chat") {
-    return proxyChat(process.argv.slice(3));
+    return await proxyChat(process.argv.slice(3));
+  }
+  if (cmd === "gdrive") {
+    return proxyGDrive((process.argv[3] || "check").toLowerCase());
+  }
+  if (cmd === "gdrive-check") {
+    return proxyNotes("gdrive-check");
+  }
+  if (cmd === "gdrive-dry-run") {
+    return proxyNotes("gdrive-dry-run");
   }
   if (["start", "stop", "status", "resume", "flush-sync", "flush-push"].includes(cmd)) {
     return proxyNotes(cmd);
@@ -250,9 +284,16 @@ async function main() {
   console.log("  npm run vault:install");
   console.log("  npm run vault:configure");
   console.log("  npm run vault:chat");
+  console.log("  npm run vault -- gdrive check|dry-run");
   console.log("  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync");
   console.log("  # or");
-  console.log("  npm run vault -- install|configure|chat|start|stop|status|resume|flush-sync");
+  console.log(
+    "  npm run vault -- install|configure|chat|gdrive|start|stop|status|resume|flush-sync"
+  );
 }
 
-await main();
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[vault-cli] ${message}`);
+  process.exit(1);
+});
