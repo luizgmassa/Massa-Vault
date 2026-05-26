@@ -60,7 +60,17 @@ export function gitInit(cwd) {
 export function gitRemoteSetUrl(remote, url, cwd) {
   try {
     runGit(["remote", "set-url", remote, url], { cwd });
-  } catch {
+    return;
+  } catch {}
+
+  try {
     runGit(["remote", "add", remote, url], { cwd });
+  } catch (error) {
+    const message = String(error?.stderr || error?.message || "");
+    if (/already exists/i.test(message)) {
+      runGit(["remote", "set-url", remote, url], { cwd });
+      return;
+    }
+    throw error;
   }
 }

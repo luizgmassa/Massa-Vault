@@ -24,6 +24,61 @@ function buildRoutingMetadata(response) {
   };
 }
 
+function extractTextContent(value) {
+  if (typeof value === "string") return value;
+  if (!value) return "";
+
+  if (Array.isArray(value)) {
+    return value.map((item) => extractTextContent(item)).join("");
+  }
+
+  if (typeof value === "object") {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.output_text === "string") return value.output_text;
+    if (typeof value.content === "string") return value.content;
+    if (Array.isArray(value.content)) return extractTextContent(value.content);
+  }
+
+  return "";
+}
+
+function extractTextFromChoice(choice) {
+  if (!choice || typeof choice !== "object") return "";
+
+  let text = "";
+  if (choice.delta && typeof choice.delta === "object") {
+    text += extractTextContent(choice.delta.content ?? choice.delta.text ?? "");
+  }
+  if (choice.message && typeof choice.message === "object") {
+    text += extractTextContent(choice.message.content ?? choice.message.text ?? "");
+  }
+  if (typeof choice.text === "string") {
+    text += choice.text;
+  }
+  return text;
+}
+
+function extractAssistantTextFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+
+  let assistantText = "";
+  if (Array.isArray(payload.choices)) {
+    for (const choice of payload.choices) {
+      assistantText += extractTextFromChoice(choice);
+    }
+  }
+
+  if (!assistantText && typeof payload.output_text === "string") {
+    assistantText = payload.output_text;
+  }
+
+  if (!assistantText && Array.isArray(payload.output)) {
+    assistantText = extractTextContent(payload.output);
+  }
+
+  return assistantText;
+}
+
 export async function streamChatCompletion({
   baseUrl,
   apiKey,
@@ -52,6 +107,29 @@ export async function streamChatCompletion({
     throw new Error("gateway returned empty response body");
   }
 
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("text/event-stream")) {
+    const raw = await response.text();
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { assistantText: "", usage: null, routing };
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(trimmed);
+    } catch {
+      if (onDelta) onDelta(trimmed);
+      return { assistantText: trimmed, usage: null, routing };
+    }
+
+    const usage = payload?.usage && typeof payload.usage === "object" ? payload.usage : null;
+    if (usage && onUsage) onUsage(usage);
+    const assistantText = extractAssistantTextFromPayload(payload);
+    if (assistantText && onDelta) onDelta(assistantText);
+    return { assistantText, usage, routing };
+  }
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
 
@@ -72,14 +150,10 @@ export async function streamChatCompletion({
       if (onUsage) onUsage(usage);
     }
 
-    if (Array.isArray(payload?.choices)) {
-      for (const choice of payload.choices) {
-        const delta = choice?.delta;
-        if (delta && typeof delta.content === "string" && delta.content.length > 0) {
-          assistantText += delta.content;
-          if (onDelta) onDelta(delta.content);
-        }
-      }
+    const text = extractAssistantTextFromPayload(payload);
+    if (text) {
+      assistantText += text;
+      if (onDelta) onDelta(text);
     }
   });
 

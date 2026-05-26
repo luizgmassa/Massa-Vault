@@ -1,12 +1,37 @@
 import fs from "node:fs";
 import path from "node:path";
 
-function isoDay(isoDate) {
-  return String(isoDate).slice(0, 10);
+function pad(value, size = 2) {
+  return String(value).padStart(size, "0");
+}
+
+function localDay(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatTimezoneOffset(date, { includeColon = true } = {}) {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const hours = pad(Math.floor(absoluteMinutes / 60));
+  const minutes = pad(absoluteMinutes % 60);
+  return includeColon ? `${sign}${hours}:${minutes}` : `${sign}${hours}${minutes}`;
+}
+
+function toLocalIso(date) {
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${formatTimezoneOffset(date, { includeColon: true })}`
+  );
 }
 
 function toFileSafeStamp(date) {
-  return date.toISOString().replace(/[:.]/g, "-");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}` +
+    `${formatTimezoneOffset(date, { includeColon: false })}`
+  );
 }
 
 function escapeFrontmatterString(value) {
@@ -14,7 +39,7 @@ function escapeFrontmatterString(value) {
 }
 
 export function transcriptFilePath(vaultPath, now = new Date()) {
-  const day = isoDay(now.toISOString());
+  const day = localDay(now);
   const folder = path.join(vaultPath, "AI Chats", day);
   const fileName = `${toFileSafeStamp(now)}.md`;
   return path.join(folder, fileName);
@@ -68,12 +93,13 @@ export function writeTranscript({
   usage,
   messages
 }) {
-  const timestamp = createdAt ? new Date(createdAt) : new Date();
+  const candidate = createdAt ? new Date(createdAt) : new Date();
+  const timestamp = Number.isNaN(candidate.getTime()) ? new Date() : candidate;
   const filePath = transcriptFilePath(vaultPath, timestamp);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const content = formatTranscript({
     id,
-    createdAt: timestamp.toISOString(),
+    createdAt: toLocalIso(timestamp),
     gatewayUrl,
     model,
     routing,

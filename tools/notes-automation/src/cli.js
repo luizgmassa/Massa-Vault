@@ -38,7 +38,7 @@ function printStatus() {
   );
 }
 
-function startDetached() {
+async function startDetached() {
   const existingPid = readPid();
   if (existingPid && isProcessRunning(existingPid)) {
     console.log(`[notes-automation] already running with pid ${existingPid}`);
@@ -53,6 +53,14 @@ function startDetached() {
   });
   child.unref();
   writePid(child.pid);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  if (!isProcessRunning(child.pid)) {
+    removePid();
+    const state = readState();
+    const details = state?.watchAlert || state?.lastError || "unknown startup failure";
+    console.error(`[notes-automation] failed to start: ${details}`);
+    process.exit(1);
+  }
   console.log(`[notes-automation] started with pid ${child.pid}`);
 }
 
@@ -110,14 +118,27 @@ function requestAction(action) {
 
 async function run() {
   writePid(process.pid);
-  startService(CONFIG_PATH);
+  try {
+    startService(CONFIG_PATH);
+  } catch (error) {
+    const current = readState();
+    writeState({
+      ...current,
+      running: false,
+      pid: null,
+      lastError: `startup failure: ${String(error?.message || error)}`,
+      updatedAt: new Date().toISOString()
+    });
+    removePid();
+    throw error;
+  }
 }
 
 const command = process.argv[2] || "status";
 
 switch (command) {
   case "start":
-    startDetached();
+    await startDetached();
     break;
   case "stop":
     stopService();

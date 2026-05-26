@@ -58,16 +58,20 @@ export class NotesAutomationService {
     this.watchers = [];
     this.paused = false;
     this.vaultGitReady = false;
+    this.pollTimer = null;
+    this.watchMode = "fswatch";
+    this.watchFailures = [];
+    this.trackedSnapshot = new Map();
   }
 
   updateState(partial) {
     const current = readState();
     writeState({
+      ...current,
       running: true,
       pid: process.pid,
       paused: this.paused,
       updatedAt: new Date().toISOString(),
-      ...current,
       ...partial
     });
   }
@@ -91,16 +95,119 @@ export class NotesAutomationService {
     }, this.config.debounceMs);
   }
 
+  recordWatchFailure(watchPath, error) {
+    const code = error && typeof error === "object" ? error.code || "UNKNOWN" : "UNKNOWN";
+    const message = error instanceof Error ? error.message : String(error);
+    const failure = {
+      watchPath,
+      code: String(code),
+      message: String(message),
+      at: new Date().toISOString()
+    };
+    this.watchFailures.push(failure);
+    if (this.watchFailures.length > 10) {
+      this.watchFailures = this.watchFailures.slice(-10);
+    }
+    this.updateState({
+      watchFailures: this.watchFailures,
+      watchAlert: `watcher failure at ${watchPath}: [${failure.code}] ${failure.message}`
+    });
+  }
+
+  shouldSkipDirectory(relativePath) {
+    const normalized = relativePath.endsWith("/") ? relativePath : `${relativePath}/`;
+    if (matchesGlob(relativePath, this.config.ignoreGlobs)) return true;
+    if (matchesGlob(normalized, this.config.ignoreGlobs)) return true;
+    return false;
+  }
+
+  captureTrackedSnapshot() {
+    const next = new Map();
+    for (const watchPath of this.config.watchPaths) {
+      const absoluteRoot = path.resolve(this.vaultPath, watchPath);
+      this.walkDirectory(absoluteRoot, next);
+    }
+    return next;
+  }
+
+  walkDirectory(absolutePath, snapshot) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(absolutePath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryAbsolutePath = path.join(absolutePath, entry.name);
+      const relativePath = toPosix(path.relative(this.vaultPath, entryAbsolutePath));
+      if (!relativePath || relativePath.startsWith("..")) continue;
+
+      if (entry.isDirectory()) {
+        if (this.shouldSkipDirectory(relativePath)) continue;
+        this.walkDirectory(entryAbsolutePath, snapshot);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (!this.shouldTrack(relativePath)) continue;
+
+      try {
+        const stat = fs.statSync(entryAbsolutePath);
+        snapshot.set(relativePath, `${stat.mtimeMs}:${stat.size}`);
+      } catch {}
+    }
+  }
+
+  startPollingFallback(reason) {
+    if (this.pollTimer) return;
+    this.watchMode = "polling";
+    this.trackedSnapshot = this.captureTrackedSnapshot();
+    const pollIntervalMs = Math.max(this.config.debounceMs * 2, 5000);
+    this.pollTimer = setInterval(() => {
+      this.pollForChanges();
+    }, pollIntervalMs);
+    this.updateState({
+      watchMode: this.watchMode,
+      watchAlert: reason,
+      watchFailures: this.watchFailures,
+      pollIntervalMs
+    });
+  }
+
+  pollForChanges() {
+    if (this.paused) return;
+    try {
+      const nextSnapshot = this.captureTrackedSnapshot();
+      for (const [relativePath, signature] of nextSnapshot.entries()) {
+        if (this.trackedSnapshot.get(relativePath) !== signature) {
+          this.queue(relativePath);
+        }
+      }
+      this.trackedSnapshot = nextSnapshot;
+    } catch (error) {
+      this.updateState({
+        watchAlert: `polling watcher error: ${String(error?.message || error)}`
+      });
+    }
+  }
+
   ensureVaultGitRepo() {
     if (!this.config.git.enabled) return true;
     if (this.vaultGitReady) return true;
+    try {
+      if (!gitHasRepo(this.vaultPath)) {
+        gitInit(this.vaultPath);
+      }
 
-    if (!gitHasRepo(this.vaultPath)) {
-      gitInit(this.vaultPath);
-    }
-
-    if (this.config.git.mode === "remote" && this.config.git.repoUrl) {
-      gitRemoteSetUrl(this.config.git.remote, this.config.git.repoUrl, this.vaultPath);
+      if (this.config.git.mode === "remote" && this.config.git.repoUrl) {
+        gitRemoteSetUrl(this.config.git.remote, this.config.git.repoUrl, this.vaultPath);
+      }
+    } catch (error) {
+      this.updateState({
+        lastError: `git repo setup failure: ${String(error?.message || error)}`
+      });
+      return false;
     }
 
     this.vaultGitReady = true;
@@ -115,7 +222,7 @@ export class NotesAutomationService {
     if (!files.length) return;
 
     try {
-      this.ensureVaultGitRepo();
+      if (!this.ensureVaultGitRepo()) return;
       for (const relPath of files) {
         gitAdd(relPath, this.vaultPath);
       }
@@ -140,7 +247,7 @@ export class NotesAutomationService {
     if (!this.config.git.autoPush) return;
     if (this.config.git.mode === "local") return;
     if (this.paused) return;
-    this.ensureVaultGitRepo();
+    if (!this.ensureVaultGitRepo()) return;
     const result = gitPush(this.config.git.remote, this.config.git.branch, this.vaultPath);
     if (result.ok) {
       this.updateState({
@@ -213,16 +320,37 @@ export class NotesAutomationService {
 
   watchOne(watchPath) {
     const absolute = path.resolve(this.vaultPath, watchPath);
-    const watcher = fs.watch(
-      absolute,
-      { persistent: true, recursive: true },
-      (_eventType, fileName) => {
-        if (!fileName) return;
-        const relPath = toPosix(path.relative(this.vaultPath, path.resolve(absolute, fileName)));
-        this.queue(relPath);
+    let watcher;
+    try {
+      watcher = fs.watch(
+        absolute,
+        { persistent: true, recursive: true },
+        (_eventType, fileName) => {
+          if (!fileName) return;
+          const relPath = toPosix(path.relative(this.vaultPath, path.resolve(absolute, fileName)));
+          this.queue(relPath);
+        }
+      );
+    } catch (error) {
+      this.recordWatchFailure(watchPath, error);
+      return false;
+    }
+
+    watcher.on("error", (error) => {
+      this.recordWatchFailure(watchPath, error);
+      try {
+        watcher.close();
+      } catch {}
+      this.watchers = this.watchers.filter((entry) => entry !== watcher);
+      if (this.watchMode !== "polling") {
+        this.startPollingFallback(
+          "File watcher degraded to polling mode after watcher error. Auto-sync remains active."
+        );
       }
-    );
+    });
+
     this.watchers.push(watcher);
+    return true;
   }
 
   start() {
@@ -231,8 +359,16 @@ export class NotesAutomationService {
       return;
     }
 
+    let attachedWatchers = 0;
     for (const watchPath of this.config.watchPaths) {
-      this.watchOne(watchPath);
+      if (this.watchOne(watchPath)) {
+        attachedWatchers += 1;
+      }
+    }
+    if (attachedWatchers === 0) {
+      this.startPollingFallback(
+        "No fs.watch watchers attached. Falling back to polling mode to avoid startup failure."
+      );
     }
 
     this.pushTimer = setInterval(() => {
@@ -246,6 +382,8 @@ export class NotesAutomationService {
     this.updateState({
       running: true,
       paused: false,
+      watchMode: this.watchMode,
+      watchFailures: this.watchFailures,
       config: this.config,
       vaultPath: this.vaultPath,
       startedAt: new Date().toISOString()
@@ -256,6 +394,7 @@ export class NotesAutomationService {
     if (this.commitTimer) clearTimeout(this.commitTimer);
     if (this.pushTimer) clearInterval(this.pushTimer);
     if (this.controlTimer) clearInterval(this.controlTimer);
+    if (this.pollTimer) clearInterval(this.pollTimer);
     for (const watcher of this.watchers) {
       watcher.close();
     }

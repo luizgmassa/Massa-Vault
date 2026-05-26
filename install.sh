@@ -374,6 +374,42 @@ normalize_bool() {
   esac
 }
 
+list_rclone_remotes() {
+  if ! command_exists rclone; then
+    return 0
+  fi
+  rclone listremotes 2>/dev/null | tr -d '\r' || true
+}
+
+validate_rclone_remote_path_syntax() {
+  local remote_path="$1"
+  [[ -n "$remote_path" ]] || die "--gdrive-remote-path is required when Google Drive sync is enabled"
+
+  if [[ "$remote_path" == /* || "$remote_path" == ./* || "$remote_path" == ../* || "$remote_path" == ~/* || "$remote_path" == ~\\* || "$remote_path" == \\\\* || "$remote_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    die "invalid gdrive remote path '$remote_path': this looks like a local path. Use remote:path (example: Personal:Obsidian)"
+  fi
+
+  if [[ "$remote_path" != *:* ]]; then
+    die "invalid gdrive remote path '$remote_path': expected remote:path (example: Personal:Obsidian)"
+  fi
+
+  local remote_name="${remote_path%%:*}"
+  [[ -n "$remote_name" ]] || die "invalid gdrive remote path '$remote_path': missing remote name before ':'"
+}
+
+verify_rclone_remote_exists() {
+  local remote_path="$1"
+  local remote_name="${remote_path%%:*}"
+  local remotes
+  remotes="$(list_rclone_remotes | sed 's/:$//')"
+  if [[ -z "$remotes" ]]; then
+    die "no rclone remotes detected. Run 'rclone config' first, then set --gdrive-remote-path as remote:path"
+  fi
+  if ! printf '%s\n' "$remotes" | grep -Fxq "$remote_name"; then
+    die "rclone remote '$remote_name' not found. Available remotes: $(printf '%s' "$remotes" | tr '\n' ' ' | xargs)"
+  fi
+}
+
 set_env_value() {
   local key="$1"
   local value="$2"
@@ -467,6 +503,14 @@ resolve_config() {
     local prompt_sync_strategy
     prompt_sync_strategy="$(printf '%s' "$SYNC_STRATEGY" | tr '[:upper:]' '[:lower:]')"
     if [[ "$prompt_sync_strategy" == "gdrive" || "$prompt_sync_strategy" == "both" ]]; then
+      local detected_remotes
+      detected_remotes="$(list_rclone_remotes | sed 's/:$//')"
+      if [[ -n "$detected_remotes" ]]; then
+        log "detected rclone remotes: $(printf '%s' "$detected_remotes" | tr '\n' ' ' | xargs)"
+      else
+        warn "no rclone remotes detected yet. Run 'rclone config' before enabling Google Drive sync."
+      fi
+      log "gdrive remote path format is remote:path (example: Personal:Obsidian), not /Obsidian"
       GDRIVE_REMOTE_PATH="$(prompt_value "Google Drive remote path" "${GDRIVE_REMOTE_PATH:-}")"
       GDRIVE_MODE="$(prompt_value "Google Drive mode (copy|sync|bisync)" "${GDRIVE_MODE:-copy}")"
     fi
@@ -490,6 +534,7 @@ resolve_config() {
 
   if [[ "$SYNC_STRATEGY" == "gdrive" || "$SYNC_STRATEGY" == "both" ]]; then
     [[ -n "$GDRIVE_REMOTE_PATH" ]] || die "--gdrive-remote-path is required for sync strategy $SYNC_STRATEGY"
+    validate_rclone_remote_path_syntax "$GDRIVE_REMOTE_PATH"
   fi
 }
 
@@ -559,6 +604,9 @@ NODE
 ensure_optional_tools() {
   if [[ "$SYNC_STRATEGY" == "gdrive" || "$SYNC_STRATEGY" == "both" ]]; then
     ensure_command rclone rclone rclone
+    if [[ "$CHECK_ONLY" -eq 0 ]]; then
+      verify_rclone_remote_exists "$GDRIVE_REMOTE_PATH"
+    fi
   fi
   ensure_command ollama ollama ollama
 }

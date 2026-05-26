@@ -189,6 +189,7 @@ async function processPrompt({
   let routing = null;
   let usage = null;
   let assistantText = "";
+  let renderedAssistantChunk = false;
 
   const baseStatus = () =>
     createStatusLine({
@@ -221,6 +222,7 @@ async function processPrompt({
       statusRenderer.render(baseStatus());
     },
     onDelta: (chunk) => {
+      renderedAssistantChunk = true;
       process.stdout.write(chunk);
       estimatedTokensRef.value += estimateTokensFromText(chunk);
       statusRenderer.render(baseStatus());
@@ -232,6 +234,9 @@ async function processPrompt({
   });
 
   assistantText = response.assistantText;
+  if (!renderedAssistantChunk && assistantText) {
+    process.stdout.write(assistantText);
+  }
   if (!usage) {
     const estimatedRequestTokens = Math.max(0, estimatedTokensRef.value - estimatedStart);
     usage = {

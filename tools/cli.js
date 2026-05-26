@@ -6,6 +6,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
+import { listRcloneRemotes, validateRcloneRemotePath } from "./notes-automation/src/gdrive.js";
 import { loadLocalEnv } from "./shared/env.js";
 
 loadLocalEnv();
@@ -37,6 +38,14 @@ function parseYN(value, defaultValue = true) {
   if (["y", "yes", "true", "1"].includes(normalized)) return true;
   if (["n", "no", "false", "0"].includes(normalized)) return false;
   return defaultValue;
+}
+
+function listRcloneRemotesSafe() {
+  try {
+    return listRcloneRemotes("rclone");
+  } catch {
+    return [];
+  }
 }
 
 function buildConfig({
@@ -127,8 +136,27 @@ async function configure() {
   let gdriveRemotePath = "";
   let gdriveMode = "copy";
   if (syncStrategy === "gdrive" || syncStrategy === "both") {
-    const remotePathAnswer = await rl.question("Google Drive remote path (e.g. gdrive:massa-vault): ");
-    gdriveRemotePath = remotePathAnswer.trim();
+    const remotes = listRcloneRemotesSafe();
+    if (remotes.length) {
+      console.log(`[vault-cli] detected rclone remotes: ${remotes.join(", ")}`);
+    } else {
+      console.log("[vault-cli] no rclone remotes detected. Run `rclone config` first.");
+    }
+    console.log(
+      "[vault-cli] Google Drive path must use remote:path syntax, e.g. Personal:Obsidian (not /Obsidian)."
+    );
+
+    while (true) {
+      const remotePathAnswer = await rl.question("Google Drive remote path (e.g. Personal:Obsidian): ");
+      const candidate = remotePathAnswer.trim();
+      const validation = validateRcloneRemotePath(candidate, remotes);
+      if (validation.ok) {
+        gdriveRemotePath = candidate;
+        break;
+      }
+      console.log(`[vault-cli] ${validation.error}`);
+    }
+
     const gdriveModeAnswer = await rl.question("Google Drive sync mode (copy|sync|bisync) [copy]: ");
     gdriveMode = (gdriveModeAnswer.trim() || "copy").toLowerCase();
   }
@@ -178,6 +206,15 @@ function install() {
     } else {
       console.log(`[vault-cli] ${name}: ${result.output}`);
     }
+  }
+
+  const remotes = listRcloneRemotesSafe();
+  if (remotes.length) {
+    console.log(`[vault-cli] rclone remotes: ${remotes.join(", ")}`);
+    console.log("[vault-cli] gdrive_remote_path format: <remote>:<path> (example: Personal:Obsidian)");
+  } else {
+    console.log("[vault-cli] rclone remotes: none found");
+    console.log("[vault-cli] run `rclone config` and create a remote before enabling gdrive sync");
   }
 
   const hookInstall = runTool("bash", ["tools/security/install-hooks.sh"]);
