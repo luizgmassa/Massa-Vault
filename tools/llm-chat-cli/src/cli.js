@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import readline from "node:readline";
 import * as readlinePromises from "node:readline/promises";
 import { stdin as input, stdout as output, stderr } from "node:process";
+import { pathToFileURL } from "node:url";
 import { loadConfig } from "../../notes-automation/src/config.js";
 import { streamChatCompletion } from "./gateway.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
@@ -52,28 +52,17 @@ function createStatusLine(state) {
   );
 }
 
-function createStatusRenderer() {
-  let previousLength = 0;
-  const canRender = Boolean(stderr.isTTY);
+function createStatusRenderer({ stream = stderr } = {}) {
+  const canRender = Boolean(stream?.isTTY);
 
   return {
     render(text) {
       if (!canRender) return;
       const line = String(text || "");
-      readline.cursorTo(stderr, 0);
-      readline.clearLine(stderr, 0);
-      stderr.write(line);
-      previousLength = line.length;
+      if (!line) return;
+      stream.write(`${line}\n`);
     },
-    clear() {
-      if (!canRender) return;
-      readline.cursorTo(stderr, 0);
-      readline.clearLine(stderr, 0);
-      if (previousLength > 0) {
-        stderr.write("\n");
-      }
-      previousLength = 0;
-    },
+    clear() {},
     isEnabled() {
       return canRender;
     }
@@ -177,7 +166,9 @@ async function processPrompt({
   sessionUsage,
   estimatedTokensRef,
   statusRenderer,
-  limitsByModel
+  limitsByModel,
+  chatCompletion = streamChatCompletion,
+  outputStream = output
 }) {
   const gateway = buildGatewayOptions();
   const userMessage = { role: "user", content: prompt };
@@ -201,14 +192,12 @@ async function processPrompt({
 
   if (!statusRenderer.isEnabled()) {
     console.log(`\nUser: ${prompt}`);
-    process.stdout.write("Assistant: ");
+    outputStream.write("Assistant: ");
   } else {
-    statusRenderer.render(baseStatus());
-    output.write("\n");
-    process.stdout.write("assistant> ");
+    outputStream.write("assistant> ");
   }
 
-  const response = await streamChatCompletion({
+  const response = await chatCompletion({
     baseUrl: gateway.gatewayUrl,
     apiKey: gateway.apiKey,
     body: {
@@ -219,23 +208,20 @@ async function processPrompt({
     },
     onRouting: (metadata) => {
       routing = metadata;
-      statusRenderer.render(baseStatus());
     },
     onDelta: (chunk) => {
       renderedAssistantChunk = true;
-      process.stdout.write(chunk);
+      outputStream.write(chunk);
       estimatedTokensRef.value += estimateTokensFromText(chunk);
-      statusRenderer.render(baseStatus());
     },
     onUsage: (nextUsage) => {
       usage = asUsage(nextUsage);
-      statusRenderer.render(baseStatus());
     }
   });
 
   assistantText = response.assistantText;
   if (!renderedAssistantChunk && assistantText) {
-    process.stdout.write(assistantText);
+    outputStream.write(assistantText);
   }
   if (!usage) {
     const estimatedRequestTokens = Math.max(0, estimatedTokensRef.value - estimatedStart);
@@ -251,7 +237,7 @@ async function processPrompt({
   }
   history.push({ role: "assistant", content: assistantText });
 
-  output.write("\n");
+  outputStream.write("\n");
   accumulateSessionUsage(sessionUsage, usage);
   const ledger = addUsageToLedger({
     usage,
@@ -545,8 +531,19 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  output.write("\n");
-  console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+export {
+  createStatusLine,
+  createStatusRenderer,
+  main,
+  processPrompt,
+  runOneShot,
+  runRepl
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    output.write("\n");
+    console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
