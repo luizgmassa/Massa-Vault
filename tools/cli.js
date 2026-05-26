@@ -9,6 +9,7 @@ import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git
 
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");
+const CHAT_CLI = path.resolve("tools/llm-chat-cli/src/cli.js");
 
 function runTool(command, args = []) {
   return spawnSync(command, args, {
@@ -189,10 +190,18 @@ function proxyNotes(command) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
+function proxyChat(args) {
+  const result = runTool(process.execPath, [CHAT_CLI, ...args]);
+  if (result.status !== 0) process.exit(result.status || 1);
+}
+
 async function main() {
   const cmd = process.argv[2] || "help";
   if (cmd === "install") return install();
   if (cmd === "configure") return configure();
+  if (cmd === "chat") {
+    return proxyChat(process.argv.slice(3));
+  }
   if (["start", "stop", "status", "resume", "flush-sync", "flush-push"].includes(cmd)) {
     return proxyNotes(cmd);
   }
@@ -200,9 +209,10 @@ async function main() {
   console.log("Usage:");
   console.log("  npm run vault:install");
   console.log("  npm run vault:configure");
+  console.log("  npm run vault:chat");
   console.log("  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync");
   console.log("  # or");
-  console.log("  npm run vault -- install|configure|start|stop|status|resume|flush-sync");
+  console.log("  npm run vault -- install|configure|chat|start|stop|status|resume|flush-sync");
 }
 
 await main();

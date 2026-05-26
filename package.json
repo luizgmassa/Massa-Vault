@@ -11,6 +11,7 @@
     "vault:install": "node tools/cli.js install",
     "vault:configure": "node tools/cli.js configure",
     "vault:start": "node tools/cli.js start",
+    "vault:chat": "node tools/cli.js chat",
     "vault:stop": "node tools/cli.js stop",
     "vault:status": "node tools/cli.js status",
     "vault:flush-sync": "node tools/cli.js flush-sync",

@@ -17,6 +17,7 @@ Your actual notes/memories live in an external vault path configured by CLI.
 - Vault path is external and configurable (`vault_path`).
 - Sync mode is selectable: `git`, `gdrive`, or `both`.
 - New CLI for install/config/start/stop/status.
+- New LLM chat CLI with streaming, transcript persistence, usage counters, and semantic search.
 
 ## Architecture
 
@@ -48,11 +49,27 @@ Your actual notes/memories live in an external vault path configured by CLI.
 npm run vault:install
 npm run vault:configure
 npm run vault:start
+npm run vault:chat
 npm run vault:status
 npm run vault:flush-sync
 npm run vault:resume
 npm run vault:stop
 ```
+
+### `chat`
+
+- `npm run vault:chat` starts interactive REPL chat.
+- `npm run vault -- chat "your prompt"` runs one-shot chat.
+- `npm run vault -- chat search "query"` runs semantic search over markdown notes + AI chats.
+- `npm run vault -- chat search index` forces/rebuilds local semantic index.
+
+Chat defaults:
+
+- gateway: `http://127.0.0.1:4100/chat/completions`
+- request model: `smart-router`
+- transcript path: `<vault_path>/AI Chats/YYYY-MM-DD/*.md`
+- usage/search state: `.automation/llm-chat-cli/*`
+- search embeddings: Ollama `/api/embed` using `embeddinggemma` (override by env)
 
 ### `install`
 
