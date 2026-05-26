@@ -4,6 +4,7 @@ import { classifyRequest, loadPolicy } from "./classifier.js";
 import { forwardRequest } from "./proxy.js";
 
 const DEFAULT_PORT = Number(process.env.ROUTER_GATEWAY_PORT || 4100);
+const DEFAULT_HOST = process.env.ROUTER_GATEWAY_HOST || "127.0.0.1";
 const DEFAULT_POLICY_PATH = process.env.ROUTER_POLICY_PATH || ".litellm/router.json";
 const DEFAULT_LITELLM_BASE = process.env.ROUTER_LITELLM_BASE_URL || "http://127.0.0.1:4000";
 const REQUIRE_SMART_ROUTER_MODEL =
@@ -130,9 +131,14 @@ export function createGatewayServer({
 
 if (process.argv[1] && process.argv[1].endsWith("/server.js")) {
   const server = createGatewayServer();
-  server.listen(DEFAULT_PORT, () => {
+  server.on("error", (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[router-gateway] failed to start on ${DEFAULT_HOST}:${DEFAULT_PORT}: ${message}`);
+    process.exit(1);
+  });
+  server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
     console.log(
-      `[router-gateway] listening on http://127.0.0.1:${DEFAULT_PORT} -> ${DEFAULT_LITELLM_BASE}`
+      `[router-gateway] listening on http://${DEFAULT_HOST}:${DEFAULT_PORT} -> ${DEFAULT_LITELLM_BASE}`
     );
   });
 }

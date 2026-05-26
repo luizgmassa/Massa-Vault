@@ -10,8 +10,18 @@ const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 
 function printStatus() {
   const pid = readPid();
-  const state = readState();
+  let state = readState();
   const running = Boolean(pid && isProcessRunning(pid));
+  if (!running && state?.running) {
+    state = {
+      ...state,
+      running: false,
+      pid: null,
+      updatedAt: new Date().toISOString(),
+      staleStateRecovered: true
+    };
+    writeState(state);
+  }
   console.log(
     JSON.stringify(
       {
@@ -47,12 +57,37 @@ function stopService() {
   const pid = readPid();
   if (!pid || !isProcessRunning(pid)) {
     removePid();
+    const current = readState();
+    writeState({
+      ...current,
+      running: false,
+      pid: null,
+      updatedAt: new Date().toISOString()
+    });
     console.log("[notes-automation] not running");
     return;
   }
-  process.kill(pid, "SIGTERM");
-  removePid();
-  console.log(`[notes-automation] stop signal sent to pid ${pid}`);
+  try {
+    process.kill(pid, "SIGTERM");
+    removePid();
+    console.log(`[notes-automation] stop signal sent to pid ${pid}`);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ESRCH") {
+      removePid();
+      const current = readState();
+      writeState({
+        ...current,
+        running: false,
+        pid: null,
+        updatedAt: new Date().toISOString()
+      });
+      console.log("[notes-automation] not running");
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[notes-automation] failed to stop pid ${pid}: ${message}`);
+    process.exit(1);
+  }
 }
 
 function requestAction(action) {

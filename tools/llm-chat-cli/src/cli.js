@@ -527,4 +527,10 @@ async function main() {
   });
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  output.write("\n");
+  console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}

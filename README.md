@@ -54,6 +54,9 @@ npm run vault:status
 npm run vault:flush-sync
 npm run vault:resume
 npm run vault:stop
+npm run litellm
+npm run router-gateway
+npm run build
 ```
 
 ### `chat`
@@ -117,9 +120,10 @@ File: `config/notes-automation.config.json`
 
 ## Router Gateway
 
-Start:
+Start (in order):
 
 ```bash
+npm run litellm
 npm run router-gateway
 ```
 

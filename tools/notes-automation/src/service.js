@@ -39,7 +39,10 @@ function isProcessRunning(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "EPERM") {
+      return true;
+    }
     return false;
   }
 }
