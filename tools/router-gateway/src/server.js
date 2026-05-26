@@ -2,6 +2,9 @@ import http from "node:http";
 import { URL } from "node:url";
 import { classifyRequest, loadPolicy } from "./classifier.js";
 import { forwardRequest } from "./proxy.js";
+import { loadLocalEnv } from "../../shared/env.js";
+
+loadLocalEnv();
 
 const DEFAULT_PORT = Number(process.env.ROUTER_GATEWAY_PORT || 4100);
 const DEFAULT_HOST = process.env.ROUTER_GATEWAY_HOST || "127.0.0.1";

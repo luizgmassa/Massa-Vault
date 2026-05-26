@@ -82,6 +82,7 @@ Common flags:
 - `--vault-path`, `--sync-strategy`, `--git-mode`, `--git-repo-url`, `--gdrive-remote-path` configure local sync.
 
 Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`. Both are ignored by git.
+Repository Node entrypoints (`npm run vault*`, `npm run router-gateway`, `npm run notes-automation*`) auto-load `.env` without overriding already-exported shell variables.
 
 ### `chat`
 
@@ -97,6 +98,7 @@ Chat defaults:
 - transcript path: `<vault_path>/AI Chats/YYYY-MM-DD/*.md`
 - usage/search state: `.automation/llm-chat-cli/*`
 - search embeddings: Ollama `/api/embed` using `embeddinggemma` (override by env)
+- auth: `LITELLM_MASTER_KEY` from `.env` is sent as `Authorization: Bearer ...` when present
 
 ### `install`
 
@@ -155,6 +157,7 @@ Default endpoint:
 
 - `http://127.0.0.1:4100/chat/completions`
 - client model must stay `smart-router`
+- direct HTTP clients must send `Authorization: Bearer <LITELLM_MASTER_KEY>` when LiteLLM master-key auth is enabled
 
 Gateway classifies into:
 

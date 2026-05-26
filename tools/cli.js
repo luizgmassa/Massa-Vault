@@ -6,6 +6,9 @@ import { spawnSync, execFileSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
+import { loadLocalEnv } from "./shared/env.js";
+
+loadLocalEnv();
 
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");

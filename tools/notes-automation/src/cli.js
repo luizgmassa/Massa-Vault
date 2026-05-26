@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { startService, isProcessRunning } from "./service.js";
 import { readPid, removePid, writePid, readState, writeState } from "./state.js";
+import { loadLocalEnv } from "../../shared/env.js";
+
+loadLocalEnv();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -10,6 +10,7 @@ import { readLiteLLMLimits } from "./litellm-limits.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "./search.js";
 import { estimateTokensFromText } from "./token-estimator.js";
 import { writeTranscript } from "./transcripts.js";
+import { loadLocalEnv } from "../../shared/env.js";
 import {
   accumulateSessionUsage,
   addUsageToLedger,
@@ -17,6 +18,8 @@ import {
   createSessionUsage,
   getUsageLedger
 } from "./usage.js";
+
+loadLocalEnv();
 
 const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT || 4100}`;
 const DEFAULT_GATEWAY_MODEL = "smart-router";
@@ -82,6 +85,13 @@ function buildGatewayOptions() {
     gatewayUrl: process.env.MASSA_VAULT_CHAT_GATEWAY_URL || DEFAULT_GATEWAY_URL,
     apiKey: process.env.LITELLM_MASTER_KEY || ""
   };
+}
+
+function warnIfAuthMissing(apiKey) {
+  if (apiKey) return;
+  console.error(
+    "[chat] warning: LITELLM_MASTER_KEY is empty. Requests may fail with 401 if gateway auth is enabled."
+  );
 }
 
 function asUsage(usage) {
@@ -510,6 +520,9 @@ async function main() {
     await runSearch({ query });
     return;
   }
+
+  const gateway = buildGatewayOptions();
+  warnIfAuthMissing(gateway.apiKey);
 
   if (!args.length) {
     await runRepl({ systemPrompt: parsed.systemPrompt });
