@@ -6,6 +6,14 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "ink": "^6.2.3",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "ink-testing-library": "^4.0.0"
+  },
   "scripts": {
     "build": "npm test",
     "setup": "bash install.sh",

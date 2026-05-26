@@ -40,35 +40,6 @@ function parseArguments(argv) {
   };
 }
 
-function createStatusLine(state) {
-  const lane = state.routing?.lane || "unknown";
-  const model = state.routing?.targetModel || DEFAULT_GATEWAY_MODEL;
-  return (
-    `[tokens session=${state.sessionUsage.total_tokens}` +
-    ` all_time=${state.ledgerTotals.total_tokens}` +
-    ` est=${state.estimatedTokens}` +
-    ` lane=${lane}` +
-    ` model=${model}]`
-  );
-}
-
-function createStatusRenderer({ stream = stderr } = {}) {
-  const canRender = Boolean(stream?.isTTY);
-
-  return {
-    render(text) {
-      if (!canRender) return;
-      const line = String(text || "");
-      if (!line) return;
-      stream.write(`${line}\n`);
-    },
-    clear() {},
-    isEnabled() {
-      return canRender;
-    }
-  };
-}
-
 function buildGatewayOptions() {
   return {
     gatewayUrl: process.env.MASSA_VAULT_CHAT_GATEWAY_URL || DEFAULT_GATEWAY_URL,
@@ -96,7 +67,53 @@ function buildMessages(history, systemPrompt) {
   return [{ role: "system", content: systemPrompt }, ...history];
 }
 
-function printUsageSummary({
+function createStatusState({
+  sessionUsage,
+  estimatedTokens,
+  routing,
+  ledgerTotals,
+  authEnabled
+}) {
+  return {
+    sessionUsage,
+    estimatedTokens,
+    routing,
+    ledgerTotals,
+    authEnabled
+  };
+}
+
+function createStatusLine(state) {
+  const lane = state.routing?.lane || "unknown";
+  const model = state.routing?.targetModel || DEFAULT_GATEWAY_MODEL;
+  return (
+    `[tokens session=${state.sessionUsage.total_tokens}` +
+    ` all_time=${state.ledgerTotals.total_tokens}` +
+    ` est=${state.estimatedTokens}` +
+    ` lane=${lane}` +
+    ` model=${model}` +
+    ` auth=${state.authEnabled ? "on" : "off"}]`
+  );
+}
+
+function createStatusRenderer({ stream = stderr } = {}) {
+  const canRender = Boolean(stream?.isTTY);
+
+  return {
+    render(text) {
+      if (!canRender) return;
+      const line = String(text || "");
+      if (!line) return;
+      stream.write(`${line}\n`);
+    },
+    clear() {},
+    isEnabled() {
+      return canRender;
+    }
+  };
+}
+
+function createUsageSummary({
   sessionUsage,
   estimatedTokens,
   routing,
@@ -111,14 +128,45 @@ function printUsageSummary({
     usedCompletionTokens: sessionUsage.completion_tokens
   });
 
+  return {
+    allTimeTotalTokens: ledger.totals.total_tokens,
+    sessionTotalTokens: sessionUsage.total_tokens,
+    sessionEstimatedTokens: estimatedTokens,
+    model: remaining.model,
+    remainingTpm: remaining.tpmRemaining,
+    remainingRpm: remaining.rpmRemaining,
+    quotaRefresh: remaining.resetsIn
+  };
+}
+
+function formatUsagePanel(summary) {
+  return [
+    `all_time_total_tokens: ${summary.allTimeTotalTokens}`,
+    `session_total_tokens: ${summary.sessionTotalTokens}`,
+    `session_estimated_tokens: ${summary.sessionEstimatedTokens}`,
+    `model: ${summary.model}`,
+    `remaining_tpm: ${summary.remainingTpm}`,
+    `remaining_rpm: ${summary.remainingRpm}`,
+    `quota_refresh: ${summary.quotaRefresh}`
+  ];
+}
+
+function printUsageSummary({
+  sessionUsage,
+  estimatedTokens,
+  routing,
+  limitsByModel
+}) {
+  const summary = createUsageSummary({
+    sessionUsage,
+    estimatedTokens,
+    routing,
+    limitsByModel
+  });
   console.log("Usage:");
-  console.log(`  all_time_total_tokens: ${ledger.totals.total_tokens}`);
-  console.log(`  session_total_tokens: ${sessionUsage.total_tokens}`);
-  console.log(`  session_estimated_tokens: ${estimatedTokens}`);
-  console.log(`  model: ${remaining.model}`);
-  console.log(`  remaining_tpm: ${remaining.tpmRemaining}`);
-  console.log(`  remaining_rpm: ${remaining.rpmRemaining}`);
-  console.log(`  quota_refresh: ${remaining.resetsIn}`);
+  for (const line of formatUsagePanel(summary)) {
+    console.log(`  ${line}`);
+  }
 }
 
 function resolveVaultPath() {
@@ -144,130 +192,59 @@ async function runSearch({ query }) {
     limit: 8
   });
 
+  return { rebuilt, results };
+}
+
+function formatSearchPanel({ rebuilt, results }) {
+  const lines = [];
   if (rebuilt) {
-    console.log("[chat-search] index rebuilt");
+    lines.push("index rebuilt");
   }
   if (!results.length) {
-    console.log("[chat-search] no results");
-    return;
+    lines.push("no results");
+    return lines;
   }
 
   for (const result of results) {
-    console.log(
-      `- ${result.filePath}#${result.chunkIndex} score=${result.score.toFixed(4)} ${result.snippet}`
+    lines.push(
+      `${result.filePath}#${result.chunkIndex} score=${result.score.toFixed(4)} ${result.snippet}`
     );
+  }
+  return lines;
+}
+
+function printSearchPlain(searchResult) {
+  if (searchResult.rebuilt) {
+    console.log("[chat-search] index rebuilt");
+  }
+  if (!searchResult.results.length) {
+    console.log("[chat-search] no results");
+    return;
+  }
+  for (const line of formatSearchPanel(searchResult)) {
+    if (line === "index rebuilt") continue;
+    console.log(`- ${line}`);
   }
 }
 
-async function processPrompt({
-  prompt,
-  history,
-  systemPrompt,
-  sessionUsage,
-  estimatedTokensRef,
-  statusRenderer,
-  limitsByModel,
-  chatCompletion = streamChatCompletion,
-  outputStream = output
-}) {
-  const gateway = buildGatewayOptions();
-  const userMessage = { role: "user", content: prompt };
-  const estimatedStart = estimatedTokensRef.value;
-  const estimatedPromptTokens = estimateTokensFromText(prompt);
-  history.push(userMessage);
-  estimatedTokensRef.value += estimatedPromptTokens;
-
-  let routing = null;
-  let usage = null;
-  let assistantText = "";
-  let renderedAssistantChunk = false;
-
-  const baseStatus = () =>
-    createStatusLine({
-      sessionUsage,
-      estimatedTokens: estimatedTokensRef.value,
-      routing,
-      ledgerTotals: getUsageLedger().totals
-    });
-
-  if (!statusRenderer.isEnabled()) {
-    console.log(`\nUser: ${prompt}`);
-    outputStream.write("Assistant: ");
-  } else {
-    outputStream.write("assistant> ");
-  }
-
-  const response = await chatCompletion({
-    baseUrl: gateway.gatewayUrl,
-    apiKey: gateway.apiKey,
-    body: {
-      model: DEFAULT_GATEWAY_MODEL,
-      stream: true,
-      stream_options: { include_usage: true },
-      messages: buildMessages(history, systemPrompt)
-    },
-    onRouting: (metadata) => {
-      routing = metadata;
-    },
-    onDelta: (chunk) => {
-      renderedAssistantChunk = true;
-      outputStream.write(chunk);
-      estimatedTokensRef.value += estimateTokensFromText(chunk);
-    },
-    onUsage: (nextUsage) => {
-      usage = asUsage(nextUsage);
-    }
-  });
-
-  assistantText = response.assistantText;
-  if (!renderedAssistantChunk && assistantText) {
-    outputStream.write(assistantText);
-  }
-  if (!usage) {
-    const estimatedRequestTokens = Math.max(0, estimatedTokensRef.value - estimatedStart);
-    usage = {
-      prompt_tokens: estimatedPromptTokens,
-      completion_tokens: Math.max(0, estimatedRequestTokens - estimatedPromptTokens),
-      total_tokens: estimatedRequestTokens
-    };
-  }
-
-  if (!assistantText.trim()) {
-    assistantText = "[no content]";
-  }
-  history.push({ role: "assistant", content: assistantText });
-
-  outputStream.write("\n");
-  accumulateSessionUsage(sessionUsage, usage);
-  const ledger = addUsageToLedger({
-    usage,
-    modelName: routing?.targetModel || DEFAULT_GATEWAY_MODEL
-  });
-  statusRenderer.render(
-    createStatusLine({
-      sessionUsage,
-      estimatedTokens: estimatedTokensRef.value,
-      routing,
-      ledgerTotals: ledger.totals
-    })
-  );
-
-  return {
-    usage,
-    routing
-  };
+function getHelpLines() {
+  return [
+    "/help                 Show commands",
+    "/exit                 Save transcript and exit",
+    "/clear                Clear conversation memory",
+    "/usage                Show token counters and quota estimates",
+    "/config               Show active gateway/system settings",
+    "/system show|set|clear Manage system prompt",
+    "/routing              Show latest router metadata",
+    "/search <query>       Semantic search in chats + vault markdown"
+  ];
 }
 
 function printHelp() {
   console.log("Commands:");
-  console.log("  /help                 Show commands");
-  console.log("  /exit                 Save transcript and exit");
-  console.log("  /clear                Clear conversation memory");
-  console.log("  /usage                Show token counters and quota estimates");
-  console.log("  /config               Show active gateway/system settings");
-  console.log("  /system show|set|clear Manage system prompt");
-  console.log("  /routing              Show latest router metadata");
-  console.log("  /search <query>       Semantic search in chats + vault markdown");
+  for (const line of getHelpLines()) {
+    console.log(`  ${line}`);
+  }
 }
 
 function buildTranscriptPayload({
@@ -312,19 +289,304 @@ async function saveTranscript({
   });
 }
 
-async function runRepl({ systemPrompt }) {
+function createReplState({ systemPrompt }) {
+  return {
+    history: [],
+    sessionUsage: createSessionUsage(),
+    estimatedTokensRef: { value: 0 },
+    latestRouting: null,
+    activeSystemPrompt: systemPrompt,
+    sessionId: randomUUID(),
+    sessionStartedAt: new Date().toISOString(),
+    transcriptSavedPath: null
+  };
+}
+
+function resetConversation(state) {
+  state.history.length = 0;
+  state.estimatedTokensRef.value = 0;
+  state.sessionUsage.prompt_tokens = 0;
+  state.sessionUsage.completion_tokens = 0;
+  state.sessionUsage.total_tokens = 0;
+  state.latestRouting = null;
+}
+
+function createTuiCommandHandlers(handlers) {
+  return {
+    panel(title, lines) {
+      if (handlers?.panel) handlers.panel(title, lines);
+    },
+    message(text) {
+      if (handlers?.message) handlers.message(text);
+    }
+  };
+}
+
+async function executeCommand({
+  line,
+  state,
+  limitsByModel,
+  mode = "plain",
+  handlers = {}
+}) {
+  const tuiHandlers = createTuiCommandHandlers(handlers);
+
+  if (line === "/help") {
+    if (mode === "plain") {
+      printHelp();
+    } else {
+      tuiHandlers.panel("commands", getHelpLines());
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line === "/exit") {
+    return { handled: true, exit: true };
+  }
+
+  if (line === "/clear") {
+    resetConversation(state);
+    if (mode === "plain") {
+      console.log("[chat] conversation cleared");
+    } else {
+      tuiHandlers.message("[chat] conversation cleared");
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line === "/usage") {
+    if (mode === "plain") {
+      printUsageSummary({
+        sessionUsage: state.sessionUsage,
+        estimatedTokens: state.estimatedTokensRef.value,
+        routing: state.latestRouting,
+        limitsByModel
+      });
+    } else {
+      const summary = createUsageSummary({
+        sessionUsage: state.sessionUsage,
+        estimatedTokens: state.estimatedTokensRef.value,
+        routing: state.latestRouting,
+        limitsByModel
+      });
+      tuiHandlers.panel("usage", formatUsagePanel(summary));
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line === "/config") {
+    const gateway = buildGatewayOptions();
+    const lines = [
+      `gateway_url: ${gateway.gatewayUrl}`,
+      `system_prompt: ${state.activeSystemPrompt ? "configured" : "empty"}`,
+      `auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`
+    ];
+    if (mode === "plain") {
+      for (const nextLine of lines) {
+        console.log(nextLine);
+      }
+    } else {
+      tuiHandlers.panel("config", lines);
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line.startsWith("/system")) {
+    const [, action, ...rest] = line.split(" ");
+    if (action === "show") {
+      if (mode === "plain") {
+        console.log(state.activeSystemPrompt || "[empty]");
+      } else {
+        tuiHandlers.panel("system", [state.activeSystemPrompt || "[empty]"]);
+      }
+    } else if (action === "set") {
+      state.activeSystemPrompt = rest.join(" ").trim();
+      if (mode === "plain") {
+        console.log("[chat] system prompt updated");
+      } else {
+        tuiHandlers.message("[chat] system prompt updated");
+      }
+    } else if (action === "clear") {
+      state.activeSystemPrompt = "";
+      if (mode === "plain") {
+        console.log("[chat] system prompt cleared");
+      } else {
+        tuiHandlers.message("[chat] system prompt cleared");
+      }
+    } else if (mode === "plain") {
+      console.log("usage: /system show|set <prompt>|clear");
+    } else {
+      tuiHandlers.panel("system", ["usage: /system show|set <prompt>|clear"]);
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line === "/routing") {
+    if (!state.latestRouting) {
+      if (mode === "plain") {
+        console.log("[chat] no routing metadata yet");
+      } else {
+        tuiHandlers.message("[chat] no routing metadata yet");
+      }
+      return { handled: true, exit: false };
+    }
+
+    if (mode === "plain") {
+      console.log(JSON.stringify(state.latestRouting, null, 2));
+    } else {
+      tuiHandlers.panel("routing", JSON.stringify(state.latestRouting, null, 2).split("\n"));
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line.startsWith("/search ")) {
+    const query = line.slice(8).trim();
+    const searchResult = await runSearch({ query });
+    if (mode === "plain") {
+      printSearchPlain(searchResult);
+    } else {
+      tuiHandlers.panel("search", formatSearchPanel(searchResult));
+    }
+    return { handled: true, exit: false };
+  }
+
+  return { handled: false, exit: false };
+}
+
+async function processPrompt({
+  prompt,
+  history,
+  systemPrompt,
+  sessionUsage,
+  estimatedTokensRef,
+  statusRenderer,
+  chatCompletion = streamChatCompletion,
+  outputStream = output,
+  renderMode = "plain",
+  onThinkingChange,
+  onAssistantDelta,
+  onUsage,
+  onRouting
+}) {
+  const gateway = buildGatewayOptions();
+  const userMessage = { role: "user", content: prompt };
+  const estimatedStart = estimatedTokensRef.value;
+  const estimatedPromptTokens = estimateTokensFromText(prompt);
+  history.push(userMessage);
+  estimatedTokensRef.value += estimatedPromptTokens;
+
+  let routing = null;
+  let usage = null;
+  let assistantText = "";
+  let renderedAssistantChunk = false;
+  let emittedAssistantChunk = false;
+
+  onThinkingChange?.(true);
+
+  if (renderMode === "plain") {
+    if (!statusRenderer?.isEnabled()) {
+      console.log(`\nUser: ${prompt}`);
+      outputStream.write("Assistant: ");
+    } else {
+      outputStream.write("assistant> ");
+    }
+  }
+
+  const response = await chatCompletion({
+    baseUrl: gateway.gatewayUrl,
+    apiKey: gateway.apiKey,
+    body: {
+      model: DEFAULT_GATEWAY_MODEL,
+      stream: true,
+      stream_options: { include_usage: true },
+      messages: buildMessages(history, systemPrompt)
+    },
+    onRouting: (metadata) => {
+      routing = metadata;
+      onRouting?.(metadata);
+    },
+    onDelta: (chunk) => {
+      if (!emittedAssistantChunk) {
+        onThinkingChange?.(false);
+      }
+      emittedAssistantChunk = true;
+      renderedAssistantChunk = true;
+      if (renderMode === "plain") {
+        outputStream.write(chunk);
+      }
+      estimatedTokensRef.value += estimateTokensFromText(chunk);
+      onAssistantDelta?.(chunk);
+    },
+    onUsage: (nextUsage) => {
+      usage = asUsage(nextUsage);
+      onUsage?.(usage);
+    }
+  });
+
+  onThinkingChange?.(false);
+
+  assistantText = response.assistantText;
+  if (!renderedAssistantChunk && assistantText) {
+    if (renderMode === "plain") {
+      outputStream.write(assistantText);
+    }
+    onAssistantDelta?.(assistantText);
+    emittedAssistantChunk = true;
+  }
+  if (!usage) {
+    const estimatedRequestTokens = Math.max(0, estimatedTokensRef.value - estimatedStart);
+    usage = {
+      prompt_tokens: estimatedPromptTokens,
+      completion_tokens: Math.max(0, estimatedRequestTokens - estimatedPromptTokens),
+      total_tokens: estimatedRequestTokens
+    };
+    onUsage?.(usage);
+  }
+
+  if (!assistantText.trim()) {
+    assistantText = "[no content]";
+    if (!emittedAssistantChunk) {
+      onAssistantDelta?.(assistantText);
+    }
+  }
+  history.push({ role: "assistant", content: assistantText });
+
+  if (renderMode === "plain") {
+    outputStream.write("\n");
+  }
+
+  accumulateSessionUsage(sessionUsage, usage);
+  const ledger = addUsageToLedger({
+    usage,
+    modelName: routing?.targetModel || DEFAULT_GATEWAY_MODEL
+  });
+
+  const statusState = createStatusState({
+    sessionUsage,
+    estimatedTokens: estimatedTokensRef.value,
+    routing,
+    ledgerTotals: ledger.totals,
+    authEnabled: Boolean(gateway.apiKey)
+  });
+
+  if (renderMode === "plain") {
+    statusRenderer?.render(createStatusLine(statusState));
+  }
+
+  return {
+    usage,
+    routing,
+    assistantText,
+    statusState
+  };
+}
+
+async function runPlainRepl({ systemPrompt }) {
   const rl = readlinePromises.createInterface({ input, output });
-  const history = [];
-  const sessionUsage = createSessionUsage();
-  const estimatedTokensRef = { value: 0 };
+  const state = createReplState({ systemPrompt });
   const statusRenderer = createStatusRenderer();
   const limitsByModel = readLiteLLMLimits();
-  const sessionId = randomUUID();
-  const sessionStartedAt = new Date().toISOString();
 
-  let latestRouting = null;
-  let activeSystemPrompt = systemPrompt;
-  let transcriptSavedPath = null;
   console.log("massa-vault chat started. type /help for commands.");
 
   try {
@@ -332,111 +594,55 @@ async function runRepl({ systemPrompt }) {
       const line = (await rl.question("you> ")).trim();
       if (!line) continue;
 
-      if (line === "/help") {
-        printHelp();
-        continue;
-      }
-
-      if (line === "/exit") {
-        transcriptSavedPath = await saveTranscript({
-          sessionId,
-          sessionStartedAt,
-          history,
-          latestRouting,
-          sessionUsage
-        });
-        if (transcriptSavedPath) {
-          console.log(`[chat] transcript saved: ${transcriptSavedPath}`);
+      const commandResult = await executeCommand({
+        line,
+        state,
+        limitsByModel,
+        mode: "plain"
+      });
+      if (commandResult.handled) {
+        if (commandResult.exit) {
+          state.transcriptSavedPath = await saveTranscript({
+            sessionId: state.sessionId,
+            sessionStartedAt: state.sessionStartedAt,
+            history: state.history,
+            latestRouting: state.latestRouting,
+            sessionUsage: state.sessionUsage
+          });
+          if (state.transcriptSavedPath) {
+            console.log(`[chat] transcript saved: ${state.transcriptSavedPath}`);
+          }
+          break;
         }
-        break;
-      }
-
-      if (line === "/clear") {
-        history.length = 0;
-        estimatedTokensRef.value = 0;
-        sessionUsage.prompt_tokens = 0;
-        sessionUsage.completion_tokens = 0;
-        sessionUsage.total_tokens = 0;
-        latestRouting = null;
-        console.log("[chat] conversation cleared");
-        continue;
-      }
-
-      if (line === "/usage") {
-        printUsageSummary({
-          sessionUsage,
-          estimatedTokens: estimatedTokensRef.value,
-          routing: latestRouting,
-          limitsByModel
-        });
-        continue;
-      }
-
-      if (line === "/config") {
-        const gateway = buildGatewayOptions();
-        console.log(`gateway_url: ${gateway.gatewayUrl}`);
-        console.log(`system_prompt: ${activeSystemPrompt ? "configured" : "empty"}`);
-        console.log(`auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`);
-        continue;
-      }
-
-      if (line.startsWith("/system")) {
-        const [, action, ...rest] = line.split(" ");
-        if (action === "show") {
-          console.log(activeSystemPrompt || "[empty]");
-        } else if (action === "set") {
-          activeSystemPrompt = rest.join(" ").trim();
-          console.log("[chat] system prompt updated");
-        } else if (action === "clear") {
-          activeSystemPrompt = "";
-          console.log("[chat] system prompt cleared");
-        } else {
-          console.log("usage: /system show|set <prompt>|clear");
-        }
-        continue;
-      }
-
-      if (line === "/routing") {
-        if (!latestRouting) {
-          console.log("[chat] no routing metadata yet");
-        } else {
-          console.log(JSON.stringify(latestRouting, null, 2));
-        }
-        continue;
-      }
-
-      if (line.startsWith("/search ")) {
-        await runSearch({ query: line.slice(8).trim() });
         continue;
       }
 
       try {
         const result = await processPrompt({
           prompt: line,
-          history,
-          systemPrompt: activeSystemPrompt,
-          sessionUsage,
-          estimatedTokensRef,
-          statusRenderer,
-          limitsByModel
+          history: state.history,
+          systemPrompt: state.activeSystemPrompt,
+          sessionUsage: state.sessionUsage,
+          estimatedTokensRef: state.estimatedTokensRef,
+          statusRenderer
         });
-        latestRouting = result.routing;
+        state.latestRouting = result.routing;
       } catch (error) {
         output.write("\n");
         console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   } finally {
-    if (!transcriptSavedPath && history.length) {
-      transcriptSavedPath = await saveTranscript({
-        sessionId,
-        sessionStartedAt,
-        history,
-        latestRouting,
-        sessionUsage
+    if (!state.transcriptSavedPath && state.history.length) {
+      state.transcriptSavedPath = await saveTranscript({
+        sessionId: state.sessionId,
+        sessionStartedAt: state.sessionStartedAt,
+        history: state.history,
+        latestRouting: state.latestRouting,
+        sessionUsage: state.sessionUsage
       });
-      if (transcriptSavedPath) {
-        console.log(`[chat] transcript saved: ${transcriptSavedPath}`);
+      if (state.transcriptSavedPath) {
+        console.log(`[chat] transcript saved: ${state.transcriptSavedPath}`);
       }
     }
     statusRenderer.clear();
@@ -444,12 +650,35 @@ async function runRepl({ systemPrompt }) {
   }
 }
 
+function isInteractiveTuiSupported({
+  stdin = input,
+  stdout = output,
+  env = process.env
+} = {}) {
+  if (env.NO_COLOR) return false;
+  return Boolean(stdin?.isTTY && stdout?.isTTY);
+}
+
+async function runRepl({ systemPrompt }) {
+  if (isInteractiveTuiSupported()) {
+    try {
+      const { runInkRepl } = await import("./ink-repl.js");
+      await runInkRepl({ systemPrompt });
+      return;
+    } catch (error) {
+      console.error(
+        `[chat] tui unavailable (${error instanceof Error ? error.message : String(error)}). falling back to plain mode.`
+      );
+    }
+  }
+  await runPlainRepl({ systemPrompt });
+}
+
 async function runOneShot({ prompt, systemPrompt }) {
   const history = [];
   const sessionUsage = createSessionUsage();
   const estimatedTokensRef = { value: 0 };
   const statusRenderer = createStatusRenderer();
-  const limitsByModel = readLiteLLMLimits();
 
   let latestRouting = null;
   try {
@@ -459,8 +688,7 @@ async function runOneShot({ prompt, systemPrompt }) {
       systemPrompt,
       sessionUsage,
       estimatedTokensRef,
-      statusRenderer,
-      limitsByModel
+      statusRenderer
     });
     latestRouting = result.routing;
   } finally {
@@ -508,7 +736,7 @@ async function main() {
       console.log("[chat-search] index built");
       return;
     }
-    await runSearch({ query });
+    printSearchPlain(await runSearch({ query }));
     return;
   }
 
@@ -532,12 +760,25 @@ async function main() {
 }
 
 export {
+  DEFAULT_GATEWAY_MODEL,
+  buildGatewayOptions,
+  createReplState,
   createStatusLine,
   createStatusRenderer,
+  createStatusState,
+  createUsageSummary,
+  executeCommand,
+  formatSearchPanel,
+  formatUsagePanel,
+  getHelpLines,
+  isInteractiveTuiSupported,
   main,
   processPrompt,
+  resetConversation,
   runOneShot,
-  runRepl
+  runPlainRepl,
+  runRepl,
+  saveTranscript
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -63,6 +63,7 @@ test("TTY chat rendering keeps assistant chunks contiguous", async () => {
 
   const rendered = writes.join("");
   assert.match(rendered, /assistant> Hello\n\[tokens session=3/);
+  assert.equal((rendered.match(/\[tokens session=/g) || []).length, 1);
   assert.equal(rendered.includes("\u001b[1G"), false);
   assert.equal(rendered.includes("\u001b[2K"), false);
   assert.doesNotMatch(rendered, /Hel\[tokens|Hello\[tokens/);
