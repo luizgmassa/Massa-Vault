@@ -4,14 +4,29 @@ import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import {
   gitAdd,
+  gitAddAll,
+  gitAbortReconcile,
   gitCachedNames,
   gitCommit,
+  gitEnsureIgnoreEntries,
+  gitFetch,
   gitHasRepo,
   gitInit,
+  gitListConflictedFiles,
+  gitListTracked,
   gitPush,
+  gitPullRebase,
+  gitReadStageFile,
+  gitRemoveCached,
   gitRemoteSetUrl
 } from "./git.js";
 import { syncToGoogleDrive } from "./gdrive.js";
+import {
+  PROTECTED_GITIGNORE_LINES,
+  PROTECTED_GIT_PATHS,
+  isProtectedArtifactPath,
+  normalizeRelativePath
+} from "./protected-artifacts.js";
 import { readState, writeState } from "./state.js";
 
 function toPosix(p) {
@@ -56,6 +71,25 @@ function summarizeCommandOutput(value, { maxLines = 20, maxChars = 4000 } = {}) 
   return clippedLines.slice(-maxChars);
 }
 
+function createSyncState(overrides = {}) {
+  return {
+    status: "idle",
+    reason: null,
+    queuedReason: null,
+    startedAt: null,
+    finishedAt: null,
+    lastSuccessAt: null,
+    lastError: null,
+    conflictCount: 0,
+    conflicts: [],
+    ...overrides
+  };
+}
+
+function ensureParentDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
 export class NotesAutomationService {
   constructor(configPath) {
     this.config = loadConfig(configPath);
@@ -73,6 +107,10 @@ export class NotesAutomationService {
     this.trackedSnapshot = new Map();
     this.pollIntervalMs = null;
     this.runId = randomUUID();
+    this.syncLock = false;
+    this.syncPromise = null;
+    this.queuedSyncReason = null;
+    this.conflicts = [];
   }
 
   updateState(partial, { force = false } = {}) {
@@ -106,6 +144,24 @@ export class NotesAutomationService {
     return true;
   }
 
+  updateSyncState(partial, { force = false } = {}) {
+    const current = readState();
+    const sync = createSyncState({
+      ...(current.sync && typeof current.sync === "object" ? current.sync : {}),
+      ...partial
+    });
+    this.updateState({ sync }, { force });
+  }
+
+  clearConflicts() {
+    this.conflicts = [];
+    this.updateSyncState({
+      status: this.paused ? "paused" : "idle",
+      conflictCount: 0,
+      conflicts: []
+    });
+  }
+
   assertNoRunningOwner() {
     const current = readState();
     const ownerRunId = typeof current.runId === "string" ? current.runId : "";
@@ -126,6 +182,7 @@ export class NotesAutomationService {
 
   shouldTrack(relativePath) {
     if (!relativePath) return false;
+    if (isProtectedArtifactPath(relativePath)) return false;
     if (matchesGlob(relativePath, this.config.ignoreGlobs)) return false;
     return matchesGlob(relativePath, this.config.includeGlobs);
   }
@@ -139,7 +196,7 @@ export class NotesAutomationService {
     }
 
     this.commitTimer = setTimeout(() => {
-      this.commitNow();
+      void this.runSync({ reason: "debounce" });
     }, this.config.debounceMs);
   }
 
@@ -262,71 +319,199 @@ export class NotesAutomationService {
     return true;
   }
 
-  commitNow() {
-    if (this.paused) return;
+  collectProtectedArtifacts() {
+    const dsStoreFiles = [];
+    const stack = [this.vaultPath];
+
+    while (stack.length) {
+      const next = stack.pop();
+      let entries = [];
+      try {
+        entries = fs.readdirSync(next, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        const absolute = path.join(next, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === ".git") continue;
+          stack.push(absolute);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (entry.name !== ".DS_Store") continue;
+        dsStoreFiles.push(absolute);
+      }
+    }
+
+    return dsStoreFiles;
+  }
+
+  enforceProtectedArtifacts() {
     if (!this.config.git.enabled) return;
-    const files = [...this.changedFiles];
+    if (!this.ensureVaultGitRepo()) return;
+
+    gitEnsureIgnoreEntries(PROTECTED_GITIGNORE_LINES, this.vaultPath);
+
+    for (const absolute of this.collectProtectedArtifacts()) {
+      try {
+        fs.unlinkSync(absolute);
+      } catch {}
+    }
+
+    const tracked = gitListTracked(PROTECTED_GIT_PATHS, this.vaultPath);
+    if (!tracked.length) return;
+    gitRemoveCached(PROTECTED_GIT_PATHS, this.vaultPath);
+  }
+
+  commitQueuedChanges(label) {
+    if (!this.config.git.enabled) return;
+    const files = [...new Set([...this.changedFiles].map(normalizeRelativePath))];
     this.changedFiles.clear();
     if (!files.length) return;
 
-    try {
-      if (!this.ensureVaultGitRepo()) return;
-      for (const relPath of files) {
-        gitAdd(relPath, this.vaultPath);
-      }
-      const staged = gitCachedNames(this.vaultPath);
-      if (!staged.length) return;
-      const subject = `notes(sync): update ${staged.length} file(s)`;
-      const body = [`source=notes-automation`, `files=${staged.slice(0, 10).join(", ")}`];
-      gitCommit(subject, body, this.vaultPath);
-      this.updateState({
-        lastCommitAt: new Date().toISOString(),
-        lastCommitFiles: staged
-      });
-    } catch (error) {
-      this.updateState({
-        lastError: `commit failure: ${String(error?.message || error)}`
-      });
+    if (!this.ensureVaultGitRepo()) return;
+    for (const relPath of files) {
+      if (!relPath || isProtectedArtifactPath(relPath)) continue;
+      gitAdd(relPath, this.vaultPath);
     }
+    this.commitStagedChanges(label);
   }
 
-  flushGitPush() {
+  commitAllChanges(label) {
     if (!this.config.git.enabled) return;
-    if (!this.config.git.autoPush) return;
-    if (this.config.git.mode === "local") return;
-    if (this.paused) return;
     if (!this.ensureVaultGitRepo()) return;
-    const result = gitPush(this.config.git.remote, this.config.git.branch, this.vaultPath);
-    if (result.ok) {
-      this.updateState({
-        lastPushAt: new Date().toISOString(),
-        lastPushError: null
-      });
-      return;
-    }
+    gitAddAll(this.vaultPath);
+    this.commitStagedChanges(label);
+  }
 
-    if (result.nonFastForward) {
-      this.paused = true;
-      this.updateState({
-        paused: true,
-        alert:
-          "Auto-push paused: non-fast-forward detected. Resolve manually (pull/rebase or merge), then run `npm run vault:resume`.",
-        lastPushError: result.output
-      });
-      return;
-    }
-
+  commitStagedChanges(label) {
+    const staged = gitCachedNames(this.vaultPath);
+    if (!staged.length) return;
+    const subject = `notes(sync): ${label}`;
+    const body = [`source=notes-automation`, `files=${staged.slice(0, 10).join(", ")}`];
+    gitCommit(subject, body, this.vaultPath);
     this.updateState({
-      lastPushError: result.output
+      lastCommitAt: new Date().toISOString(),
+      lastCommitFiles: staged
     });
   }
 
-  flushGoogleDriveSync() {
-    if (!this.config.gdrive.enabled) return;
-    if (this.paused) return;
+  quarantineGitConflicts(errorOutput = "") {
+    const conflicts = gitListConflictedFiles(this.vaultPath);
+    if (!conflicts.length) return [];
+
+    const root = path.join(
+      this.vaultPath,
+      ".automation",
+      "sync-conflicts",
+      `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`
+    );
+    fs.mkdirSync(root, { recursive: true });
+
+    const captured = [];
+    for (const filePath of conflicts) {
+      const safePath = normalizeRelativePath(filePath).replace(/\//g, "__");
+      const worktreePath = path.join(root, `${safePath}.worktree.txt`);
+      const oursPath = path.join(root, `${safePath}.ours.txt`);
+      const theirsPath = path.join(root, `${safePath}.theirs.txt`);
+      const basePath = path.join(root, `${safePath}.base.txt`);
+
+      const absolute = path.join(this.vaultPath, filePath);
+      let worktree = "";
+      try {
+        worktree = fs.readFileSync(absolute, "utf8");
+      } catch {}
+
+      ensureParentDir(worktreePath);
+      fs.writeFileSync(worktreePath, worktree, "utf8");
+      fs.writeFileSync(oursPath, gitReadStageFile(2, filePath, this.vaultPath), "utf8");
+      fs.writeFileSync(theirsPath, gitReadStageFile(3, filePath, this.vaultPath), "utf8");
+      fs.writeFileSync(basePath, gitReadStageFile(1, filePath, this.vaultPath), "utf8");
+
+      captured.push({
+        filePath,
+        worktreePath,
+        oursPath,
+        theirsPath,
+        basePath
+      });
+    }
+
+    fs.writeFileSync(
+      path.join(root, "summary.json"),
+      JSON.stringify(
+        {
+          detectedAt: new Date().toISOString(),
+          errorOutput: summarizeCommandOutput(errorOutput),
+          conflicts: captured
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    this.conflicts = captured;
+    return captured;
+  }
+
+  pullGitInbound() {
+    if (!this.config.git.enabled) return { ok: true, skipped: true };
+    if (this.config.git.mode === "local") return { ok: true, skipped: true };
+    if (!this.ensureVaultGitRepo()) return { ok: false, error: "git repo not ready" };
+
+    try {
+      gitFetch(this.config.git.remote, this.config.git.branch, this.vaultPath);
+    } catch (error) {
+      return {
+        ok: false,
+        error: `git fetch failure: ${String(error?.stderr || error?.message || error)}`
+      };
+    }
+
+    const pull = gitPullRebase(this.config.git.remote, this.config.git.branch, this.vaultPath);
+    if (pull.ok) {
+      this.updateState({
+        lastPullAt: new Date().toISOString(),
+        lastPullError: null
+      });
+      return { ok: true };
+    }
+
+    if (pull.conflict) {
+      const conflicts = this.quarantineGitConflicts(pull.output);
+      gitAbortReconcile(this.vaultPath);
+      this.paused = true;
+      this.updateSyncState({
+        status: "conflict",
+        conflictCount: conflicts.length,
+        conflicts,
+        lastError: summarizeCommandOutput(pull.output)
+      });
+      this.updateState({
+        paused: true,
+        alert:
+          "Sync paused: Git conflict detected. Run `npm run vault -- sync conflicts`, resolve files, then `npm run vault -- sync resolve --done`.",
+        lastPullError: pull.output
+      });
+      return { ok: false, conflict: true, error: pull.output };
+    }
+
+    this.updateState({
+      lastPullError: pull.output
+    });
+    return { ok: false, error: pull.output };
+  }
+
+  syncGoogleDriveInbound() {
+    if (!this.config.gdrive.enabled) return { ok: true, skipped: true };
 
     const attemptedAt = new Date().toISOString();
-    const result = syncToGoogleDrive(this.vaultPath, this.config.gdrive);
+    const result = syncToGoogleDrive(this.vaultPath, this.config.gdrive, {
+      cleanupProtected: true
+    });
     const nextState = {
       lastGDriveAttemptAt: attemptedAt,
       lastGDriveMode: result.command || null,
@@ -342,20 +527,186 @@ export class NotesAutomationService {
         lastGDriveError: null,
         lastGDriveOutput: summarizeCommandOutput(result.output)
       });
-      return;
+      return { ok: true };
     }
 
+    const errorOutput = summarizeCommandOutput(result.error || result.output || "");
     this.updateState({
       ...nextState,
       lastGDriveError: result.error || "unknown gdrive sync error",
-      lastGDriveOutput: summarizeCommandOutput(result.error || result.output || "")
+      lastGDriveOutput: errorOutput
     });
+
+    if (result.conflict || result.unsafeFailure) {
+      this.paused = true;
+      this.updateSyncState({
+        status: "paused",
+        lastError: errorOutput
+      });
+      this.updateState({
+        paused: true,
+        alert:
+          "Sync paused: Google Drive bisync needs manual intervention. Run `npm run vault -- sync` after fixing remote/local divergence.",
+        lastError: errorOutput
+      });
+    }
+
+    return { ok: false, error: result.error || "unknown gdrive sync error" };
   }
 
-  flushSyncBackends() {
-    this.commitNow();
-    this.flushGitPush();
-    this.flushGoogleDriveSync();
+  pushGitOutbound() {
+    if (!this.config.git.enabled) return { ok: true, skipped: true };
+    if (!this.config.git.autoPush) return { ok: true, skipped: true };
+    if (this.config.git.mode === "local") return { ok: true, skipped: true };
+    if (!this.ensureVaultGitRepo()) return { ok: false, error: "git repo not ready" };
+
+    const result = gitPush(this.config.git.remote, this.config.git.branch, this.vaultPath);
+    if (result.ok) {
+      this.updateState({
+        lastPushAt: new Date().toISOString(),
+        lastPushError: null
+      });
+      return { ok: true };
+    }
+
+    if (result.nonFastForward) {
+      this.paused = true;
+      this.updateState({
+        paused: true,
+        alert:
+          "Auto-push paused: non-fast-forward detected. Resolve manually (pull/rebase or merge), then run `npm run vault:resume`.",
+        lastPushError: result.output
+      });
+      this.updateSyncState({
+        status: "paused",
+        lastError: summarizeCommandOutput(result.output)
+      });
+      return { ok: false, error: result.output };
+    }
+
+    this.updateState({
+      lastPushError: result.output
+    });
+    return { ok: false, error: result.output };
+  }
+
+  executeSync(reason) {
+    if (this.paused) {
+      this.updateSyncState({
+        status: this.conflicts.length ? "conflict" : "paused",
+        reason: null,
+        queuedReason: null
+      });
+      return { ok: false, skipped: true, reason: "paused" };
+    }
+
+    const startedAt = new Date().toISOString();
+    this.updateSyncState({
+      status: "syncing",
+      reason,
+      startedAt,
+      queuedReason: null,
+      lastError: null
+    });
+
+    try {
+      this.enforceProtectedArtifacts();
+      this.commitQueuedChanges(`local changes (${reason})`);
+
+      const pull = this.pullGitInbound();
+      if (!pull.ok) {
+        const finalStatus = this.paused ? (this.conflicts.length ? "conflict" : "paused") : "idle";
+        this.updateSyncState({
+          status: finalStatus,
+          reason: null,
+          finishedAt: new Date().toISOString(),
+          lastError: summarizeCommandOutput(pull.error || "")
+        });
+        return { ok: false, error: pull.error };
+      }
+
+      const gdrive = this.syncGoogleDriveInbound();
+      if (!gdrive.ok) {
+        const finalStatus = this.paused ? "paused" : "idle";
+        this.updateSyncState({
+          status: finalStatus,
+          reason: null,
+          finishedAt: new Date().toISOString(),
+          lastError: summarizeCommandOutput(gdrive.error || "")
+        });
+        return { ok: false, error: gdrive.error };
+      }
+
+      this.enforceProtectedArtifacts();
+      this.commitAllChanges(`post-sync changes (${reason})`);
+
+      const push = this.pushGitOutbound();
+      if (!push.ok) {
+        const finalStatus = this.paused ? "paused" : "idle";
+        this.updateSyncState({
+          status: finalStatus,
+          reason: null,
+          finishedAt: new Date().toISOString(),
+          lastError: summarizeCommandOutput(push.error || "")
+        });
+        return { ok: false, error: push.error };
+      }
+
+      const completedAt = new Date().toISOString();
+      this.updateSyncState({
+        status: "idle",
+        reason: null,
+        finishedAt: completedAt,
+        lastSuccessAt: completedAt,
+        lastError: null
+      });
+      return { ok: true };
+    } catch (error) {
+      const message = String(error?.message || error);
+      this.updateSyncState({
+        status: this.paused ? "paused" : "idle",
+        reason: null,
+        finishedAt: new Date().toISOString(),
+        lastError: summarizeCommandOutput(message)
+      });
+      this.updateState({
+        lastError: `sync failure: ${message}`
+      });
+      return { ok: false, error: message };
+    }
+  }
+
+  runSync({ reason = "manual" } = {}) {
+    if (this.syncLock) {
+      this.queuedSyncReason = reason;
+      this.updateSyncState({ queuedReason: reason });
+      return this.syncPromise || Promise.resolve({ ok: true, queued: true });
+    }
+
+    this.syncLock = true;
+    this.syncPromise = Promise.resolve()
+      .then(() => {
+        let nextReason = reason;
+        let lastResult = { ok: true };
+        do {
+          lastResult = this.executeSync(nextReason);
+          nextReason = this.queuedSyncReason;
+          this.queuedSyncReason = null;
+        } while (nextReason && lastResult.ok && !this.paused);
+        return lastResult;
+      })
+      .finally(() => {
+        this.syncLock = false;
+        this.syncPromise = null;
+        this.queuedSyncReason = null;
+        const current = readState();
+        const sync = createSyncState(current.sync || {});
+        if (sync.queuedReason) {
+          this.updateSyncState({ queuedReason: null });
+        }
+      });
+
+    return this.syncPromise;
   }
 
   pollControl() {
@@ -365,18 +716,20 @@ export class NotesAutomationService {
 
     if (action === "resume") {
       this.paused = false;
+      this.clearConflicts();
       this.updateState({
         paused: false,
         alert: null,
         requestedAction: null,
-        resumedAt: new Date().toISOString()
+        resumedAt: new Date().toISOString(),
+        lastError: null
       });
       return;
     }
 
-    if (action === "flush-push" || action === "flush-sync") {
+    if (action === "flush-push" || action === "flush-sync" || action === "sync") {
       this.updateState({ requestedAction: null });
-      this.flushSyncBackends();
+      void this.runSync({ reason: action });
     }
   }
 
@@ -435,7 +788,7 @@ export class NotesAutomationService {
     }
 
     this.pushTimer = setInterval(() => {
-      this.flushSyncBackends();
+      void this.runSync({ reason: "interval" });
     }, this.config.pushIntervalMin * 60_000);
 
     this.controlTimer = setInterval(() => {
@@ -457,8 +810,11 @@ export class NotesAutomationService {
       stoppedAt: null,
       config: this.config,
       vaultPath: this.vaultPath,
+      sync: createSyncState(),
       startedAt: new Date().toISOString()
     }, { force: true });
+
+    void this.runSync({ reason: "start" });
   }
 
   async shutdown() {
@@ -470,7 +826,7 @@ export class NotesAutomationService {
       watcher.close();
     }
 
-    this.flushSyncBackends();
+    await this.runSync({ reason: "stop" });
     this.updateState({
       running: false,
       pid: null,
@@ -493,4 +849,24 @@ export function startService(configPath) {
   return service;
 }
 
-export { isProcessRunning };
+export async function runSyncOnce(configPath, { reason = "manual-cli" } = {}) {
+  const service = new NotesAutomationService(configPath);
+  const startedAt = new Date().toISOString();
+  service.updateState(
+    {
+      running: false,
+      pid: null,
+      paused: false,
+      alert: null,
+      sync: createSyncState({
+        status: "syncing",
+        reason,
+        startedAt
+      })
+    },
+    { force: true }
+  );
+  return service.runSync({ reason });
+}
+
+export { createSyncState, isProcessRunning };

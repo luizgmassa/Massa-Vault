@@ -58,7 +58,7 @@ Options:
   --git-branch NAME
   --git-auto-push true|false
   --gdrive-remote-path REMOTE
-  --gdrive-mode copy|sync|bisync
+  --gdrive-mode bisync
   --skip-model-pull             Skip Ollama model pulls.
   -h, --help                    Show this help.
 USAGE
@@ -512,7 +512,8 @@ resolve_config() {
       fi
       log "gdrive remote path format is remote:path (example: Personal:Obsidian), not /Obsidian"
       GDRIVE_REMOTE_PATH="$(prompt_value "Google Drive remote path" "${GDRIVE_REMOTE_PATH:-}")"
-      GDRIVE_MODE="$(prompt_value "Google Drive mode (copy|sync|bisync)" "${GDRIVE_MODE:-copy}")"
+      log "Google Drive mode is fixed to bisync for safe two-way sync."
+      GDRIVE_MODE="bisync"
     fi
   fi
 
@@ -521,7 +522,7 @@ resolve_config() {
   GIT_MODE="$(normalize_choice "${GIT_MODE:-local}" "local remote" "git mode")"
   GIT_REMOTE="${GIT_REMOTE:-origin}"
   GIT_BRANCH="${GIT_BRANCH:-master}"
-  GDRIVE_MODE="$(normalize_choice "${GDRIVE_MODE:-copy}" "copy sync bisync" "gdrive mode")"
+  GDRIVE_MODE="$(normalize_choice "${GDRIVE_MODE:-bisync}" "bisync" "gdrive mode")"
 
   if [[ "$GIT_MODE" == "local" ]]; then
     GIT_AUTO_PUSH="false"
@@ -568,6 +569,8 @@ const config = {
   ignore_globs: [
     ".git/**",
     ".automation/**",
+    ".DS_Store",
+    "**/.DS_Store",
     ".logs/**",
     ".obsidian/workspace.json",
     ".obsidian/plugins/**/data.json",
@@ -590,9 +593,15 @@ const config = {
   branch: process.env.MV_GIT_BRANCH || "master",
   gdrive_binary: "rclone",
   gdrive_remote_path: process.env.MV_GDRIVE_REMOTE_PATH || "",
-  gdrive_mode: process.env.MV_GDRIVE_MODE || "copy",
+  gdrive_mode: process.env.MV_GDRIVE_MODE || "bisync",
   gdrive_first_run_resync: true,
-  gdrive_args: ["--exclude", ".git/**", "--exclude", ".obsidian/workspace.json"],
+  gdrive_args: [
+    "--exclude", ".git/**",
+    "--exclude", ".obsidian/workspace.json",
+    "--exclude", ".automation/**",
+    "--exclude", ".DS_Store",
+    "--exclude", "**/.DS_Store"
+  ],
   debounce_ms: 1500
 };
 fs.mkdirSync(path.dirname(configPath), { recursive: true });

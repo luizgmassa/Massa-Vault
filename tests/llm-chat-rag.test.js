@@ -267,52 +267,54 @@ test("vault access regression prompt includes access contract and metadata", asy
 
 test("vault context is not persisted to transcript history", async () => {
   await withTempDir(async (tempDir) => {
-    writeMinimalConfig(tempDir);
-    const history = [];
-    const sessionUsage = createSessionUsage();
-    const estimatedTokensRef = { value: 0 };
+    const vaultPath = writeMinimalConfig(tempDir);
+    await withEnvValue("VAULT_PATH", vaultPath, async () => {
+      const history = [];
+      const sessionUsage = createSessionUsage();
+      const estimatedTokensRef = { value: 0 };
 
-    await processPrompt({
-      prompt: "summarize beta",
-      history,
-      systemPrompt: "",
-      sessionUsage,
-      estimatedTokensRef,
-      renderMode: "silent",
-      statusRenderer: createStatusRenderer({ stream: { isTTY: false, write() {} } }),
-      vaultContextBuilder: async () => ({
-        message: "Relevant Obsidian vault context:\n[source 1] docs/beta.md#0\nbeta details",
-        metadata: {
-          source: "obsidian",
-          retrieved_chunks: 1,
-          context_length: 72,
-          sources: [{ path: "docs/beta.md", chunk_index: 0, score: 0.88 }]
+      await processPrompt({
+        prompt: "summarize beta",
+        history,
+        systemPrompt: "",
+        sessionUsage,
+        estimatedTokensRef,
+        renderMode: "silent",
+        statusRenderer: createStatusRenderer({ stream: { isTTY: false, write() {} } }),
+        vaultContextBuilder: async () => ({
+          message: "Relevant Obsidian vault context:\n[source 1] docs/beta.md#0\nbeta details",
+          metadata: {
+            source: "obsidian",
+            retrieved_chunks: 1,
+            context_length: 72,
+            sources: [{ path: "docs/beta.md", chunk_index: 0, score: 0.88 }]
+          }
+        }),
+        chatCompletion: async ({ onUsage }) => {
+          onUsage?.({ prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 });
+          return {
+            assistantText: "beta answer",
+            usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 },
+            routing: null
+          };
         }
-      }),
-      chatCompletion: async ({ onUsage }) => {
-        onUsage?.({ prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 });
-        return {
-          assistantText: "beta answer",
-          usage: { prompt_tokens: 6, completion_tokens: 4, total_tokens: 10 },
-          routing: null
-        };
-      }
-    });
+      });
 
-    assert.deepEqual(history.map((entry) => entry.role), ["user", "assistant"]);
+      assert.deepEqual(history.map((entry) => entry.role), ["user", "assistant"]);
 
-    const transcriptPath = await saveTranscript({
-      sessionId: "session-test",
-      sessionStartedAt: new Date().toISOString(),
-      history,
-      latestRouting: null,
-      sessionUsage
+      const transcriptPath = await saveTranscript({
+        sessionId: "session-test",
+        sessionStartedAt: new Date().toISOString(),
+        history,
+        latestRouting: null,
+        sessionUsage
+      });
+      const transcriptContent = fs.readFileSync(transcriptPath, "utf8");
+      assert.match(transcriptContent, /## USER/);
+      assert.match(transcriptContent, /## ASSISTANT/);
+      assert.doesNotMatch(transcriptContent, /Relevant Obsidian vault context/);
+      assert.doesNotMatch(transcriptContent, /docs\/beta\.md#0/);
     });
-    const transcriptContent = fs.readFileSync(transcriptPath, "utf8");
-    assert.match(transcriptContent, /## USER/);
-    assert.match(transcriptContent, /## ASSISTANT/);
-    assert.doesNotMatch(transcriptContent, /Relevant Obsidian vault context/);
-    assert.doesNotMatch(transcriptContent, /docs\/beta\.md#0/);
   });
 });
 
@@ -422,4 +424,50 @@ test("MASSA_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports 
       process.env.MASSA_VAULT_CHAT_RAG = previousRag;
     }
   }
+});
+
+test("executeCommand /save and /sync delegate to save+sync hook", async () => {
+  const state = createReplState({ systemPrompt: "" });
+  const messages = [];
+  let calls = 0;
+
+  const hook = async () => {
+    calls += 1;
+    return {
+      saveResult: {
+        path: "/tmp/transcript.md",
+        saved: true
+      },
+      summary: "[chat] sync status=idle conflicts=0"
+    };
+  };
+
+  const saveResult = await executeCommand({
+    line: "/save",
+    state,
+    limitsByModel: {},
+    mode: "tui",
+    handlers: {
+      message: (text) => messages.push(text)
+    },
+    onSaveAndSync: hook
+  });
+  assert.equal(saveResult.handled, true);
+  assert.equal(saveResult.exit, false);
+
+  const syncResult = await executeCommand({
+    line: "/sync",
+    state,
+    limitsByModel: {},
+    mode: "tui",
+    handlers: {
+      message: (text) => messages.push(text)
+    },
+    onSaveAndSync: hook
+  });
+  assert.equal(syncResult.handled, true);
+  assert.equal(syncResult.exit, false);
+  assert.equal(calls, 2);
+  assert.match(messages.join("\n"), /transcript saved/i);
+  assert.match(messages.join("\n"), /sync status=idle/i);
 });

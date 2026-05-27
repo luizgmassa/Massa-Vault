@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadConfig } from "./config.js";
 import { checkGoogleDriveRemote, syncToGoogleDrive } from "./gdrive.js";
-import { startService, isProcessRunning } from "./service.js";
+import { runSyncOnce, startService, isProcessRunning } from "./service.js";
 import { readPid, removePid, writePid, readState, writeState } from "./state.js";
 import { loadLocalEnv } from "../../shared/env.js";
 
@@ -123,7 +123,7 @@ function stopService() {
   }
 }
 
-function requestAction(action) {
+function requestAction(action, { quiet = false } = {}) {
   const pid = readPid();
   if (!pid || !isProcessRunning(pid)) {
     console.error(`[notes-automation] service is not running`);
@@ -135,7 +135,155 @@ function requestAction(action) {
     requestedAction: action,
     requestedAt: new Date().toISOString()
   });
-  console.log(`[notes-automation] action requested: ${action}`);
+  if (!quiet) {
+    console.log(`[notes-automation] action requested: ${action}`);
+  }
+}
+
+function summarizeSyncStatus() {
+  const state = readState();
+  const sync = state?.sync && typeof state.sync === "object" ? state.sync : {};
+  return {
+    running: Boolean(state?.running),
+    paused: Boolean(state?.paused),
+    status: sync.status || "idle",
+    reason: sync.reason || null,
+    queuedReason: sync.queuedReason || null,
+    conflictCount: Number(sync.conflictCount || 0),
+    conflicts: Array.isArray(sync.conflicts) ? sync.conflicts : [],
+    lastError: sync.lastError || null,
+    lastSuccessAt: sync.lastSuccessAt || null,
+    finishedAt: sync.finishedAt || null,
+    alert: state?.alert || null
+  };
+}
+
+function printSyncSummary(payload) {
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+async function waitForSyncCompletion({
+  timeoutMs = 300_000,
+  pollMs = 500
+} = {}) {
+  const start = Date.now();
+  let sawRequested = false;
+  let sawSyncing = false;
+  while (Date.now() - start < timeoutMs) {
+    const state = readState();
+    const sync = summarizeSyncStatus();
+    if (state?.requestedAction) {
+      sawRequested = true;
+    }
+    if (sync.status === "syncing") {
+      sawSyncing = true;
+    }
+    const requestSettled = !state?.requestedAction && sawRequested;
+    const syncSettled = sync.status !== "syncing" && sawSyncing;
+    if (requestSettled || syncSettled) {
+      return sync;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  const timedOut = summarizeSyncStatus();
+  return { ...timedOut, timedOut: true };
+}
+
+async function runManualSync() {
+  const pid = readPid();
+  const serviceRunning = Boolean(pid && isProcessRunning(pid));
+  if (serviceRunning) {
+    requestAction("sync", { quiet: true });
+    const sync = await waitForSyncCompletion();
+    printSyncSummary({
+      ok: !sync.timedOut && sync.status !== "conflict" && !sync.lastError,
+      serviceMode: "daemon",
+      sync
+    });
+    if (sync.timedOut || sync.status === "conflict" || sync.lastError) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  const result = await runSyncOnce(CONFIG_PATH, { reason: "manual-cli" });
+  const sync = summarizeSyncStatus();
+  printSyncSummary({
+    ok: Boolean(result?.ok),
+    serviceMode: "oneshot",
+    result,
+    sync
+  });
+  if (!result?.ok) {
+    process.exit(1);
+  }
+}
+
+function printSyncConflicts() {
+  const sync = summarizeSyncStatus();
+  printSyncSummary({
+    ok: sync.conflictCount > 0,
+    sync
+  });
+}
+
+function printResolveGuide(markDone = false) {
+  const state = readState();
+  const sync = summarizeSyncStatus();
+  if (!sync.conflictCount) {
+    printSyncSummary({
+      ok: true,
+      message: "No active sync conflicts.",
+      sync
+    });
+    return;
+  }
+
+  if (markDone) {
+    const pid = readPid();
+    if (pid && isProcessRunning(pid)) {
+      requestAction("resume");
+      printSyncSummary({
+        ok: true,
+        message: "Conflict state cleared. Daemon resume requested. Run `npm run vault -- sync` next.",
+        sync: summarizeSyncStatus()
+      });
+      return;
+    }
+
+    writeState({
+      ...state,
+      paused: false,
+      alert: null,
+      sync: {
+        ...(state?.sync && typeof state.sync === "object" ? state.sync : {}),
+        status: "idle",
+        conflictCount: 0,
+        conflicts: [],
+        lastError: null,
+        queuedReason: null,
+        reason: null
+      },
+      updatedAt: new Date().toISOString()
+    });
+    printSyncSummary({
+      ok: true,
+      message: "Conflict state cleared. Run `npm run vault -- sync` to verify.",
+      sync: summarizeSyncStatus()
+    });
+    return;
+  }
+
+  const conflicts = Array.isArray(sync.conflicts) ? sync.conflicts : [];
+  printSyncSummary({
+    ok: false,
+    message:
+      "Resolve each conflicted file using quarantine snapshots, then run `npm run vault -- sync resolve --done`.",
+    conflictRootHint:
+      conflicts[0]?.worktreePath?.split("/.automation/sync-conflicts/")[0] || state?.vaultPath || null,
+    conflicts
+  });
+  process.exit(1);
 }
 
 function printGDriveCheck() {
@@ -203,7 +351,16 @@ async function main() {
       requestAction("flush-push");
       break;
     case "flush-sync":
-      requestAction("flush-sync");
+      await runManualSync();
+      break;
+    case "sync":
+      await runManualSync();
+      break;
+    case "sync-conflicts":
+      printSyncConflicts();
+      break;
+    case "sync-resolve":
+      printResolveGuide(process.argv.includes("--done"));
       break;
     case "resume":
       requestAction("resume");
@@ -219,7 +376,7 @@ async function main() {
       break;
     default:
       console.error(
-        "Usage: node tools/notes-automation/src/cli.js [start|stop|status|flush-push|flush-sync|resume|gdrive-check|gdrive-dry-run]"
+        "Usage: node tools/notes-automation/src/cli.js [start|stop|status|sync|sync-conflicts|sync-resolve|flush-push|flush-sync|resume|gdrive-check|gdrive-dry-run]"
       );
       process.exit(1);
   }

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
 
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const DEFAULT_LOCAL_CONFIG_PATH = path.resolve("config/notes-automation.local.json");
@@ -28,6 +29,19 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
   const syncStrategy = String(parsed.sync_strategy || "git").toLowerCase();
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";
+  const gdriveMode = String(parsed.gdrive_mode || "bisync").toLowerCase();
+  if (gdriveEnabled && gdriveMode !== "bisync") {
+    throw new Error(
+      `Invalid gdrive_mode "${gdriveMode}". When Google Drive sync is enabled, gdrive_mode must be "bisync".`
+    );
+  }
+
+  const ignoreGlobs = Array.isArray(parsed.ignore_globs) ? [...parsed.ignore_globs] : [];
+  for (const glob of PROTECTED_ARTIFACT_GLOBS) {
+    if (!ignoreGlobs.includes(glob)) {
+      ignoreGlobs.push(glob);
+    }
+  }
 
   return {
     enabled:
@@ -36,7 +50,7 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
     vaultPath: path.resolve(process.env.VAULT_PATH || parsed.vault_path || "."),
     watchPaths: parsed.watch_paths || ["."],
     includeGlobs: parsed.include_globs || ["**/*.md"],
-    ignoreGlobs: parsed.ignore_globs || [],
+    ignoreGlobs,
     pushIntervalMin: toNumber(
       process.env.NOTES_AUTOMATION_PUSH_INTERVAL_MIN ?? parsed.push_interval_min,
       10
@@ -57,7 +71,7 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
       enabled: gdriveEnabled,
       binary: process.env.NOTES_AUTOMATION_GDRIVE_BIN || parsed.gdrive_binary || "rclone",
       remotePath: process.env.NOTES_AUTOMATION_GDRIVE_REMOTE_PATH || parsed.gdrive_remote_path || "",
-      mode: parsed.gdrive_mode || "copy",
+      mode: gdriveMode,
       firstRunResync:
         String(parsed.gdrive_first_run_resync ?? true).toLowerCase() === "true",
       args: Array.isArray(parsed.gdrive_args) ? parsed.gdrive_args : []

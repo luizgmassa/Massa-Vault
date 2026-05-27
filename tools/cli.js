@@ -87,6 +87,8 @@ function buildConfig({
     ignore_globs: [
       ".git/**",
       ".automation/**",
+      ".DS_Store",
+      "**/.DS_Store",
       ".obsidian/workspace.json",
       ".obsidian/plugins/**/data.json",
       ".obsidian/plugins/**/cache/**",
@@ -110,7 +112,18 @@ function buildConfig({
     gdrive_remote_path: gdriveRemotePath,
     gdrive_mode: gdriveMode,
     gdrive_first_run_resync: true,
-    gdrive_args: ["--exclude", ".git/**", "--exclude", ".obsidian/workspace.json"]
+    gdrive_args: [
+      "--exclude",
+      ".git/**",
+      "--exclude",
+      ".obsidian/workspace.json",
+      "--exclude",
+      ".automation/**",
+      "--exclude",
+      ".DS_Store",
+      "--exclude",
+      "**/.DS_Store"
+    ]
   };
 }
 
@@ -148,7 +161,7 @@ async function configure() {
   }
 
   let gdriveRemotePath = "";
-  let gdriveMode = "copy";
+  let gdriveMode = "bisync";
   if (syncStrategy === "gdrive" || syncStrategy === "both") {
     const remotes = listRcloneRemotesSafe();
     if (remotes.length) {
@@ -171,8 +184,8 @@ async function configure() {
       console.log(`[vault-cli] ${validation.error}`);
     }
 
-    const gdriveModeAnswer = await rl.question("Google Drive sync mode (copy|sync|bisync) [copy]: ");
-    gdriveMode = (gdriveModeAnswer.trim() || "copy").toLowerCase();
+    console.log("[vault-cli] Google Drive mode is fixed to bisync for safe two-way sync.");
+    gdriveMode = "bisync";
   }
 
   rl.close();
@@ -239,8 +252,8 @@ function install() {
   }
 }
 
-function proxyNotes(command) {
-  const result = runTool(process.execPath, [NOTES_CLI, command]);
+function proxyNotes(...args) {
+  const result = runTool(process.execPath, [NOTES_CLI, ...args]);
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
@@ -276,6 +289,15 @@ async function main() {
   if (cmd === "gdrive-dry-run") {
     return proxyNotes("gdrive-dry-run");
   }
+  if (cmd === "sync") {
+    const sub = (process.argv[3] || "").toLowerCase();
+    if (!sub) return proxyNotes("sync");
+    if (sub === "conflicts") return proxyNotes("sync-conflicts");
+    if (sub === "resolve") return proxyNotes("sync-resolve", ...(process.argv.slice(4)));
+    if (sub === "status") return proxyNotes("status");
+    console.error("Usage: npm run vault -- sync [conflicts|resolve|status]");
+    process.exit(1);
+  }
   if (["start", "stop", "status", "resume", "flush-sync", "flush-push"].includes(cmd)) {
     return proxyNotes(cmd);
   }
@@ -284,11 +306,12 @@ async function main() {
   console.log("  npm run vault:install");
   console.log("  npm run vault:configure");
   console.log("  npm run vault:chat");
+  console.log("  npm run vault:sync");
   console.log("  npm run vault -- gdrive check|dry-run");
   console.log("  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync");
   console.log("  # or");
   console.log(
-    "  npm run vault -- install|configure|chat|gdrive|start|stop|status|resume|flush-sync"
+    "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|resume|flush-sync"
   );
 }
 

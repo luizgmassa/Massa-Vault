@@ -14,6 +14,8 @@
   "ignore_globs": [
     ".git/**",
     ".automation/**",
+    ".DS_Store",
+    "**/.DS_Store",
     ".logs/**",
     ".obsidian/workspace.json",
     ".obsidian/plugins/**/data.json",
@@ -36,13 +38,19 @@
   "branch": "master",
   "gdrive_binary": "rclone",
   "gdrive_remote_path": "",
-  "gdrive_mode": "copy",
+  "gdrive_mode": "bisync",
   "gdrive_first_run_resync": true,
   "gdrive_args": [
     "--exclude",
     ".git/**",
     "--exclude",
-    ".obsidian/workspace.json"
+    ".obsidian/workspace.json",
+    "--exclude",
+    ".automation/**",
+    "--exclude",
+    ".DS_Store",
+    "--exclude",
+    "**/.DS_Store"
   ],
   "debounce_ms": 1500
 }

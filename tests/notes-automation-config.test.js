@@ -62,6 +62,29 @@ test("loads both sync strategy with git and gdrive enabled", () => {
     assert.equal(config.git.remote, "origin");
     assert.equal(config.git.branch, "main");
     assert.equal(config.gdrive.remotePath, "gdrive:massa-vault");
+    assert.equal(config.ignoreGlobs.includes(".automation/**"), true);
+    assert.equal(config.ignoreGlobs.includes(".DS_Store"), true);
+    assert.equal(config.ignoreGlobs.includes("**/.DS_Store"), true);
+  });
+});
+
+test("rejects non-bisync google drive mode when gdrive is enabled", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: "/tmp/vault",
+        sync_strategy: "gdrive",
+        gdrive_remote_path: "gdrive:massa-vault",
+        gdrive_mode: "copy"
+      }),
+      "utf8"
+    );
+
+    assert.throws(() => loadConfig(configPath), /must be "bisync"/i);
   });
 });
 

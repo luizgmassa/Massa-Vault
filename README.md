@@ -3,8 +3,8 @@
 Automation system for a personal Obsidian knowledge base with:
 
 - semantic + complexity AI routing
-- automated Git sync
-- optional Google Drive sync
+- automated bidirectional Git sync
+- optional Google Drive bisync
 - setup/config CLI
 
 This repository now stores **system/tooling files only**.  
@@ -31,17 +31,15 @@ Your actual notes/memories live in an external vault path configured by CLI.
 ### Git sync
 
 - Watches vault files.
-- Auto-commits changed note/config files.
-- If `git_mode=remote` and `git_auto_push=true`, pushes every interval.
-- If non-fast-forward occurs, service pauses and waits for manual resolve.
+- Serialized sync runs (no overlapping jobs) on start, stop, debounce, interval, and manual sync.
+- Auto-commits local changes, pulls/reconciles inbound GitHub changes, then pushes outbound updates.
+- If Git conflicts are detected, sync pauses and quarantines both versions under `.automation/sync-conflicts/`.
 
 ### Google Drive sync
 
-- Uses `rclone` backend.
-- Supported modes:
-  - `copy` (safe backup, no deletes)
-  - `sync` (destination mirrors source, can delete)
-  - `bisync` (two-way sync; first run uses `--resync`)
+- Uses `rclone bisync` only (one-way modes are rejected).
+- Required excludes are always enforced, including `.automation/**` and `.DS_Store`.
+- Existing protected artifacts on remote are cleaned up during sync.
 
 ## CLI Usage
 
@@ -51,6 +49,7 @@ npm run vault:install
 npm run vault:configure
 npm run vault:start
 npm run vault:chat
+npm run vault:sync
 npm run vault:status
 npm run vault:flush-sync
 npm run vault:resume
@@ -58,6 +57,15 @@ npm run vault:stop
 npm run litellm
 npm run router-gateway
 npm run build
+```
+
+Additional sync commands:
+
+```bash
+npm run vault -- sync
+npm run vault -- sync status
+npm run vault -- sync conflicts
+npm run vault -- sync resolve --done
 ```
 
 ### `setup`
@@ -90,6 +98,9 @@ Repository Node entrypoints (`npm run vault*`, `npm run router-gateway`, `npm ru
 - `npm run vault -- chat "your prompt"` runs one-shot chat.
 - `npm run vault -- chat search "query"` runs semantic search over markdown notes + AI chats.
 - `npm run vault -- chat search index` forces/rebuilds local semantic index.
+- REPL commands include `/save` (save transcript + sync) and `/sync` (save if needed + sync).
+- `/exit`, Ctrl-C, SIGTERM, and SIGHUP perform best-effort save+sync before exit.
+- Idle save+sync runs automatically after assistant responses (default 30 seconds).
 
 Chat defaults:
 
@@ -116,7 +127,7 @@ Interactive setup for:
 - sync strategy (`git`, `gdrive`, `both`)
 - git mode (`remote` or `local`)
 - remote URL/branch/auto-push
-- Google Drive remote path and mode
+- Google Drive remote path (mode is fixed to `bisync`)
 
 If Git sync is enabled, CLI initializes git repo in vault path if needed and configures remote URL.
 
@@ -130,7 +141,7 @@ File: `config/notes-automation.config.json`
   "vault_path": "/absolute/path/to/your/obsidian-vault",
   "watch_paths": ["."],
   "include_globs": ["**/*.md", "templates/**/*.md"],
-  "ignore_globs": [".git/**", ".obsidian/workspace.json"],
+  "ignore_globs": [".git/**", ".automation/**", ".DS_Store", "**/.DS_Store", ".obsidian/workspace.json"],
   "push_interval_min": 10,
   "sync_strategy": "both",
   "git_mode": "remote",
@@ -140,12 +151,34 @@ File: `config/notes-automation.config.json`
   "branch": "master",
   "gdrive_binary": "rclone",
   "gdrive_remote_path": "gdrive:massa-vault",
-  "gdrive_mode": "copy",
+  "gdrive_mode": "bisync",
   "gdrive_first_run_resync": true,
-  "gdrive_args": ["--exclude", ".git/**"],
+  "gdrive_args": ["--exclude", ".git/**", "--exclude", ".automation/**", "--exclude", ".DS_Store", "--exclude", "**/.DS_Store"],
   "debounce_ms": 1500
 }
 ```
+
+## Sync Lifecycle
+
+Each sync run executes in this order:
+
+1. Enforce protected-artifact rules (`.automation/**`, `.DS_Store`, `**/.DS_Store`).
+2. Commit local pending changes.
+3. Pull/reconcile inbound GitHub changes.
+4. Run Google Drive `rclone bisync`.
+5. Re-apply protected-artifact cleanup after inbound sync.
+6. Commit imported/cleanup changes.
+7. Push GitHub.
+
+## Conflict Recovery
+
+- Show current conflicts:
+  - `npm run vault -- sync conflicts`
+- Resolve conflicts using quarantine files in `.automation/sync-conflicts/`.
+- Mark resolved:
+  - `npm run vault -- sync resolve --done`
+- Run sync again:
+  - `npm run vault -- sync`
 
 ## Router Gateway
 

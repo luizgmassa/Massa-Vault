@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import * as readlinePromises from "node:readline/promises";
 import { stdin as input, stdout as output, stderr } from "node:process";
 import { pathToFileURL } from "node:url";
@@ -24,8 +25,10 @@ loadLocalEnv();
 const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT || 4100}`;
 const DEFAULT_GATEWAY_MODEL = "smart-router";
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
+const NOTES_AUTOMATION_CLI_PATH = path.resolve("tools/notes-automation/src/cli.js");
 const DEFAULT_RAG_CHUNK_LIMIT = 5;
 const DEFAULT_RAG_MAX_CHARS = 6000;
+const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
 const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 const VAULT_CONTEXT_MODES = ["semantic", "manifest"];
 
@@ -532,6 +535,8 @@ function printSearchPlain(searchResult) {
 function getHelpLines() {
   return [
     "/help                 Show commands",
+    "/save                 Save transcript and trigger sync",
+    "/sync                 Save transcript (if needed) and trigger sync",
     "/exit                 Save transcript and exit",
     "/clear                Clear conversation memory",
     "/usage                Show token counters and quota estimates",
@@ -591,6 +596,86 @@ async function saveTranscript({
   });
 }
 
+function parseJsonOutput(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function runNotesAutomationCommand(args = []) {
+  try {
+    const output = execFileSync(process.execPath, [NOTES_AUTOMATION_CLI_PATH, ...args], {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).trim();
+    return { ok: true, output, payload: parseJsonOutput(output) };
+  } catch (error) {
+    const output = String(error?.stdout || error?.stderr || error?.message || "").trim();
+    return { ok: false, output, payload: parseJsonOutput(output) };
+  }
+}
+
+function formatSyncFeedback(result) {
+  const payload = result?.payload && typeof result.payload === "object" ? result.payload : null;
+  if (!payload) {
+    if (result?.ok) return "[chat] sync completed.";
+    return `[chat] sync failed: ${result?.output || "unknown error"}`;
+  }
+
+  const sync =
+    payload.sync && typeof payload.sync === "object"
+      ? payload.sync
+      : payload.state && typeof payload.state?.sync === "object"
+        ? payload.state.sync
+        : {};
+  const status = sync.status || (payload.ok ? "idle" : "error");
+  const conflictCount = Number(sync.conflictCount || 0);
+  const errorText = sync.lastError || payload.message || payload.error || "";
+  const base = `[chat] sync status=${status} conflicts=${conflictCount}`;
+  if (!payload.ok || errorText) {
+    return `${base} error=${errorText || "unknown"}`;
+  }
+  return base;
+}
+
+async function persistTranscriptForSession(state) {
+  if (state.transcriptSavedPath && state.lastSavedHistoryLength === state.history.length) {
+    return { path: state.transcriptSavedPath, saved: false };
+  }
+
+  const path = await saveTranscript({
+    sessionId: state.sessionId,
+    sessionStartedAt: state.sessionStartedAt,
+    history: state.history,
+    latestRouting: state.latestRouting,
+    sessionUsage: state.sessionUsage
+  });
+  if (!path) {
+    return { path: null, saved: false };
+  }
+
+  state.transcriptSavedPath = path;
+  state.lastSavedHistoryLength = state.history.length;
+  return { path, saved: true };
+}
+
+async function saveAndSyncSession(state, { reason = "chat-manual-sync", skipSave = false } = {}) {
+  const saveResult = skipSave ? { path: null, saved: false } : await persistTranscriptForSession(state);
+  const syncResult = runNotesAutomationCommand(["sync"]);
+  return {
+    saveResult,
+    syncResult,
+    reason,
+    summary: formatSyncFeedback(syncResult)
+  };
+}
+
 function createReplState({ systemPrompt }) {
   return {
     history: [],
@@ -600,7 +685,8 @@ function createReplState({ systemPrompt }) {
     activeSystemPrompt: systemPrompt,
     sessionId: randomUUID(),
     sessionStartedAt: new Date().toISOString(),
-    transcriptSavedPath: null
+    transcriptSavedPath: null,
+    lastSavedHistoryLength: 0
   };
 }
 
@@ -611,6 +697,8 @@ function resetConversation(state) {
   state.sessionUsage.completion_tokens = 0;
   state.sessionUsage.total_tokens = 0;
   state.latestRouting = null;
+  state.transcriptSavedPath = null;
+  state.lastSavedHistoryLength = 0;
 }
 
 function createTuiCommandHandlers(handlers) {
@@ -629,7 +717,8 @@ async function executeCommand({
   state,
   limitsByModel,
   mode = "plain",
-  handlers = {}
+  handlers = {},
+  onSaveAndSync = saveAndSyncSession
 }) {
   const tuiHandlers = createTuiCommandHandlers(handlers);
 
@@ -644,6 +733,70 @@ async function executeCommand({
 
   if (line === "/exit") {
     return { handled: true, exit: true };
+  }
+
+  if (line === "/save") {
+    const result = await onSaveAndSync(state, { reason: "chat-manual-save" });
+    const transcriptMessage = result.saveResult.path
+      ? `[chat] transcript saved: ${result.saveResult.path}`
+      : "[chat] nothing to save";
+    if (mode === "plain") {
+      console.log(transcriptMessage);
+      console.log(result.summary);
+    } else {
+      tuiHandlers.message(transcriptMessage);
+      tuiHandlers.message(result.summary);
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line === "/sync") {
+    const result = await onSaveAndSync(state, { reason: "chat-manual-sync" });
+    const transcriptMessage = result.saveResult.path
+      ? `[chat] transcript saved: ${result.saveResult.path}`
+      : "[chat] transcript already up to date";
+    if (mode === "plain") {
+      console.log(transcriptMessage);
+      console.log(result.summary);
+    } else {
+      tuiHandlers.message(transcriptMessage);
+      tuiHandlers.message(result.summary);
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line.startsWith("/sync ")) {
+    const subcommand = line.slice(6).trim().toLowerCase();
+    const notesArgs =
+      subcommand === "status"
+        ? ["status"]
+        : subcommand === "conflicts"
+          ? ["sync-conflicts"]
+          : null;
+    if (!notesArgs) {
+      const usage = "usage: /sync | /sync status | /sync conflicts";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const result = runNotesAutomationCommand(notesArgs);
+    const summary = formatSyncFeedback(result);
+    if (mode === "plain") {
+      console.log(summary);
+      if (result.output) {
+        console.log(result.output);
+      }
+    } else {
+      tuiHandlers.message(summary);
+      if (result.output) {
+        tuiHandlers.panel("sync", result.output.split("\n"));
+      }
+    }
+    return { handled: true, exit: false };
   }
 
   if (line === "/clear") {
@@ -927,12 +1080,85 @@ async function runPlainRepl({ systemPrompt }) {
   const state = createReplState({ systemPrompt });
   const statusRenderer = createStatusRenderer();
   const limitsByModel = readLiteLLMLimits();
+  const idleSyncMs = Number.isFinite(DEFAULT_IDLE_SYNC_MS) ? Math.max(DEFAULT_IDLE_SYNC_MS, 5000) : 30_000;
+  let nextIdleSyncAt = null;
+  let closing = false;
+
+  const summarizeSaveAndSync = (result) => {
+    if (result.saveResult.path && result.saveResult.saved) {
+      console.log(`[chat] transcript saved: ${result.saveResult.path}`);
+    } else if (result.saveResult.path) {
+      console.log("[chat] transcript already up to date");
+    } else {
+      console.log("[chat] nothing to save");
+    }
+    console.log(result.summary);
+  };
+
+  const saveAndSyncFor = async (reason) => {
+    const result = await saveAndSyncSession(state, { reason });
+    summarizeSaveAndSync(result);
+    return result;
+  };
+
+  const handleSignal = (signalName) => {
+    if (closing) return;
+    closing = true;
+    void (async () => {
+      try {
+        await saveAndSyncFor(`chat-signal-${signalName.toLowerCase()}`);
+      } catch (error) {
+        console.error(`[chat] signal cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        process.exit(0);
+      }
+    })();
+  };
+
+  const signalHandlers = {
+    SIGINT: () => handleSignal("SIGINT"),
+    SIGTERM: () => handleSignal("SIGTERM"),
+    SIGHUP: () => handleSignal("SIGHUP")
+  };
+  for (const [signal, handler] of Object.entries(signalHandlers)) {
+    process.on(signal, handler);
+  }
+
+  const questionWithIdleSync = async () => {
+    if (!nextIdleSyncAt) {
+      const line = await rl.question("you> ");
+      return { line, idle: false };
+    }
+
+    const timeoutMs = Math.max(nextIdleSyncAt - Date.now(), 1);
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
+    try {
+      const line = await rl.question("you> ", { signal: abortController.signal });
+      clearTimeout(timer);
+      return { line, idle: false };
+    } catch (error) {
+      clearTimeout(timer);
+      if (error?.name === "AbortError" || /aborted/i.test(String(error?.message || error))) {
+        return { line: "", idle: true };
+      }
+      throw error;
+    }
+  };
 
   console.log("massa-vault chat started. type /help for commands.");
 
   try {
     while (true) {
-      const line = (await rl.question("you> ")).trim();
+      const promptResult = await questionWithIdleSync();
+      if (promptResult.idle) {
+        nextIdleSyncAt = null;
+        await saveAndSyncFor("chat-idle-sync");
+        continue;
+      }
+
+      const line = promptResult.line.trim();
+      nextIdleSyncAt = null;
       if (!line) continue;
 
       const commandResult = await executeCommand({
@@ -943,22 +1169,15 @@ async function runPlainRepl({ systemPrompt }) {
       });
       if (commandResult.handled) {
         if (commandResult.exit) {
-          state.transcriptSavedPath = await saveTranscript({
-            sessionId: state.sessionId,
-            sessionStartedAt: state.sessionStartedAt,
-            history: state.history,
-            latestRouting: state.latestRouting,
-            sessionUsage: state.sessionUsage
-          });
-          if (state.transcriptSavedPath) {
-            console.log(`[chat] transcript saved: ${state.transcriptSavedPath}`);
-          }
+          await saveAndSyncFor("chat-exit");
+          closing = true;
           break;
         }
         continue;
       }
 
       try {
+        state.transcriptSavedPath = null;
         const result = await processPrompt({
           prompt: line,
           history: state.history,
@@ -968,23 +1187,18 @@ async function runPlainRepl({ systemPrompt }) {
           statusRenderer
         });
         state.latestRouting = result.routing;
+        nextIdleSyncAt = Date.now() + idleSyncMs;
       } catch (error) {
         output.write("\n");
         console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   } finally {
-    if (!state.transcriptSavedPath && state.history.length) {
-      state.transcriptSavedPath = await saveTranscript({
-        sessionId: state.sessionId,
-        sessionStartedAt: state.sessionStartedAt,
-        history: state.history,
-        latestRouting: state.latestRouting,
-        sessionUsage: state.sessionUsage
-      });
-      if (state.transcriptSavedPath) {
-        console.log(`[chat] transcript saved: ${state.transcriptSavedPath}`);
-      }
+    for (const [signal, handler] of Object.entries(signalHandlers)) {
+      process.off(signal, handler);
+    }
+    if (!closing && state.history.length) {
+      await saveAndSyncFor("chat-finalize");
     }
     statusRenderer.clear();
     rl.close();
@@ -1125,6 +1339,7 @@ export {
   runOneShot,
   runPlainRepl,
   runRepl,
+  saveAndSyncSession,
   saveTranscript
 };
 

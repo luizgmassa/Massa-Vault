@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
 
 const REQUIRED_GDRIVE_EXCLUDES = [
   ".git/**",
   ".obsidian/workspace.json",
-  ".automation/**",
-  ".logs/**"
+  ".logs/**",
+  ...PROTECTED_ARTIFACT_GLOBS
 ];
 
 function runCommand(binary, args, run = execFileSync) {
@@ -139,6 +140,55 @@ function normalizeGdriveArgs(args = []) {
   return normalized;
 }
 
+function detectBisyncFailureType(output) {
+  const text = String(output || "").toLowerCase();
+  if (!text) return { conflict: false, unsafeFailure: false };
+  const conflict = /\bconflict\b|\bbisync aborted\b|\bmerge\b/.test(text);
+  const unsafeFailure =
+    conflict ||
+    /\bcritical\b|\brefusing\b|\bunsafe\b|\bmanual intervention\b|\bpanic\b/.test(text);
+  return { conflict, unsafeFailure };
+}
+
+function resolveSyncCommand(mode) {
+  const normalized = String(mode || "bisync").toLowerCase();
+  if (normalized !== "bisync") {
+    return {
+      ok: false,
+      error:
+        `Unsupported gdrive_mode "${normalized}". Google Drive sync requires "bisync" for safe two-way convergence.`
+    };
+  }
+  return { ok: true, command: "bisync" };
+}
+
+export function cleanupGoogleDriveProtectedArtifacts(
+  gdriveConfig,
+  { run = execFileSync, dryRun = false } = {}
+) {
+  const includeArgs = [];
+  for (const pattern of PROTECTED_ARTIFACT_GLOBS) {
+    includeArgs.push("--include", pattern);
+  }
+
+  const args = ["delete", gdriveConfig.remotePath, ...includeArgs, "--rmdirs"];
+  if (dryRun) {
+    args.push("--dry-run");
+  }
+
+  try {
+    const output = runCommand(gdriveConfig.binary, args, run);
+    return { ok: true, args, output, dryRun };
+  } catch (error) {
+    return {
+      ok: false,
+      args,
+      dryRun,
+      error: String(error?.stderr || error?.message || error)
+    };
+  }
+}
+
 export function prepareGoogleDriveSync(
   vaultPath,
   gdriveConfig,
@@ -161,10 +211,11 @@ export function prepareGoogleDriveSync(
     return { ok: false, error: pathValidation.error };
   }
 
-  const mode = String(gdriveConfig.mode || "copy").toLowerCase();
-  let command = "copy";
-  if (mode === "sync") command = "sync";
-  if (mode === "bisync") command = "bisync";
+  const syncCommand = resolveSyncCommand(gdriveConfig.mode);
+  if (!syncCommand.ok) {
+    return { ok: false, error: syncCommand.error };
+  }
+  const command = syncCommand.command;
 
   const args = [
     command,
@@ -203,6 +254,11 @@ export function checkGoogleDriveRemote(
   gdriveConfig,
   { run = execFileSync, availableRemotes } = {}
 ) {
+  const syncCommand = resolveSyncCommand(gdriveConfig.mode);
+  if (!syncCommand.ok) {
+    return { ok: false, error: syncCommand.error };
+  }
+
   let remotes = [];
   try {
     remotes = Array.isArray(availableRemotes)
@@ -245,7 +301,8 @@ export function syncToGoogleDrive(
     run = execFileSync,
     availableRemotes,
     dryRun = false,
-    forceResync = false
+    forceResync = false,
+    cleanupProtected = false
   } = {}
 ) {
   if (!gdriveConfig.enabled) {
@@ -260,6 +317,20 @@ export function syncToGoogleDrive(
   });
   if (!prepared.ok) {
     return { ok: false, error: prepared.error };
+  }
+
+  let cleanup = null;
+  if (cleanupProtected) {
+    cleanup = cleanupGoogleDriveProtectedArtifacts(gdriveConfig, { run, dryRun });
+    if (!cleanup.ok) {
+      return {
+        ok: false,
+        error: cleanup.error,
+        command: "delete",
+        args: cleanup.args,
+        dryRun
+      };
+    }
   }
 
   try {
@@ -277,15 +348,21 @@ export function syncToGoogleDrive(
       command: prepared.command,
       args: prepared.args,
       resyncApplied: prepared.resyncApplied,
+      cleanup,
       dryRun
     };
   } catch (error) {
+    const details = String(error?.stderr || error?.message || error);
+    const failure = detectBisyncFailureType(details);
     return {
       ok: false,
-      error: String(error?.stderr || error?.message || error),
+      error: details,
       command: prepared.command,
       args: prepared.args,
       resyncApplied: prepared.resyncApplied,
+      cleanup,
+      conflict: failure.conflict,
+      unsafeFailure: failure.unsafeFailure,
       dryRun
     };
   }

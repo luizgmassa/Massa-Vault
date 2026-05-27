@@ -66,3 +66,24 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
     fs.watch = originalWatch;
   }
 });
+
+test("runSync serializes concurrent requests and replays queued reason", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
+  const vaultPath = path.join(tempDir, "vault");
+  fs.mkdirSync(vaultPath, { recursive: true });
+  const configPath = createConfig(tempDir, vaultPath);
+  const service = new NotesAutomationService(configPath);
+
+  const reasons = [];
+  service.executeSync = (reason) => {
+    reasons.push(reason);
+    return { ok: true };
+  };
+
+  await Promise.all([
+    service.runSync({ reason: "manual-a" }),
+    service.runSync({ reason: "manual-b" })
+  ]);
+
+  assert.deepEqual(reasons, ["manual-a", "manual-b"]);
+});

@@ -9,7 +9,7 @@ import {
   createStatusState,
   executeCommand,
   processPrompt,
-  saveTranscript
+  saveAndSyncSession
 } from "./cli.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
 import { getUsageLedger } from "./usage.js";
@@ -119,34 +119,19 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
     );
   }, []);
 
-  const persistTranscriptIfNeeded = useCallback(async () => {
-    const state = sessionRef.current;
-    if (state.transcriptSavedPath || !state.history.length) {
-      return state.transcriptSavedPath;
-    }
-
-    state.transcriptSavedPath = await saveTranscript({
-      sessionId: state.sessionId,
-      sessionStartedAt: state.sessionStartedAt,
-      history: state.history,
-      latestRouting: state.latestRouting,
-      sessionUsage: state.sessionUsage
-    });
-    if (state.transcriptSavedPath) {
-      appendMessage("system", `[chat] transcript saved: ${state.transcriptSavedPath}`);
-    }
-    return state.transcriptSavedPath;
-  }, [appendMessage]);
-
   const finalizeExit = useCallback(async () => {
     if (exitingRef.current) return;
     exitingRef.current = true;
     try {
-      await persistTranscriptIfNeeded();
+      const result = await saveAndSyncSession(sessionRef.current, { reason: "chat-exit" });
+      if (result.saveResult.path && result.saveResult.saved) {
+        appendMessage("system", `[chat] transcript saved: ${result.saveResult.path}`);
+      }
+      appendMessage("system", result.summary);
     } finally {
       exit();
     }
-  }, [exit, persistTranscriptIfNeeded]);
+  }, [appendMessage, exit]);
 
   const handleSubmit = useCallback(
     async (value) => {
@@ -179,6 +164,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         appendMessage("user", line);
         const assistantMessageId = createAssistantMessage();
         let streamedAny = false;
+        state.transcriptSavedPath = null;
 
         const result = await processPrompt({
           prompt: line,
@@ -235,6 +221,20 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       void finalizeExit();
     }
   });
+
+  useEffect(() => {
+    const handleSignal = () => {
+      void finalizeExit();
+    };
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGHUP", handleSignal);
+    return () => {
+      process.off("SIGINT", handleSignal);
+      process.off("SIGTERM", handleSignal);
+      process.off("SIGHUP", handleSignal);
+    };
+  }, [finalizeExit]);
 
   useEffect(() => {
     appendMessage("system", "massa-vault chat started. type /help for commands.");

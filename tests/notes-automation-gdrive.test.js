@@ -48,6 +48,28 @@ test("prepareGoogleDriveSync appends required excludes and dry-run flag", () => 
   assert.equal(prepared.args.includes(".obsidian/workspace.json"), true);
   assert.equal(prepared.args.includes(".automation/**"), true);
   assert.equal(prepared.args.includes(".logs/**"), true);
+  assert.equal(prepared.args.includes(".DS_Store"), true);
+  assert.equal(prepared.args.includes("**/.DS_Store"), true);
+});
+
+test("prepareGoogleDriveSync rejects one-way modes", () => {
+  const prepared = prepareGoogleDriveSync(
+    "/tmp/vault",
+    {
+      enabled: true,
+      binary: "rclone",
+      remotePath: "Personal:Obsidian",
+      mode: "copy",
+      firstRunResync: false,
+      args: []
+    },
+    {
+      availableRemotes: ["Personal"]
+    }
+  );
+
+  assert.equal(prepared.ok, false);
+  assert.match(prepared.error, /requires "bisync"/i);
 });
 
 test("checkGoogleDriveRemote validates using rclone lsd", () => {
