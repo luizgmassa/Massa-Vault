@@ -5,6 +5,7 @@
 .automation/
 .logs/
 config/*.local.json
+node_modules/
 
 # local runtime secrets
 .litellm/litellm.local.env
