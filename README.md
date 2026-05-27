@@ -99,6 +99,9 @@ Chat defaults:
 - usage/search state: `.automation/llm-chat-cli/*`
 - search embeddings: Ollama `/api/embed` using `embeddinggemma` (override by env)
 - auth: `LITELLM_MASTER_KEY` from `.env` is sent as `Authorization: Bearer ...` when present
+- auto vault context: enabled by default (`MASSA_VAULT_CHAT_RAG=off` disables auto retrieval)
+- `/config` includes `vault_context` mode (`auto` or `disabled`)
+- vault context modes: semantic note chunks for content questions, manifest file lists for vault listing questions
 
 ### `install`
 

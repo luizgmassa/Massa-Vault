@@ -200,6 +200,9 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
           onRouting: (routing) => {
             state.latestRouting = routing;
             refreshFooter(routing);
+          },
+          onWarning: (message) => {
+            appendMessage("system", message);
           }
         });
 

@@ -286,7 +286,8 @@ export async function searchIndex({
   query,
   baseUrl = DEFAULT_OLLAMA_BASE_URL,
   model = DEFAULT_EMBED_MODEL,
-  limit = 8
+  limit = 8,
+  includeText = false
 }) {
   const value = String(query || "").trim();
   if (!value) return [];
@@ -308,7 +309,8 @@ export async function searchIndex({
       filePath: item.relativePath,
       chunkIndex: item.chunkIndex,
       score,
-      snippet: extractSnippet(item.text, value)
+      snippet: extractSnippet(item.text, value),
+      ...(includeText ? { text: item.text } : {})
     });
   }
 

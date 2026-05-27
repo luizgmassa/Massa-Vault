@@ -24,6 +24,10 @@ loadLocalEnv();
 const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT || 4100}`;
 const DEFAULT_GATEWAY_MODEL = "smart-router";
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
+const DEFAULT_RAG_CHUNK_LIMIT = 5;
+const DEFAULT_RAG_MAX_CHARS = 6000;
+const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
+const VAULT_CONTEXT_MODES = ["semantic", "manifest"];
 
 function parseArguments(argv) {
   const args = [...argv];
@@ -52,6 +56,14 @@ function warnIfAuthMissing(apiKey) {
   console.error(
     "[chat] warning: LITELLM_MASTER_KEY is empty. Requests may fail with 401 if gateway auth is enabled."
   );
+}
+
+function isVaultContextEnabled(env = process.env) {
+  const raw = String(env.MASSA_VAULT_CHAT_RAG || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return true;
+  return !RAG_DISABLED_VALUES.has(raw);
 }
 
 function asUsage(usage) {
@@ -172,6 +184,296 @@ function printUsageSummary({
 function resolveVaultPath() {
   const config = loadConfig(DEFAULT_CONFIG_PATH);
   return config.vaultPath;
+}
+
+function normalizeSourcePath(filePath) {
+  const raw = String(filePath || "").trim();
+  if (!raw) return "";
+  const normalized = raw.replace(/\\/g, "/");
+  if (path.isAbsolute(raw) || /^[A-Za-z]:\//.test(normalized)) {
+    return path.basename(normalized);
+  }
+  return normalized.replace(/^\.\//, "");
+}
+
+function emptyVaultMetadata(mode) {
+  return {
+    source: "obsidian",
+    mode,
+    retrieved_chunks: 0,
+    retrieved_files: 0,
+    context_length: 0,
+    truncated: false,
+    sources: []
+  };
+}
+
+function classifyVaultContextIntent(prompt) {
+  const text = String(prompt || "").toLowerCase();
+  const hasManifestIntent =
+    /\b(what|which|show|list|display)\b[^?!.]*(files|notes|folders|directories)\b/.test(text) ||
+    /\b(files|notes|folders|directories)\b[^?!.]*\b(in|inside|under)\b[^?!.]*\bvault\b/.test(text) ||
+    /\b(vault structure|folder structure|file list|note list)\b/.test(text);
+  if (!hasManifestIntent) return "semantic";
+
+  const hasSemanticIntent =
+    /\b(about|contain|contains|mention|mentions|summarize|summary|explain|related|topic|search|find)\b/.test(
+      text
+    ) || /\b(files|notes)\b[^?!.]*\babout\b/.test(text);
+  return hasSemanticIntent ? "hybrid" : "manifest";
+}
+
+function buildVaultAccessContract() {
+  return [
+    "Vault access contract:",
+    "- The massa-vault CLI retrieved the Obsidian vault context below with the user's permission.",
+    "- Treat this context as user-provided data for this request.",
+    "- When vault context or a manifest is present, do not claim you cannot access the user's files.",
+    "- You can answer only from the injected vault context and manifest, not arbitrary filesystem state."
+  ].join("\n");
+}
+
+function getIndexFilePaths(indexData) {
+  const paths = new Set();
+  if (indexData?.snapshot && typeof indexData.snapshot === "object") {
+    for (const filePath of Object.keys(indexData.snapshot)) {
+      const normalized = normalizeSourcePath(filePath);
+      if (normalized) paths.add(normalized);
+    }
+  }
+  if (Array.isArray(indexData?.items)) {
+    for (const item of indexData.items) {
+      const normalized = normalizeSourcePath(item?.relativePath);
+      if (normalized) paths.add(normalized);
+    }
+  }
+  return [...paths].sort((a, b) => a.localeCompare(b));
+}
+
+function asVaultMessages(message) {
+  const content = String(message || "").trim();
+  if (!content) return [{ role: "system", content: buildVaultAccessContract() }];
+  return [
+    { role: "system", content: buildVaultAccessContract() },
+    { role: "system", content }
+  ];
+}
+
+function buildVaultManifestPayload(filePaths, { maxChars = DEFAULT_RAG_MAX_CHARS } = {}) {
+  const paths = Array.isArray(filePaths) ? filePaths.map(normalizeSourcePath).filter(Boolean) : [];
+  const uniquePaths = [...new Set(paths)].sort((a, b) => a.localeCompare(b));
+  const intro = "Obsidian vault manifest (relative paths):";
+  let message = intro;
+  const sources = [];
+  let truncated = false;
+
+  if (!uniquePaths.length) {
+    message += "\n[no markdown files found]";
+    return {
+      message,
+      metadata: {
+        ...emptyVaultMetadata("manifest"),
+        context_length: message.length
+      }
+    };
+  }
+
+  for (const filePath of uniquePaths) {
+    const line = `\n- ${filePath}`;
+    if (message.length + line.length > maxChars) {
+      truncated = true;
+      break;
+    }
+    message += line;
+    sources.push({ type: "file", path: filePath });
+  }
+
+  if (truncated) {
+    const remaining = uniquePaths.length - sources.length;
+    const suffix = `\n[manifest truncated: ${remaining} more file(s) omitted]`;
+    if (message.length + suffix.length <= maxChars) {
+      message += suffix;
+    }
+  }
+
+  return {
+    message,
+    metadata: {
+      source: "obsidian",
+      mode: "manifest",
+      retrieved_chunks: 0,
+      retrieved_files: sources.length,
+      total_files: uniquePaths.length,
+      context_length: message.length,
+      truncated,
+      sources
+    }
+  };
+}
+
+function buildVaultContextPayload(
+  results,
+  { maxChars = DEFAULT_RAG_MAX_CHARS, mode = "semantic" } = {}
+) {
+  const items = Array.isArray(results) ? results : [];
+  if (!items.length) {
+    return {
+      message: "No relevant Obsidian vault chunks were retrieved for this prompt.",
+      metadata: emptyVaultMetadata(mode)
+    };
+  }
+
+  const intro = "Relevant Obsidian vault context:";
+  let message = intro;
+  const sources = [];
+  let truncated = false;
+
+  for (const item of items) {
+    const sourcePath = normalizeSourcePath(item?.filePath);
+    const chunkText = String(item?.text || item?.snippet || "").trim();
+    if (!sourcePath || !chunkText) continue;
+
+    const chunkIndex = Number.isFinite(Number(item?.chunkIndex)) ? Number(item.chunkIndex) : 0;
+    const score = Number.isFinite(Number(item?.score)) ? Number(item.score.toFixed(4)) : 0;
+    const block = `[source ${sources.length + 1}] ${sourcePath}#${chunkIndex}\n${chunkText}`;
+    const separator = "\n\n";
+    const remainingChars = maxChars - message.length - separator.length;
+    if (remainingChars <= 0) {
+      truncated = true;
+      break;
+    }
+
+    if (block.length > remainingChars) {
+      if (remainingChars < 32) break;
+      message += `${separator}${block.slice(0, remainingChars).trimEnd()}`;
+      sources.push({
+        type: "chunk",
+        path: sourcePath,
+        chunk_index: chunkIndex,
+        score
+      });
+      truncated = true;
+      break;
+    }
+
+    message += `${separator}${block}`;
+    sources.push({
+      type: "chunk",
+      path: sourcePath,
+      chunk_index: chunkIndex,
+      score
+    });
+  }
+
+  if (!sources.length) {
+    return {
+      message: "No relevant Obsidian vault chunks were retrieved for this prompt.",
+      metadata: emptyVaultMetadata(mode)
+    };
+  }
+
+  return {
+    message,
+    metadata: {
+      source: "obsidian",
+      mode,
+      retrieved_chunks: sources.length,
+      retrieved_files: new Set(sources.map((source) => source.path)).size,
+      context_length: message.length,
+      truncated,
+      sources
+    }
+  };
+}
+
+function combineVaultPayloads(manifestPayload, semanticPayload, { maxChars = DEFAULT_RAG_MAX_CHARS } = {}) {
+  const parts = [manifestPayload.message, semanticPayload.message].filter(Boolean);
+  let message = parts.join("\n\n");
+  let truncated = Boolean(manifestPayload.metadata.truncated || semanticPayload.metadata.truncated);
+
+  if (message.length > maxChars) {
+    message = message.slice(0, maxChars).trimEnd();
+    truncated = true;
+  }
+
+  const sources = [
+    ...(manifestPayload.metadata.sources || []),
+    ...(semanticPayload.metadata.sources || [])
+  ];
+
+  return {
+    message,
+    metadata: {
+      source: "obsidian",
+      mode: "hybrid",
+      retrieved_chunks: semanticPayload.metadata.retrieved_chunks,
+      retrieved_files: manifestPayload.metadata.retrieved_files,
+      total_files: manifestPayload.metadata.total_files,
+      context_length: message.length,
+      truncated,
+      sources
+    }
+  };
+}
+
+async function buildVaultContext({
+  prompt,
+  limit = DEFAULT_RAG_CHUNK_LIMIT,
+  maxChars = DEFAULT_RAG_MAX_CHARS
+}) {
+  const query = String(prompt || "").trim();
+  if (!query) {
+    return {
+      message: "",
+      messages: asVaultMessages(""),
+      metadata: emptyVaultMetadata("semantic")
+    };
+  }
+
+  const config = loadConfig(DEFAULT_CONFIG_PATH);
+  const defaults = getSearchDefaults();
+  const { index } = await ensureSearchIndex({
+    vaultPath: config.vaultPath,
+    ignoreGlobs: config.ignoreGlobs || [],
+    baseUrl: defaults.baseUrl,
+    model: defaults.model
+  });
+  const mode = classifyVaultContextIntent(query);
+  const filePaths = getIndexFilePaths(index);
+
+  if (mode === "manifest") {
+    const payload = buildVaultManifestPayload(filePaths, { maxChars });
+    return {
+      ...payload,
+      messages: asVaultMessages(payload.message)
+    };
+  }
+
+  const results = await searchIndex({
+    indexData: index,
+    query,
+    baseUrl: defaults.baseUrl,
+    model: defaults.model,
+    limit,
+    includeText: true
+  });
+  const semanticPayload = buildVaultContextPayload(results, { maxChars, mode });
+
+  if (mode === "hybrid") {
+    const manifestPayload = buildVaultManifestPayload(filePaths, {
+      maxChars: Math.min(Math.floor(maxChars / 2), 2500)
+    });
+    const payload = combineVaultPayloads(manifestPayload, semanticPayload, { maxChars });
+    return {
+      ...payload,
+      messages: asVaultMessages(payload.message)
+    };
+  }
+
+  return {
+    ...semanticPayload,
+    messages: asVaultMessages(semanticPayload.message)
+  };
 }
 
 async function runSearch({ query }) {
@@ -379,7 +681,9 @@ async function executeCommand({
     const lines = [
       `gateway_url: ${gateway.gatewayUrl}`,
       `system_prompt: ${state.activeSystemPrompt ? "configured" : "empty"}`,
-      `auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`
+      `auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`,
+      `vault_context: ${isVaultContextEnabled() ? "auto" : "disabled"}`,
+      `vault_context_modes: ${VAULT_CONTEXT_MODES.join(", ")}`
     ];
     if (mode === "plain") {
       for (const nextLine of lines) {
@@ -461,19 +765,55 @@ async function processPrompt({
   estimatedTokensRef,
   statusRenderer,
   chatCompletion = streamChatCompletion,
+  vaultContextBuilder = buildVaultContext,
   outputStream = output,
   renderMode = "plain",
   onThinkingChange,
   onAssistantDelta,
   onUsage,
-  onRouting
+  onRouting,
+  onWarning
 }) {
   const gateway = buildGatewayOptions();
+  const emitWarning = (message) => {
+    if (renderMode === "plain") {
+      console.error(message);
+    }
+    onWarning?.(message);
+  };
+
+  let vaultContext = null;
+  if (isVaultContextEnabled()) {
+    try {
+      vaultContext = await vaultContextBuilder({ prompt });
+    } catch (error) {
+      emitWarning(
+        `[chat] warning: vault context unavailable (${error instanceof Error ? error.message : String(error)}). continuing without context.`
+      );
+    }
+  }
+
   const userMessage = { role: "user", content: prompt };
   const estimatedStart = estimatedTokensRef.value;
   const estimatedPromptTokens = estimateTokensFromText(prompt);
   history.push(userMessage);
   estimatedTokensRef.value += estimatedPromptTokens;
+
+  const requestMessages = buildMessages(history, systemPrompt);
+  const vaultMessages = Array.isArray(vaultContext?.messages)
+    ? vaultContext.messages
+    : vaultContext?.message
+      ? [{ role: "system", content: vaultContext.message }]
+      : [];
+  const normalizedVaultMessages = vaultMessages
+    .map((message) => ({
+      role: message?.role || "system",
+      content: String(message?.content || "").trim()
+    }))
+    .filter((message) => message.content);
+  if (normalizedVaultMessages.length && requestMessages.length) {
+    requestMessages.splice(requestMessages.length - 1, 0, ...normalizedVaultMessages);
+  }
 
   let routing = null;
   let usage = null;
@@ -499,7 +839,8 @@ async function processPrompt({
       model: DEFAULT_GATEWAY_MODEL,
       stream: true,
       stream_options: { include_usage: true },
-      messages: buildMessages(history, systemPrompt)
+      messages: requestMessages,
+      ...(vaultContext?.metadata ? { context: vaultContext.metadata } : {})
     },
     onRouting: (metadata) => {
       routing = metadata;
@@ -761,7 +1102,12 @@ async function main() {
 
 export {
   DEFAULT_GATEWAY_MODEL,
+  buildVaultAccessContract,
+  buildVaultContext,
+  buildVaultContextPayload,
+  buildVaultManifestPayload,
   buildGatewayOptions,
+  classifyVaultContextIntent,
   createReplState,
   createStatusLine,
   createStatusRenderer,
@@ -772,6 +1118,7 @@ export {
   formatUsagePanel,
   getHelpLines,
   isInteractiveTuiSupported,
+  isVaultContextEnabled,
   main,
   processPrompt,
   resetConversation,
