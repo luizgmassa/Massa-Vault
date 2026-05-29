@@ -145,3 +145,40 @@ test("sync-resolve --done clears paused/conflict state in oneshot mode", () => {
     assert.deepEqual(state.sync.conflicts, []);
   });
 });
+
+test("sync-conflicts payload includes gdrive import classification and review guidance fields", () => {
+  withTempDir((tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      paused: false,
+      sync: {
+        status: "idle",
+        conflictCount: 0,
+        conflicts: [],
+        lastGDriveImportClassification: "suspicious",
+        lastGDriveImportSummary: {
+          changedCount: 22,
+          addedCount: 6,
+          modifiedCount: 11,
+          deletedCount: 5
+        },
+        reviewNeeded: true,
+        lastPreGDriveSnapshotCommit: "abc123",
+        preGDriveSnapshotSkipped: null
+      }
+    });
+
+    const result = runNotesCli(["sync-conflicts"], tempDir);
+    assert.equal(result.status, 0);
+    assert.equal(result.stderr, "");
+
+    const payload = parseJson(result.stdout);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.sync.gdrive_import, "suspicious");
+    assert.equal(payload.sync.gdriveImport, "suspicious");
+    assert.equal(payload.sync.reviewNeeded, true);
+    assert.equal(payload.sync.gdriveImportSummary.changedCount, 22);
+    assert.equal(payload.sync.lastPreGDriveSnapshotCommit, "abc123");
+    assert.match(String(payload.sync.nextAction || ""), /review/i);
+  });
+});

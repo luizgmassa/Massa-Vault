@@ -487,7 +487,15 @@ test("executeCommand /sync status includes auto-resync attempt metadata", async 
           sync: {
             status: "paused",
             conflictCount: 0,
-            lastError: "gdrive still failing"
+            lastError: "gdrive still failing",
+            lastGDriveImportClassification: "suspicious",
+            lastGDriveImportSummary: {
+              changedCount: 21,
+              addedCount: 5,
+              modifiedCount: 11,
+              deletedCount: 5
+            },
+            reviewNeeded: true
           },
           lastGDriveAutoResyncAttempted: true,
           lastGDriveAutoResyncApplied: false,
@@ -517,5 +525,8 @@ test("executeCommand /sync status includes auto-resync attempt metadata", async 
     assert.equal(panels.length, 1);
     assert.match(messages.join("\n"), /auto_resync=attempted/i);
     assert.match(messages.join("\n"), /mode=newer/i);
+    assert.match(messages.join("\n"), /gdrive_import=suspicious/i);
+    assert.match(messages.join("\n"), /changed=21/i);
+    assert.match(messages.join("\n"), /next_action=/i);
   });
 });

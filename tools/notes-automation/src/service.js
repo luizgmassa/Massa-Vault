@@ -14,6 +14,9 @@ import {
   gitInit,
   gitListConflictedFiles,
   gitListTracked,
+  gitRevParse,
+  gitTrackedFiles,
+  gitWorkingTreeChanges,
   gitPush,
   gitPullRebase,
   gitReadStageFile,
@@ -82,6 +85,11 @@ function createSyncState(overrides = {}) {
     lastError: null,
     conflictCount: 0,
     conflicts: [],
+    lastGDriveImportClassification: null,
+    lastGDriveImportSummary: null,
+    lastPreGDriveSnapshotCommit: null,
+    preGDriveSnapshotSkipped: null,
+    reviewNeeded: false,
     ...overrides
   };
 }
@@ -376,26 +384,52 @@ export class NotesAutomationService {
       if (!relPath || isProtectedArtifactPath(relPath)) continue;
       gitAdd(relPath, this.vaultPath);
     }
-    this.commitStagedChanges(label);
+    return this.commitStagedChanges(label);
   }
 
   commitAllChanges(label) {
     if (!this.config.git.enabled) return;
     if (!this.ensureVaultGitRepo()) return;
     gitAddAll(this.vaultPath);
-    this.commitStagedChanges(label);
+    return this.commitStagedChanges(label);
+  }
+
+  commitAllChangesWithSubject(subject, extraBody = []) {
+    if (!this.config.git.enabled) return { committed: false, staged: [] };
+    if (!this.ensureVaultGitRepo()) return { committed: false, staged: [], error: "git repo not ready" };
+    gitAddAll(this.vaultPath);
+    return this.commitStagedWithSubject(subject, { extraBody });
   }
 
   commitStagedChanges(label) {
     const staged = gitCachedNames(this.vaultPath);
-    if (!staged.length) return;
     const subject = `notes(sync): ${label}`;
-    const body = [`source=notes-automation`, `files=${staged.slice(0, 10).join(", ")}`];
+    return this.commitStagedWithSubject(subject);
+  }
+
+  commitStagedWithSubject(subject, { extraBody = [] } = {}) {
+    const staged = gitCachedNames(this.vaultPath);
+    if (!staged.length) return { committed: false, staged: [] };
+    const body = [
+      "source=notes-automation",
+      `files=${staged.slice(0, 10).join(", ")}`,
+      ...extraBody.filter(Boolean)
+    ];
     gitCommit(subject, body, this.vaultPath);
+    let commitHash = null;
+    try {
+      commitHash = gitRevParse("HEAD", this.vaultPath);
+    } catch {}
     this.updateState({
       lastCommitAt: new Date().toISOString(),
-      lastCommitFiles: staged
+      lastCommitFiles: staged,
+      lastCommitHash: commitHash
     });
+    return {
+      committed: true,
+      staged,
+      commitHash
+    };
   }
 
   quarantineGitConflicts(errorOutput = "") {
@@ -599,6 +633,362 @@ export class NotesAutomationService {
     return { ok: false, error: result.output };
   }
 
+  isInternalArtifactPath(filePath) {
+    const normalized = normalizeRelativePath(filePath);
+    if (!normalized) return false;
+    if (isProtectedArtifactPath(normalized)) return true;
+    if (normalized === ".obsidian/workspace.json") return true;
+    if (normalized === ".logs" || normalized.startsWith(".logs/")) return true;
+    if (normalized === ".git" || normalized.startsWith(".git/")) return true;
+    return false;
+  }
+
+  collectInternalArtifactPaths() {
+    const entries = new Set();
+    const stack = [this.vaultPath];
+
+    while (stack.length) {
+      const absolutePath = stack.pop();
+      let dirEntries = [];
+      try {
+        dirEntries = fs.readdirSync(absolutePath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of dirEntries) {
+        const absolute = path.join(absolutePath, entry.name);
+        const relative = normalizeRelativePath(path.relative(this.vaultPath, absolute));
+        if (!relative || relative.startsWith("..")) continue;
+
+        if (entry.isDirectory()) {
+          if (relative === ".git") continue;
+          stack.push(absolute);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (!this.isInternalArtifactPath(relative)) continue;
+        entries.add(relative);
+      }
+    }
+
+    return entries;
+  }
+
+  captureGDriveImportBaseline() {
+    const trackedFilesBefore =
+      this.config.git.enabled && this.ensureVaultGitRepo() ? gitTrackedFiles(this.vaultPath).length : 0;
+    return {
+      trackedFilesBefore,
+      internalArtifactPathsBefore: this.collectInternalArtifactPaths()
+    };
+  }
+
+  createPreGDriveSnapshot() {
+    if (!this.config.git.enabled) {
+      this.updateSyncState({
+        lastPreGDriveSnapshotCommit: null,
+        preGDriveSnapshotSkipped: "git-disabled"
+      });
+      return { ok: true, skipped: true, reason: "git-disabled" };
+    }
+    if (!this.ensureVaultGitRepo()) {
+      return { ok: false, error: "git repo not ready" };
+    }
+
+    gitAddAll(this.vaultPath);
+    const staged = gitCachedNames(this.vaultPath).filter((filePath) => !isProtectedArtifactPath(filePath));
+    if (!staged.length) {
+      this.updateSyncState({
+        lastPreGDriveSnapshotCommit: null,
+        preGDriveSnapshotSkipped: "clean"
+      });
+      return { ok: true, skipped: true, reason: "clean" };
+    }
+
+    const snapshotCommit = this.commitStagedWithSubject("backup(sync): snapshot before gdrive import", {
+      extraBody: ["reason=pre-gdrive-import"]
+    });
+    this.updateSyncState({
+      lastPreGDriveSnapshotCommit: snapshotCommit.commitHash || null,
+      preGDriveSnapshotSkipped: null
+    });
+    return {
+      ok: true,
+      skipped: false,
+      commitHash: snapshotCommit.commitHash || null,
+      staged: snapshotCommit.staged || staged
+    };
+  }
+
+  classifyGDriveImport(baseline = {}) {
+    const trackedFilesBefore = Number(baseline.trackedFilesBefore || 0);
+    const internalBefore =
+      baseline.internalArtifactPathsBefore instanceof Set
+        ? baseline.internalArtifactPathsBefore
+        : new Set();
+    const thresholds = this.config.gdriveImport || {
+      suspiciousFileThreshold: 20,
+      suspiciousDeleteThreshold: 5,
+      suspiciousPercentThreshold: 10,
+      dangerousPercentThreshold: 50
+    };
+
+    if (!this.config.git.enabled || !this.ensureVaultGitRepo()) {
+      return {
+        classification: "normal",
+        summary: {
+          changedCount: 0,
+          addedCount: 0,
+          modifiedCount: 0,
+          deletedCount: 0,
+          trackedFilesBefore,
+          trackedFilesExisting: 0,
+          changedPercent: 0,
+          deletedPercent: 0,
+          rootRenameOrDelete: false,
+          vaultNearlyEmpty: false,
+          importedInternalArtifactCount: 0,
+          importedInternalArtifactSample: [],
+          samplePaths: [],
+          reasons: ["git-disabled"]
+        }
+      };
+    }
+
+    const changes = gitWorkingTreeChanges(this.vaultPath)
+      .map((entry) => ({
+        status: String(entry.status || "").toUpperCase().charAt(0) || "M",
+        path: normalizeRelativePath(entry.path),
+        previousPath: entry.previousPath ? normalizeRelativePath(entry.previousPath) : null
+      }))
+      .filter((entry) => entry.path);
+
+    let addedCount = 0;
+    let modifiedCount = 0;
+    let deletedCount = 0;
+    const samplePaths = [];
+    const deletedTopLevel = new Map();
+    const addedTopLevel = new Map();
+
+    const topLevel = (value) => {
+      const normalized = normalizeRelativePath(value);
+      if (!normalized) return "";
+      const index = normalized.indexOf("/");
+      return index >= 0 ? normalized.slice(0, index) : normalized;
+    };
+    const increment = (map, key) => {
+      if (!key) return;
+      map.set(key, Number(map.get(key) || 0) + 1);
+    };
+
+    for (const entry of changes) {
+      if (samplePaths.length < 10) {
+        samplePaths.push(
+          entry.status === "R" && entry.previousPath
+            ? `${entry.previousPath} -> ${entry.path}`
+            : entry.path
+        );
+      }
+
+      if (entry.status === "A") {
+        addedCount += 1;
+        increment(addedTopLevel, topLevel(entry.path));
+        continue;
+      }
+      if (entry.status === "D") {
+        deletedCount += 1;
+        increment(deletedTopLevel, topLevel(entry.path));
+        continue;
+      }
+      if (entry.status === "R") {
+        modifiedCount += 1;
+        increment(addedTopLevel, topLevel(entry.path));
+        increment(deletedTopLevel, topLevel(entry.previousPath || ""));
+        continue;
+      }
+      modifiedCount += 1;
+    }
+
+    const changedCount = changes.length;
+    const trackedFiles = gitTrackedFiles(this.vaultPath);
+    const trackedFilesExisting = trackedFiles.filter((filePath) => {
+      if (isProtectedArtifactPath(filePath)) return false;
+      try {
+        return fs.existsSync(path.join(this.vaultPath, filePath));
+      } catch {
+        return false;
+      }
+    }).length;
+
+    const trackedBaseline = trackedFilesBefore > 0 ? trackedFilesBefore : trackedFiles.length;
+    const changedPercent =
+      trackedBaseline > 0 ? Number(((changedCount / trackedBaseline) * 100).toFixed(2)) : 0;
+    const deletedPercent =
+      trackedBaseline > 0 ? Number(((deletedCount / trackedBaseline) * 100).toFixed(2)) : 0;
+
+    const internalAfter = this.collectInternalArtifactPaths();
+    const importedInternalPaths = [...internalAfter].filter((filePath) => !internalBefore.has(filePath));
+
+    const dominant = (map, total) => {
+      let key = "";
+      let count = 0;
+      for (const [name, value] of map.entries()) {
+        if (value > count) {
+          key = name;
+          count = value;
+        }
+      }
+      return {
+        key,
+        share: total > 0 ? count / total : 0
+      };
+    };
+
+    const deletedDominant = dominant(deletedTopLevel, deletedCount);
+    const addedDominant = dominant(addedTopLevel, addedCount);
+    const renameAcrossTopLevel = changes.some((entry) => {
+      if (entry.status !== "R" || !entry.previousPath) return false;
+      const from = topLevel(entry.previousPath);
+      const to = topLevel(entry.path);
+      return Boolean(from && to && from !== to);
+    });
+    const rootRenameOrDelete =
+      renameAcrossTopLevel ||
+      (deletedCount >= thresholds.suspiciousDeleteThreshold &&
+        addedCount >= thresholds.suspiciousDeleteThreshold &&
+        deletedDominant.share >= 0.8 &&
+        addedDominant.share >= 0.8 &&
+        deletedDominant.key &&
+        addedDominant.key &&
+        deletedDominant.key !== addedDominant.key);
+
+    const vaultNearlyEmpty =
+      trackedBaseline > 0 &&
+      trackedFilesExisting <= Math.max(1, Math.floor(trackedBaseline * 0.1));
+    const protectedArtifactChanged =
+      importedInternalPaths.length > 0 ||
+      changes.some(
+        (entry) =>
+          this.isInternalArtifactPath(entry.path) ||
+          (entry.previousPath ? this.isInternalArtifactPath(entry.previousPath) : false)
+      );
+    const dangerous =
+      protectedArtifactChanged ||
+      changedPercent >= thresholds.dangerousPercentThreshold ||
+      deletedPercent >= thresholds.dangerousPercentThreshold ||
+      vaultNearlyEmpty;
+    const suspicious =
+      !dangerous &&
+      (changedCount >= thresholds.suspiciousFileThreshold ||
+        deletedCount >= thresholds.suspiciousDeleteThreshold ||
+        changedPercent >= thresholds.suspiciousPercentThreshold ||
+        rootRenameOrDelete);
+
+    let classification = "normal";
+    if (dangerous) classification = "dangerous";
+    else if (suspicious) classification = "suspicious";
+
+    const reasons = [];
+    if (protectedArtifactChanged) reasons.push("internal_artifact_imported");
+    if (changedPercent >= thresholds.dangerousPercentThreshold)
+      reasons.push("changed_percent_above_dangerous");
+    if (deletedPercent >= thresholds.dangerousPercentThreshold)
+      reasons.push("deleted_percent_above_dangerous");
+    if (vaultNearlyEmpty) reasons.push("vault_nearly_empty");
+    if (changedCount >= thresholds.suspiciousFileThreshold)
+      reasons.push("changed_count_above_suspicious");
+    if (deletedCount >= thresholds.suspiciousDeleteThreshold)
+      reasons.push("delete_count_above_suspicious");
+    if (changedPercent >= thresholds.suspiciousPercentThreshold)
+      reasons.push("changed_percent_above_suspicious");
+    if (rootRenameOrDelete) reasons.push("root_rename_or_delete_pattern");
+
+    return {
+      classification,
+      summary: {
+        changedCount,
+        addedCount,
+        modifiedCount,
+        deletedCount,
+        trackedFilesBefore: trackedBaseline,
+        trackedFilesExisting,
+        changedPercent,
+        deletedPercent,
+        rootRenameOrDelete,
+        vaultNearlyEmpty,
+        importedInternalArtifactCount: importedInternalPaths.length,
+        importedInternalArtifactSample: importedInternalPaths.slice(0, 10),
+        samplePaths,
+        reasons
+      }
+    };
+  }
+
+  handleSuccessfulGDriveImport(reason, baseline = {}) {
+    this.enforceProtectedArtifacts();
+    const evaluation = this.classifyGDriveImport(baseline);
+    const classification = evaluation.classification;
+    const summary = evaluation.summary;
+    const reviewNeeded = classification === "suspicious" || classification === "dangerous";
+
+    this.updateSyncState({
+      lastGDriveImportClassification: classification,
+      lastGDriveImportSummary: summary,
+      reviewNeeded
+    });
+
+    if (!this.config.git.enabled) {
+      return { ok: true, classification, summary, skipped: true };
+    }
+
+    const subjectByClass = {
+      normal: "sync(gdrive): import live-storage changes",
+      suspicious: "sync(gdrive): suspicious live-storage import",
+      dangerous: "sync(gdrive): dangerous import held for review"
+    };
+    const subject = subjectByClass[classification] || subjectByClass.normal;
+    const commit = this.commitAllChangesWithSubject(subject, [
+      `reason=${reason}`,
+      `classification=${classification}`,
+      `changed=${summary.changedCount}`,
+      `added=${summary.addedCount}`,
+      `modified=${summary.modifiedCount}`,
+      `deleted=${summary.deletedCount}`
+    ]);
+    if (commit.error) {
+      return { ok: false, classification, summary, error: commit.error };
+    }
+
+    if (classification === "dangerous") {
+      const error = "dangerous gdrive import held for review (post-import push skipped)";
+      this.paused = true;
+      this.updateSyncState({
+        status: "paused",
+        reviewNeeded: true,
+        lastError: summarizeCommandOutput(error)
+      });
+      this.updateState({
+        paused: true,
+        alert:
+          "Sync paused: dangerous Google Drive import detected. Review latest local commit and restore from pre-GDrive snapshot if needed before resuming.",
+        lastError: error
+      });
+      return { ok: false, classification, summary, error };
+    }
+
+    if (!commit.committed) {
+      return { ok: true, classification, summary, commitSkipped: true };
+    }
+
+    const push = this.pushGitOutbound();
+    if (!push.ok) {
+      return { ok: false, classification, summary, error: push.error };
+    }
+
+    return { ok: true, classification, summary };
+  }
+
   executeSync(reason) {
     if (this.paused) {
       this.updateSyncState({
@@ -634,6 +1024,35 @@ export class NotesAutomationService {
         return { ok: false, error: pull.error };
       }
 
+      let gdriveBaseline = null;
+      if (this.config.gdrive.enabled) {
+        gdriveBaseline = this.captureGDriveImportBaseline();
+        const preSnapshot = this.createPreGDriveSnapshot();
+        if (!preSnapshot.ok) {
+          this.updateSyncState({
+            status: "idle",
+            reason: null,
+            finishedAt: new Date().toISOString(),
+            lastError: summarizeCommandOutput(preSnapshot.error || "pre-gdrive snapshot failed")
+          });
+          return { ok: false, error: preSnapshot.error || "pre-gdrive snapshot failed" };
+        }
+
+        if (!preSnapshot.skipped) {
+          const prePush = this.pushGitOutbound();
+          if (!prePush.ok) {
+            const finalStatus = this.paused ? "paused" : "idle";
+            this.updateSyncState({
+              status: finalStatus,
+              reason: null,
+              finishedAt: new Date().toISOString(),
+              lastError: summarizeCommandOutput(prePush.error || "")
+            });
+            return { ok: false, error: prePush.error };
+          }
+        }
+      }
+
       const gdrive = this.syncGoogleDriveInbound();
       if (!gdrive.ok) {
         const finalStatus = this.paused ? "paused" : "idle";
@@ -646,19 +1065,33 @@ export class NotesAutomationService {
         return { ok: false, error: gdrive.error };
       }
 
-      this.enforceProtectedArtifacts();
-      this.commitAllChanges(`post-sync changes (${reason})`);
+      if (this.config.gdrive.enabled) {
+        const postImport = this.handleSuccessfulGDriveImport(reason, gdriveBaseline || {});
+        if (!postImport.ok) {
+          const finalStatus = this.paused ? "paused" : "idle";
+          this.updateSyncState({
+            status: finalStatus,
+            reason: null,
+            finishedAt: new Date().toISOString(),
+            lastError: summarizeCommandOutput(postImport.error || "")
+          });
+          return { ok: false, error: postImport.error };
+        }
+      } else {
+        this.enforceProtectedArtifacts();
+        this.commitAllChanges(`post-sync changes (${reason})`);
 
-      const push = this.pushGitOutbound();
-      if (!push.ok) {
-        const finalStatus = this.paused ? "paused" : "idle";
-        this.updateSyncState({
-          status: finalStatus,
-          reason: null,
-          finishedAt: new Date().toISOString(),
-          lastError: summarizeCommandOutput(push.error || "")
-        });
-        return { ok: false, error: push.error };
+        const push = this.pushGitOutbound();
+        if (!push.ok) {
+          const finalStatus = this.paused ? "paused" : "idle";
+          this.updateSyncState({
+            status: finalStatus,
+            reason: null,
+            finishedAt: new Date().toISOString(),
+            lastError: summarizeCommandOutput(push.error || "")
+          });
+          return { ok: false, error: push.error };
+        }
       }
 
       const completedAt = new Date().toISOString();

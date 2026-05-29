@@ -40,6 +40,10 @@
   "gdrive_remote_path": "",
   "gdrive_mode": "bisync",
   "gdrive_resync_mode": "newer",
+  "gdrive_import_suspicious_file_threshold": 20,
+  "gdrive_import_suspicious_delete_threshold": 5,
+  "gdrive_import_suspicious_percent_threshold": 10,
+  "gdrive_import_dangerous_percent_threshold": 50,
   "gdrive_first_run_resync": true,
   "gdrive_args": [
     "--exclude",

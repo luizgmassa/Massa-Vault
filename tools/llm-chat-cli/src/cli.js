@@ -645,10 +645,44 @@ function formatSyncFeedback(result) {
     sync.lastGDriveAutoResyncApplied ?? state.lastGDriveAutoResyncApplied
   );
   const resyncMode = String(sync.lastGDriveResyncMode || state.lastGDriveResyncMode || "").trim();
+  const nestedStateSync = state?.sync && typeof state.sync === "object" ? state.sync : {};
+  const gdriveImport = String(
+    sync.gdriveImport ||
+      sync.lastGDriveImportClassification ||
+      nestedStateSync.lastGDriveImportClassification ||
+      ""
+  ).trim();
+  const gdriveImportSummary =
+    (sync.gdriveImportSummary && typeof sync.gdriveImportSummary === "object"
+      ? sync.gdriveImportSummary
+      : null) ||
+    (sync.lastGDriveImportSummary && typeof sync.lastGDriveImportSummary === "object"
+      ? sync.lastGDriveImportSummary
+      : null) ||
+    (nestedStateSync.lastGDriveImportSummary &&
+    typeof nestedStateSync.lastGDriveImportSummary === "object"
+      ? nestedStateSync.lastGDriveImportSummary
+      : null);
+  const gdriveImportPart = gdriveImport ? ` gdrive_import=${gdriveImport}` : "";
+  const gdriveImportCounts =
+    gdriveImportSummary && typeof gdriveImportSummary.changedCount === "number"
+      ? ` changed=${Number(gdriveImportSummary.changedCount || 0)} added=${Number(gdriveImportSummary.addedCount || 0)} modified=${Number(gdriveImportSummary.modifiedCount || 0)} deleted=${Number(gdriveImportSummary.deletedCount || 0)}`
+      : "";
+  const nextAction =
+    sync.nextAction ||
+    (gdriveImport === "dangerous"
+      ? "review local dangerous import commit before resume"
+      : gdriveImport === "suspicious"
+        ? "review suspicious import diff"
+        : "");
+  const nextActionPart =
+    gdriveImport === "dangerous" || gdriveImport === "suspicious"
+      ? ` next_action=${String(nextAction || "").trim() || "review import"}`
+      : "";
   const autoResyncSummary = autoResyncAttempted
     ? ` auto_resync=${autoResyncApplied ? "applied" : "attempted"} mode=${resyncMode || "newer"}`
     : "";
-  const base = `[chat] sync status=${status} conflicts=${conflictCount}${autoResyncSummary}`;
+  const base = `[chat] sync status=${status} conflicts=${conflictCount}${gdriveImportPart}${gdriveImportCounts}${autoResyncSummary}${nextActionPart}`;
   if (!payload.ok || errorText) {
     return `${base} error=${errorText || "unknown"}`;
   }

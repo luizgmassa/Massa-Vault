@@ -11,6 +11,11 @@ function toNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toNonNegativeNumber(value, fallback) {
+  const parsed = toNumber(value, fallback);
+  return parsed >= 0 ? parsed : fallback;
+}
+
 function readJsonFile(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   return JSON.parse(raw);
@@ -83,6 +88,24 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
       firstRunResync:
         String(parsed.gdrive_first_run_resync ?? true).toLowerCase() === "true",
       args: Array.isArray(parsed.gdrive_args) ? parsed.gdrive_args : []
+    },
+    gdriveImport: {
+      suspiciousFileThreshold: toNonNegativeNumber(
+        parsed.gdrive_import_suspicious_file_threshold,
+        20
+      ),
+      suspiciousDeleteThreshold: toNonNegativeNumber(
+        parsed.gdrive_import_suspicious_delete_threshold,
+        5
+      ),
+      suspiciousPercentThreshold: toNonNegativeNumber(
+        parsed.gdrive_import_suspicious_percent_threshold,
+        10
+      ),
+      dangerousPercentThreshold: toNonNegativeNumber(
+        parsed.gdrive_import_dangerous_percent_threshold,
+        50
+      )
     }
   };
 }

@@ -38,6 +38,8 @@ Your actual notes/memories live in an external vault path configured by CLI.
 ### Google Drive sync
 
 - Uses `rclone bisync` only (one-way modes are rejected).
+- Google Drive is treated as live storage and may overwrite local vault files during import/resync.
+- A Git snapshot is created before each Drive import so GitHub remains the recovery ledger.
 - Required excludes are always enforced, including `.automation/**` and `.DS_Store`.
 - Existing protected artifacts on remote are cleaned up during sync.
 
@@ -153,6 +155,10 @@ File: `config/notes-automation.config.json`
   "gdrive_remote_path": "gdrive:massa-vault",
   "gdrive_mode": "bisync",
   "gdrive_resync_mode": "newer",
+  "gdrive_import_suspicious_file_threshold": 20,
+  "gdrive_import_suspicious_delete_threshold": 5,
+  "gdrive_import_suspicious_percent_threshold": 10,
+  "gdrive_import_dangerous_percent_threshold": 50,
   "gdrive_first_run_resync": true,
   "gdrive_args": ["--exclude", ".git/**", "--exclude", ".automation/**", "--exclude", ".DS_Store", "--exclude", "**/.DS_Store"],
   "debounce_ms": 1500
@@ -166,10 +172,16 @@ Each sync run executes in this order:
 1. Enforce protected-artifact rules (`.automation/**`, `.DS_Store`, `**/.DS_Store`).
 2. Commit local pending changes.
 3. Pull/reconcile inbound GitHub changes.
-4. Run Google Drive `rclone bisync`.
-5. Re-apply protected-artifact cleanup after inbound sync.
-6. Commit imported/cleanup changes.
-7. Push GitHub.
+4. Create pre-GDrive backup commit (`backup(sync): snapshot before gdrive import`).
+5. Push that backup snapshot when remote auto-push is enabled.
+6. Run Google Drive `rclone bisync` (live-storage import, local overwrite allowed).
+7. Re-apply protected-artifact cleanup after inbound sync.
+8. Classify import diff (`normal`, `suspicious`, `dangerous`) using file/delete/percent thresholds.
+9. Commit import with classification-specific message.
+10. Push behavior by classification:
+   - `normal`: push commit.
+   - `suspicious`: push commit and set `reviewNeeded=true`.
+   - `dangerous`: keep commit local, pause sync, require manual review.
 
 ## Conflict Recovery
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { NotesAutomationService } from "../tools/notes-automation/src/service.js";
 import { readState } from "../tools/notes-automation/src/state.js";
 
@@ -47,6 +48,16 @@ function withTempCwd(run) {
     process.chdir(previousCwd);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+function runGit(args, cwd) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.status === 0) return;
+  throw new Error(`git ${args.join(" ")} failed: ${String(result.stderr || result.stdout || "").trim()}`);
 }
 
 function writeFakeRclone(tempDir) {
@@ -237,5 +248,274 @@ test("gdrive lockout followed by failed auto-resync pauses with actionable alert
       delete process.env.FAKE_RCLONE_STATE;
       delete process.env.FAKE_RCLONE_MODE;
     }
+  });
+});
+
+test("executeSync creates pre-gdrive snapshot before inbound gdrive run", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "remote",
+      git_auto_push: true
+    });
+    const service = new NotesAutomationService(configPath);
+    service.updateState({ running: false, pid: null, sync: {} }, { force: true });
+
+    const calls = [];
+    service.enforceProtectedArtifacts = () => {};
+    service.commitQueuedChanges = () => {};
+    service.pullGitInbound = () => ({ ok: true });
+    service.captureGDriveImportBaseline = () => ({ trackedFilesBefore: 10, internalArtifactPathsBefore: new Set() });
+    service.createPreGDriveSnapshot = () => {
+      calls.push("pre-snapshot");
+      return { ok: true, skipped: false, commitHash: "abc123" };
+    };
+    service.pushGitOutbound = () => {
+      calls.push("push");
+      return { ok: true };
+    };
+    service.syncGoogleDriveInbound = () => {
+      calls.push("gdrive");
+      return { ok: true };
+    };
+    service.handleSuccessfulGDriveImport = () => {
+      calls.push("post-import");
+      return { ok: true };
+    };
+
+    const result = service.executeSync("manual-test");
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, ["pre-snapshot", "push", "gdrive", "post-import"]);
+  });
+});
+
+test("executeSync skips pre-gdrive push when snapshot is clean", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "remote",
+      git_auto_push: true
+    });
+    const service = new NotesAutomationService(configPath);
+    service.updateState({ running: false, pid: null, sync: {} }, { force: true });
+
+    const calls = [];
+    service.enforceProtectedArtifacts = () => {};
+    service.commitQueuedChanges = () => {};
+    service.pullGitInbound = () => ({ ok: true });
+    service.captureGDriveImportBaseline = () => ({ trackedFilesBefore: 10, internalArtifactPathsBefore: new Set() });
+    service.createPreGDriveSnapshot = () => {
+      calls.push("pre-snapshot");
+      return { ok: true, skipped: true, reason: "clean" };
+    };
+    service.pushGitOutbound = () => {
+      calls.push("push");
+      return { ok: true };
+    };
+    service.syncGoogleDriveInbound = () => {
+      calls.push("gdrive");
+      return { ok: true };
+    };
+    service.handleSuccessfulGDriveImport = () => {
+      calls.push("post-import");
+      return { ok: true };
+    };
+
+    const result = service.executeSync("manual-test");
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, ["pre-snapshot", "gdrive", "post-import"]);
+  });
+});
+
+test("normal gdrive import commits, pushes, and clears reviewNeeded", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "remote",
+      git_auto_push: true
+    });
+    const service = new NotesAutomationService(configPath);
+    service.updateState({ running: false, pid: null, sync: {} }, { force: true });
+
+    const subjects = [];
+    let pushed = 0;
+    service.enforceProtectedArtifacts = () => {};
+    service.classifyGDriveImport = () => ({
+      classification: "normal",
+      summary: {
+        changedCount: 3,
+        addedCount: 1,
+        modifiedCount: 2,
+        deletedCount: 0
+      }
+    });
+    service.commitAllChangesWithSubject = (subject) => {
+      subjects.push(subject);
+      return { committed: true, commitHash: "abc" };
+    };
+    service.pushGitOutbound = () => {
+      pushed += 1;
+      return { ok: true };
+    };
+
+    const result = service.handleSuccessfulGDriveImport("manual-test", {
+      trackedFilesBefore: 30,
+      internalArtifactPathsBefore: new Set()
+    });
+    const state = readState();
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(subjects, ["sync(gdrive): import live-storage changes"]);
+    assert.equal(pushed, 1);
+    assert.equal(state.sync.lastGDriveImportClassification, "normal");
+    assert.equal(state.sync.reviewNeeded, false);
+  });
+});
+
+test("suspicious gdrive import commits, pushes, and sets reviewNeeded", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "remote",
+      git_auto_push: true
+    });
+    const service = new NotesAutomationService(configPath);
+    service.updateState({ running: false, pid: null, sync: {} }, { force: true });
+
+    const subjects = [];
+    let pushed = 0;
+    service.enforceProtectedArtifacts = () => {};
+    service.classifyGDriveImport = () => ({
+      classification: "suspicious",
+      summary: {
+        changedCount: 24,
+        addedCount: 8,
+        modifiedCount: 12,
+        deletedCount: 4
+      }
+    });
+    service.commitAllChangesWithSubject = (subject) => {
+      subjects.push(subject);
+      return { committed: true, commitHash: "def" };
+    };
+    service.pushGitOutbound = () => {
+      pushed += 1;
+      return { ok: true };
+    };
+
+    const result = service.handleSuccessfulGDriveImport("manual-test", {
+      trackedFilesBefore: 100,
+      internalArtifactPathsBefore: new Set()
+    });
+    const state = readState();
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(subjects, ["sync(gdrive): suspicious live-storage import"]);
+    assert.equal(pushed, 1);
+    assert.equal(state.sync.lastGDriveImportClassification, "suspicious");
+    assert.equal(state.sync.reviewNeeded, true);
+  });
+});
+
+test("dangerous gdrive import commits locally, does not push, and pauses sync", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "remote",
+      git_auto_push: true
+    });
+    const service = new NotesAutomationService(configPath);
+    service.updateState({ running: false, pid: null, sync: {} }, { force: true });
+
+    const subjects = [];
+    let pushed = 0;
+    service.enforceProtectedArtifacts = () => {};
+    service.classifyGDriveImport = () => ({
+      classification: "dangerous",
+      summary: {
+        changedCount: 80,
+        addedCount: 2,
+        modifiedCount: 8,
+        deletedCount: 70
+      }
+    });
+    service.commitAllChangesWithSubject = (subject) => {
+      subjects.push(subject);
+      return { committed: true, commitHash: "ghi" };
+    };
+    service.pushGitOutbound = () => {
+      pushed += 1;
+      return { ok: true };
+    };
+
+    const result = service.handleSuccessfulGDriveImport("manual-test", {
+      trackedFilesBefore: 100,
+      internalArtifactPathsBefore: new Set()
+    });
+    const state = readState();
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(subjects, ["sync(gdrive): dangerous import held for review"]);
+    assert.equal(pushed, 0);
+    assert.equal(service.paused, true);
+    assert.equal(state.paused, true);
+    assert.equal(state.sync.lastGDriveImportClassification, "dangerous");
+    assert.equal(state.sync.reviewNeeded, true);
+  });
+});
+
+test("internal/protected artifact import is classified as dangerous", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, "note.md"), "hello", "utf8");
+
+    runGit(["init"], vaultPath);
+    runGit(["config", "user.name", "Test Bot"], vaultPath);
+    runGit(["config", "user.email", "test@example.com"], vaultPath);
+    runGit(["add", "note.md"], vaultPath);
+    runGit(["commit", "-m", "init"], vaultPath);
+
+    const configPath = createConfig(tempDir, vaultPath, {
+      sync_strategy: "both",
+      gdrive_mode: "bisync",
+      gdrive_remote_path: "Personal:Obsidian",
+      git_mode: "local",
+      git_auto_push: false
+    });
+    const service = new NotesAutomationService(configPath);
+    service.vaultGitReady = true;
+
+    const before = service.collectInternalArtifactPaths();
+    fs.mkdirSync(path.join(vaultPath, ".logs"), { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, ".logs", "imported.log"), "from-drive", "utf8");
+
+    const result = service.classifyGDriveImport({
+      trackedFilesBefore: 1,
+      internalArtifactPathsBefore: before
+    });
+
+    assert.equal(result.classification, "dangerous");
+    assert.equal(result.summary.importedInternalArtifactCount > 0, true);
   });
 });

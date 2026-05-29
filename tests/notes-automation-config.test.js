@@ -63,6 +63,10 @@ test("loads both sync strategy with git and gdrive enabled", () => {
     assert.equal(config.git.branch, "main");
     assert.equal(config.gdrive.remotePath, "gdrive:massa-vault");
     assert.equal(config.gdrive.resyncMode, "newer");
+    assert.equal(config.gdriveImport.suspiciousFileThreshold, 20);
+    assert.equal(config.gdriveImport.suspiciousDeleteThreshold, 5);
+    assert.equal(config.gdriveImport.suspiciousPercentThreshold, 10);
+    assert.equal(config.gdriveImport.dangerousPercentThreshold, 50);
     assert.equal(config.ignoreGlobs.includes(".automation/**"), true);
     assert.equal(config.ignoreGlobs.includes(".DS_Store"), true);
     assert.equal(config.ignoreGlobs.includes("**/.DS_Store"), true);

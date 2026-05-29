@@ -52,7 +52,8 @@ function printStatus() {
       {
         running,
         pid: normalizedPid,
-        state
+        state,
+        sync: summarizeSyncStatus()
       },
       null,
       2
@@ -143,6 +144,18 @@ function requestAction(action, { quiet = false } = {}) {
 function summarizeSyncStatus() {
   const state = readState();
   const sync = state?.sync && typeof state.sync === "object" ? state.sync : {};
+  const gdriveImport = sync.lastGDriveImportClassification || null;
+  const gdriveImportSummary =
+    sync.lastGDriveImportSummary && typeof sync.lastGDriveImportSummary === "object"
+      ? sync.lastGDriveImportSummary
+      : null;
+  const reviewNeeded = Boolean(sync.reviewNeeded);
+  const nextAction =
+    gdriveImport === "dangerous"
+      ? "review latest local sync(gdrive) dangerous commit; restore from pre-GDrive snapshot if needed; run sync-resolve/resume after manual verification"
+      : gdriveImport === "suspicious"
+        ? "review imported diff summary and confirm before continuing normal automation"
+        : null;
   return {
     running: Boolean(state?.running),
     paused: Boolean(state?.paused),
@@ -160,6 +173,13 @@ function summarizeSyncStatus() {
     lastGDriveAutoResyncAt: state?.lastGDriveAutoResyncAt || null,
     lastGDriveResyncMode: state?.lastGDriveResyncMode || null,
     lastGDriveInitialError: state?.lastGDriveInitialError || null,
+    gdrive_import: gdriveImport,
+    gdriveImport,
+    gdriveImportSummary,
+    reviewNeeded,
+    lastPreGDriveSnapshotCommit: sync.lastPreGDriveSnapshotCommit || null,
+    preGDriveSnapshotSkipped: sync.preGDriveSnapshotSkipped || null,
+    nextAction,
     alert: state?.alert || null
   };
 }
