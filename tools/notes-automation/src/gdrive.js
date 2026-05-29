@@ -9,6 +9,20 @@ const REQUIRED_GDRIVE_EXCLUDES = [
   ".logs/**",
   ...PROTECTED_ARTIFACT_GLOBS
 ];
+const ALLOWED_RESYNC_MODES = new Set(["path1", "path2", "newer", "older"]);
+
+function resolveResyncMode(value, { fallback = "newer" } = {}) {
+  const normalized = String(value || fallback).trim().toLowerCase();
+  if (!ALLOWED_RESYNC_MODES.has(normalized)) {
+    return {
+      ok: false,
+      error:
+        `Invalid gdrive_resync_mode "${normalized}". ` +
+        "Expected one of: path1, path2, newer, older."
+    };
+  }
+  return { ok: true, mode: normalized };
+}
 
 function runCommand(binary, args, run = execFileSync) {
   const output = run(binary, args, {
@@ -150,6 +164,26 @@ function detectBisyncFailureType(output) {
   return { conflict, unsafeFailure };
 }
 
+function extractFailureDetails(error) {
+  const details = String(error?.stderr || error?.message || error);
+  const status = Number.isInteger(error?.status) ? Number(error.status) : null;
+  return { details, status };
+}
+
+function requiresBisyncResyncRecovery(details, status) {
+  const text = String(details || "").toLowerCase();
+  const hasExplicitRecoveryHint = text.includes("must run --resync to recover");
+  const hasMissingPriorListing =
+    /\b(cannot\s+find|can't\s+find|missing|not\s+found|no\s+prior)\b[\s\S]{0,120}\bprior\s+path[12]\s+listing\b/.test(
+      text
+    ) ||
+    /\bprior\s+path[12]\s+listing\b[\s\S]{0,120}\b(missing|not\s+found|cannot\s+find|can't\s+find)\b/.test(
+      text
+    );
+  const hasCriticalExitCode = status === 7;
+  return hasExplicitRecoveryHint || hasMissingPriorListing || hasCriticalExitCode;
+}
+
 function resolveSyncCommand(mode) {
   const normalized = String(mode || "bisync").toLowerCase();
   if (normalized !== "bisync") {
@@ -194,6 +228,12 @@ export function prepareGoogleDriveSync(
   gdriveConfig,
   { run = execFileSync, availableRemotes, dryRun = false, forceResync = false } = {}
 ) {
+  const resyncModeResult = resolveResyncMode(gdriveConfig.resyncMode, { fallback: "newer" });
+  if (!resyncModeResult.ok) {
+    return { ok: false, error: resyncModeResult.error };
+  }
+  const resyncMode = resyncModeResult.mode;
+
   let remotes = [];
   try {
     remotes = Array.isArray(availableRemotes)
@@ -229,7 +269,7 @@ export function prepareGoogleDriveSync(
     const marker = firstRunMarker(vaultPath);
     const hasMarker = fs.existsSync(marker);
     if (forceResync || (!hasMarker && gdriveConfig.firstRunResync)) {
-      args.push("--resync");
+      args.push("--resync", "--resync-mode", resyncMode);
       resyncApplied = true;
     }
   }
@@ -246,6 +286,7 @@ export function prepareGoogleDriveSync(
     remotePath: pathValidation.remotePath,
     remotes,
     resyncApplied,
+    resyncMode,
     dryRun
   };
 }
@@ -348,12 +389,87 @@ export function syncToGoogleDrive(
       command: prepared.command,
       args: prepared.args,
       resyncApplied: prepared.resyncApplied,
+      requiresResync: false,
+      autoResyncAttempted: false,
+      autoResyncApplied: false,
+      initialError: null,
       cleanup,
       dryRun
     };
   } catch (error) {
-    const details = String(error?.stderr || error?.message || error);
+    const initialFailure = extractFailureDetails(error);
+    const details = initialFailure.details;
     const failure = detectBisyncFailureType(details);
+    const requiresResync =
+      prepared.command === "bisync" &&
+      requiresBisyncResyncRecovery(initialFailure.details, initialFailure.status);
+
+    if (requiresResync && !dryRun && !prepared.resyncApplied) {
+      const retryPrepared = prepareGoogleDriveSync(vaultPath, gdriveConfig, {
+        run,
+        availableRemotes: prepared.remotes,
+        dryRun: false,
+        forceResync: true
+      });
+      if (!retryPrepared.ok) {
+        return {
+          ok: false,
+          error: retryPrepared.error,
+          command: prepared.command,
+          args: prepared.args,
+          resyncApplied: prepared.resyncApplied,
+          cleanup,
+          conflict: failure.conflict,
+          unsafeFailure: failure.unsafeFailure,
+          requiresResync: true,
+          autoResyncAttempted: true,
+          autoResyncApplied: false,
+          initialError: details,
+          dryRun
+        };
+      }
+
+      try {
+        const retryOutput = runCommand(retryPrepared.binary, retryPrepared.args, run);
+        if (retryPrepared.command === "bisync") {
+          const marker = firstRunMarker(vaultPath);
+          fs.mkdirSync(path.dirname(marker), { recursive: true });
+          fs.writeFileSync(marker, new Date().toISOString(), "utf8");
+        }
+        return {
+          ok: true,
+          output: retryOutput,
+          command: retryPrepared.command,
+          args: retryPrepared.args,
+          resyncApplied: retryPrepared.resyncApplied,
+          requiresResync: true,
+          autoResyncAttempted: true,
+          autoResyncApplied: true,
+          initialError: details,
+          cleanup,
+          dryRun
+        };
+      } catch (retryError) {
+        const retryFailure = extractFailureDetails(retryError);
+        const retryType = detectBisyncFailureType(retryFailure.details);
+        return {
+          ok: false,
+          error: retryFailure.details,
+          command: retryPrepared.command,
+          args: retryPrepared.args,
+          resyncApplied: retryPrepared.resyncApplied,
+          cleanup,
+          conflict: retryType.conflict,
+          unsafeFailure: retryType.unsafeFailure,
+          requiresResync: true,
+          autoResyncAttempted: true,
+          autoResyncApplied: false,
+          initialError: details,
+          dryRun
+        };
+      }
+    }
+
     return {
       ok: false,
       error: details,
@@ -363,6 +479,10 @@ export function syncToGoogleDrive(
       cleanup,
       conflict: failure.conflict,
       unsafeFailure: failure.unsafeFailure,
+      requiresResync,
+      autoResyncAttempted: false,
+      autoResyncApplied: false,
+      initialError: null,
       dryRun
     };
   }

@@ -4,6 +4,7 @@ import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
 
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const DEFAULT_LOCAL_CONFIG_PATH = path.resolve("config/notes-automation.local.json");
+const ALLOWED_GDRIVE_RESYNC_MODES = new Set(["path1", "path2", "newer", "older"]);
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
@@ -30,9 +31,15 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";
   const gdriveMode = String(parsed.gdrive_mode || "bisync").toLowerCase();
+  const gdriveResyncMode = String(parsed.gdrive_resync_mode || "newer").toLowerCase();
   if (gdriveEnabled && gdriveMode !== "bisync") {
     throw new Error(
       `Invalid gdrive_mode "${gdriveMode}". When Google Drive sync is enabled, gdrive_mode must be "bisync".`
+    );
+  }
+  if (!ALLOWED_GDRIVE_RESYNC_MODES.has(gdriveResyncMode)) {
+    throw new Error(
+      `Invalid gdrive_resync_mode "${gdriveResyncMode}". Expected one of: path1, path2, newer, older.`
     );
   }
 
@@ -72,6 +79,7 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
       binary: process.env.NOTES_AUTOMATION_GDRIVE_BIN || parsed.gdrive_binary || "rclone",
       remotePath: process.env.NOTES_AUTOMATION_GDRIVE_REMOTE_PATH || parsed.gdrive_remote_path || "",
       mode: gdriveMode,
+      resyncMode: gdriveResyncMode,
       firstRunResync:
         String(parsed.gdrive_first_run_resync ?? true).toLowerCase() === "true",
       args: Array.isArray(parsed.gdrive_args) ? parsed.gdrive_args : []

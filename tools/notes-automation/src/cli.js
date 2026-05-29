@@ -154,6 +154,12 @@ function summarizeSyncStatus() {
     lastError: sync.lastError || null,
     lastSuccessAt: sync.lastSuccessAt || null,
     finishedAt: sync.finishedAt || null,
+    lastGDriveRequiresResync: Boolean(state?.lastGDriveRequiresResync),
+    lastGDriveAutoResyncAttempted: Boolean(state?.lastGDriveAutoResyncAttempted),
+    lastGDriveAutoResyncApplied: Boolean(state?.lastGDriveAutoResyncApplied),
+    lastGDriveAutoResyncAt: state?.lastGDriveAutoResyncAt || null,
+    lastGDriveResyncMode: state?.lastGDriveResyncMode || null,
+    lastGDriveInitialError: state?.lastGDriveInitialError || null,
     alert: state?.alert || null
   };
 }

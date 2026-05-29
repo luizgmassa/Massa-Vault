@@ -634,10 +634,21 @@ function formatSyncFeedback(result) {
       : payload.state && typeof payload.state?.sync === "object"
         ? payload.state.sync
         : {};
+  const state = payload.state && typeof payload.state === "object" ? payload.state : {};
   const status = sync.status || (payload.ok ? "idle" : "error");
   const conflictCount = Number(sync.conflictCount || 0);
   const errorText = sync.lastError || payload.message || payload.error || "";
-  const base = `[chat] sync status=${status} conflicts=${conflictCount}`;
+  const autoResyncAttempted = Boolean(
+    sync.lastGDriveAutoResyncAttempted ?? state.lastGDriveAutoResyncAttempted
+  );
+  const autoResyncApplied = Boolean(
+    sync.lastGDriveAutoResyncApplied ?? state.lastGDriveAutoResyncApplied
+  );
+  const resyncMode = String(sync.lastGDriveResyncMode || state.lastGDriveResyncMode || "").trim();
+  const autoResyncSummary = autoResyncAttempted
+    ? ` auto_resync=${autoResyncApplied ? "applied" : "attempted"} mode=${resyncMode || "newer"}`
+    : "";
+  const base = `[chat] sync status=${status} conflicts=${conflictCount}${autoResyncSummary}`;
   if (!payload.ok || errorText) {
     return `${base} error=${errorText || "unknown"}`;
   }

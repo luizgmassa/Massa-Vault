@@ -111,6 +111,7 @@ function buildConfig({
     gdrive_binary: "rclone",
     gdrive_remote_path: gdriveRemotePath,
     gdrive_mode: gdriveMode,
+    gdrive_resync_mode: "newer",
     gdrive_first_run_resync: true,
     gdrive_args: [
       "--exclude",

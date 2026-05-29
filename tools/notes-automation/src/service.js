@@ -517,7 +517,13 @@ export class NotesAutomationService {
       lastGDriveMode: result.command || null,
       lastGDriveArgs: Array.isArray(result.args) ? result.args : [],
       lastGDriveDryRun: Boolean(result.dryRun),
-      lastGDriveResyncApplied: Boolean(result.resyncApplied)
+      lastGDriveResyncApplied: Boolean(result.resyncApplied),
+      lastGDriveRequiresResync: Boolean(result.requiresResync),
+      lastGDriveAutoResyncAttempted: Boolean(result.autoResyncAttempted),
+      lastGDriveAutoResyncApplied: Boolean(result.autoResyncApplied),
+      lastGDriveAutoResyncAt: result.autoResyncApplied ? attemptedAt : null,
+      lastGDriveResyncMode: result.resyncApplied ? this.config.gdrive.resyncMode || null : null,
+      lastGDriveInitialError: result.initialError ? summarizeCommandOutput(result.initialError) : null
     };
 
     if (result.ok) {
@@ -538,6 +544,10 @@ export class NotesAutomationService {
     });
 
     if (result.conflict || result.unsafeFailure) {
+      const manualRecoveryAlert =
+        result.requiresResync && result.autoResyncAttempted && !result.autoResyncApplied
+          ? "Sync paused: Google Drive auto recovery (--resync) was attempted but failed. Inspect rclone output, fix remote/local divergence, then run `npm run vault -- sync`."
+          : "Sync paused: Google Drive bisync needs manual intervention. Run `npm run vault -- sync` after fixing remote/local divergence.";
       this.paused = true;
       this.updateSyncState({
         status: "paused",
@@ -545,8 +555,7 @@ export class NotesAutomationService {
       });
       this.updateState({
         paused: true,
-        alert:
-          "Sync paused: Google Drive bisync needs manual intervention. Run `npm run vault -- sync` after fixing remote/local divergence.",
+        alert: manualRecoveryAlert,
         lastError: errorOutput
       });
     }

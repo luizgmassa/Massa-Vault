@@ -471,3 +471,51 @@ test("executeCommand /save and /sync delegate to save+sync hook", async () => {
   assert.match(messages.join("\n"), /transcript saved/i);
   assert.match(messages.join("\n"), /sync status=idle/i);
 });
+
+test("executeCommand /sync status includes auto-resync attempt metadata", async () => {
+  await withTempDir(async (tempDir) => {
+    writeMinimalConfig(tempDir);
+    const stateDir = path.join(tempDir, ".automation", "notes-automation");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "state.json"),
+      JSON.stringify(
+        {
+          running: false,
+          pid: null,
+          paused: true,
+          sync: {
+            status: "paused",
+            conflictCount: 0,
+            lastError: "gdrive still failing"
+          },
+          lastGDriveAutoResyncAttempted: true,
+          lastGDriveAutoResyncApplied: false,
+          lastGDriveResyncMode: "newer"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const messages = [];
+    const panels = [];
+    const result = await executeCommand({
+      line: "/sync status",
+      state: createReplState({ systemPrompt: "" }),
+      limitsByModel: {},
+      mode: "tui",
+      handlers: {
+        message: (text) => messages.push(text),
+        panel: (title, lines) => panels.push({ title, lines })
+      }
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.exit, false);
+    assert.equal(panels.length, 1);
+    assert.match(messages.join("\n"), /auto_resync=attempted/i);
+    assert.match(messages.join("\n"), /mode=newer/i);
+  });
+});

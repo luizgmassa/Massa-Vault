@@ -152,6 +152,7 @@ File: `config/notes-automation.config.json`
   "gdrive_binary": "rclone",
   "gdrive_remote_path": "gdrive:massa-vault",
   "gdrive_mode": "bisync",
+  "gdrive_resync_mode": "newer",
   "gdrive_first_run_resync": true,
   "gdrive_args": ["--exclude", ".git/**", "--exclude", ".automation/**", "--exclude", ".DS_Store", "--exclude", "**/.DS_Store"],
   "debounce_ms": 1500
