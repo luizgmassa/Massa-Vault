@@ -9,16 +9,16 @@ import {
   gitCachedNames,
   gitCommit,
   gitEnsureIgnoreEntries,
-  gitFetch,
+  gitFetchBranch,
   gitHasRepo,
   gitInit,
   gitListConflictedFiles,
+  gitRebaseOnto,
   gitListTracked,
   gitRevParse,
   gitTrackedFiles,
   gitWorkingTreeChanges,
   gitPush,
-  gitPullRebase,
   gitReadStageFile,
   gitRemoveCached,
   gitRemoteSetUrl
@@ -496,8 +496,12 @@ export class NotesAutomationService {
     if (this.config.git.mode === "local") return { ok: true, skipped: true };
     if (!this.ensureVaultGitRepo()) return { ok: false, error: "git repo not ready" };
 
+    const remote = this.config.git.remote;
+    const branch = this.config.git.branch;
+    const upstreamRef = `refs/remotes/${remote}/${branch}`;
+
     try {
-      gitFetch(this.config.git.remote, this.config.git.branch, this.vaultPath);
+      gitFetchBranch(remote, branch, this.vaultPath);
     } catch (error) {
       return {
         ok: false,
@@ -505,8 +509,8 @@ export class NotesAutomationService {
       };
     }
 
-    const pull = gitPullRebase(this.config.git.remote, this.config.git.branch, this.vaultPath);
-    if (pull.ok) {
+    const rebase = gitRebaseOnto(upstreamRef, this.vaultPath);
+    if (rebase.ok) {
       this.updateState({
         lastPullAt: new Date().toISOString(),
         lastPullError: null
@@ -514,29 +518,46 @@ export class NotesAutomationService {
       return { ok: true };
     }
 
-    if (pull.conflict) {
-      const conflicts = this.quarantineGitConflicts(pull.output);
+    const conflictedFiles = gitListConflictedFiles(this.vaultPath);
+    const conflictDetected = rebase.conflict || conflictedFiles.length > 0;
+    if (conflictDetected) {
+      let conflicts = [];
+      if (conflictedFiles.length > 0) {
+        conflicts = this.quarantineGitConflicts(rebase.output);
+        if (!conflicts.length) {
+          conflicts = conflictedFiles.map((filePath) => ({ filePath }));
+          this.conflicts = conflicts;
+        }
+      }
       gitAbortReconcile(this.vaultPath);
+
+      if (!conflicts.length) {
+        this.updateState({
+          lastPullError: rebase.output
+        });
+        return { ok: false, error: rebase.output };
+      }
+
       this.paused = true;
       this.updateSyncState({
         status: "conflict",
         conflictCount: conflicts.length,
         conflicts,
-        lastError: summarizeCommandOutput(pull.output)
+        lastError: summarizeCommandOutput(rebase.output)
       });
       this.updateState({
         paused: true,
         alert:
           "Sync paused: Git conflict detected. Run `npm run vault -- sync conflicts`, resolve files, then `npm run vault -- sync resolve --done`.",
-        lastPullError: pull.output
+        lastPullError: rebase.output
       });
-      return { ok: false, conflict: true, error: pull.output };
+      return { ok: false, conflict: true, error: rebase.output };
     }
 
     this.updateState({
-      lastPullError: pull.output
+      lastPullError: rebase.output
     });
-    return { ok: false, error: pull.output };
+    return { ok: false, error: rebase.output };
   }
 
   syncGoogleDriveInbound() {

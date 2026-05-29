@@ -60,6 +60,33 @@ function runGit(args, cwd) {
   throw new Error(`git ${args.join(" ")} failed: ${String(result.stderr || result.stdout || "").trim()}`);
 }
 
+function configureGitUser(cwd) {
+  runGit(["config", "user.name", "Test Bot"], cwd);
+  runGit(["config", "user.email", "test@example.com"], cwd);
+}
+
+function initRemoteGitPair(tempDir) {
+  const remotePath = path.join(tempDir, "remote.git");
+  runGit(["init", "--bare", remotePath], tempDir);
+
+  const seedPath = path.join(tempDir, "seed");
+  runGit(["clone", remotePath, seedPath], tempDir);
+  configureGitUser(seedPath);
+  runGit(["checkout", "-b", "master"], seedPath);
+  fs.writeFileSync(path.join(seedPath, "note.md"), "base\n", "utf8");
+  runGit(["add", "note.md"], seedPath);
+  runGit(["commit", "-m", "seed"], seedPath);
+  runGit(["push", "-u", "origin", "master"], seedPath);
+
+  const localPath = path.join(tempDir, "vault");
+  const peerPath = path.join(tempDir, "peer");
+  runGit(["clone", remotePath, localPath], tempDir);
+  runGit(["clone", remotePath, peerPath], tempDir);
+  configureGitUser(localPath);
+  configureGitUser(peerPath);
+  return { localPath, peerPath };
+}
+
 function writeFakeRclone(tempDir) {
   const scriptPath = path.join(tempDir, "fake-rclone.mjs");
   const script = `#!/usr/bin/env node
@@ -517,5 +544,89 @@ test("internal/protected artifact import is classified as dangerous", () => {
 
     assert.equal(result.classification, "dangerous");
     assert.equal(result.summary.importedInternalArtifactCount > 0, true);
+  });
+});
+
+test("pullGitInbound non-conflict rebase failure does not enter conflict state", () => {
+  withTempCwd((tempDir) => {
+    const { localPath } = initRemoteGitPair(tempDir);
+    fs.mkdirSync(path.join(localPath, ".git", "rebase-merge"), { recursive: true });
+
+    const configPath = createConfig(tempDir, localPath, {
+      sync_strategy: "git",
+      git_mode: "remote",
+      git_auto_push: false,
+      remote: "origin",
+      branch: "master"
+    });
+    const service = new NotesAutomationService(configPath);
+    service.vaultGitReady = true;
+    service.updateState(
+      {
+        running: false,
+        pid: null,
+        paused: false,
+        sync: { status: "idle", conflictCount: 0, conflicts: [] }
+      },
+      { force: true }
+    );
+
+    const result = service.pullGitInbound();
+    const state = readState();
+
+    assert.equal(result.ok, false);
+    assert.notEqual(result.conflict, true);
+    assert.equal(service.paused, false);
+    assert.notEqual(state.sync?.status, "conflict");
+    assert.equal(state.sync?.conflictCount || 0, 0);
+    assert.match(String(result.error || ""), /rebase-merge|already a rebase/i);
+  });
+});
+
+test("pullGitInbound conflict failure pauses and records conflicted files", () => {
+  withTempCwd((tempDir) => {
+    const { localPath, peerPath } = initRemoteGitPair(tempDir);
+
+    fs.writeFileSync(path.join(localPath, "note.md"), "local-change\n", "utf8");
+    runGit(["add", "note.md"], localPath);
+    runGit(["commit", "-m", "local change"], localPath);
+
+    fs.writeFileSync(path.join(peerPath, "note.md"), "remote-change\n", "utf8");
+    runGit(["add", "note.md"], peerPath);
+    runGit(["commit", "-m", "remote change"], peerPath);
+    runGit(["push", "origin", "master"], peerPath);
+
+    const configPath = createConfig(tempDir, localPath, {
+      sync_strategy: "git",
+      git_mode: "remote",
+      git_auto_push: false,
+      remote: "origin",
+      branch: "master"
+    });
+    const service = new NotesAutomationService(configPath);
+    service.vaultGitReady = true;
+    service.updateState(
+      {
+        running: false,
+        pid: null,
+        paused: false,
+        sync: { status: "idle", conflictCount: 0, conflicts: [] }
+      },
+      { force: true }
+    );
+
+    const result = service.pullGitInbound();
+    const state = readState();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.conflict, true);
+    assert.equal(service.paused, true);
+    assert.equal(state.paused, true);
+    assert.equal(state.sync?.status, "conflict");
+    assert.equal((state.sync?.conflictCount || 0) > 0, true);
+    assert.equal(Array.isArray(state.sync?.conflicts), true);
+    assert.equal((state.sync?.conflicts || []).length > 0, true);
+    assert.match(String(state.sync?.conflicts?.[0]?.filePath || ""), /note\.md$/);
+    assert.match(String(state.alert || ""), /Git conflict detected/i);
   });
 });

@@ -38,14 +38,34 @@ export function gitFetch(remote, branch, cwd) {
   return runGit(["fetch", remote, branch], { cwd });
 }
 
-export function gitPullRebase(remote, branch, cwd) {
+export function gitFetchBranch(remote, branch, cwd) {
+  const remoteName = String(remote || "").trim();
+  const branchName = String(branch || "").trim();
+  const remoteRef = `refs/remotes/${remoteName}/${branchName}`;
+  const refspec = `refs/heads/${branchName}:${remoteRef}`;
+  return runGit(["fetch", "--prune", remoteName, refspec], { cwd });
+}
+
+export function isRebaseConflictOutput(output) {
+  const text = String(output || "");
+  if (!text) return false;
+  return (
+    /(^|\n)\s*CONFLICT\s*\(/i.test(text) ||
+    /could not apply/i.test(text) ||
+    /resolve all conflicts manually/i.test(text) ||
+    /after resolving the conflicts/i.test(text) ||
+    /fix conflicts and then run/i.test(text) ||
+    /failed to merge in the changes/i.test(text)
+  );
+}
+
+export function gitRebaseOnto(upstreamRef, cwd) {
   try {
-    const output = runGit(["pull", "--rebase", "--autostash", remote, branch], { cwd });
+    const output = runGit(["rebase", "--autostash", upstreamRef], { cwd });
     return { ok: true, output };
   } catch (error) {
     const output = String(error?.stderr || error?.message || "").trim();
-    const conflict =
-      /conflict|resolve|could not apply|cannot rebase|needs merge/i.test(output);
+    const conflict = isRebaseConflictOutput(output);
     return { ok: false, output, conflict };
   }
 }
