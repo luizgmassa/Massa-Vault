@@ -9,6 +9,7 @@ import { loadConfig } from "../../notes-automation/src/config.js";
 import { streamChatCompletion } from "./gateway.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "./search.js";
+import { buildSyncStatusModelFromResult } from "./sync-status.js";
 import { estimateTokensFromText } from "./token-estimator.js";
 import { writeTranscript } from "./transcripts.js";
 import { loadLocalEnv } from "../../shared/env.js";
@@ -537,6 +538,8 @@ function getHelpLines() {
     "/help                 Show commands",
     "/save                 Save transcript and trigger sync",
     "/sync                 Save transcript (if needed) and trigger sync",
+    "/sync status          Open live sync status screen (TUI) / print JSON status (plain)",
+    "/conv                 Return from sync status screen to conversation (TUI)",
     "/exit                 Save transcript and exit",
     "/clear                Clear conversation memory",
     "/usage                Show token counters and quota estimates",
@@ -619,6 +622,10 @@ function runNotesAutomationCommand(args = []) {
     const output = String(error?.stdout || error?.stderr || error?.message || "").trim();
     return { ok: false, output, payload: parseJsonOutput(output) };
   }
+}
+
+function readLocalSyncStatusModel() {
+  return buildSyncStatusModelFromResult(runNotesAutomationCommand(["status"]));
 }
 
 function formatSyncFeedback(result) {
@@ -780,6 +787,21 @@ async function executeCommand({
     return { handled: true, exit: true };
   }
 
+  if (line === "/conv") {
+    if (mode === "plain") {
+      console.log("[chat] conversation mode");
+      return { handled: true, exit: false };
+    }
+    return {
+      handled: true,
+      exit: false,
+      action: {
+        type: "switch-screen",
+        screen: "conversation"
+      }
+    };
+  }
+
   if (line === "/save") {
     const result = await onSaveAndSync(state, { reason: "chat-manual-save" });
     const transcriptMessage = result.saveResult.path
@@ -812,13 +834,7 @@ async function executeCommand({
 
   if (line.startsWith("/sync ")) {
     const subcommand = line.slice(6).trim().toLowerCase();
-    const notesArgs =
-      subcommand === "status"
-        ? ["status"]
-        : subcommand === "conflicts"
-          ? ["sync-conflicts"]
-          : null;
-    if (!notesArgs) {
+    if (subcommand !== "status" && subcommand !== "conflicts") {
       const usage = "usage: /sync | /sync status | /sync conflicts";
       if (mode === "plain") {
         console.log(usage);
@@ -828,6 +844,20 @@ async function executeCommand({
       return { handled: true, exit: false };
     }
 
+    if (subcommand === "status" && mode !== "plain") {
+      const syncStatus = readLocalSyncStatusModel();
+      return {
+        handled: true,
+        exit: false,
+        action: {
+          type: "switch-screen",
+          screen: "sync",
+          syncStatus
+        }
+      };
+    }
+
+    const notesArgs = subcommand === "status" ? ["status"] : ["sync-conflicts"];
     const result = runNotesAutomationCommand(notesArgs);
     const summary = formatSyncFeedback(result);
     if (mode === "plain") {
@@ -1380,6 +1410,7 @@ export {
   isVaultContextEnabled,
   main,
   processPrompt,
+  readLocalSyncStatusModel,
   resetConversation,
   runOneShot,
   runPlainRepl,

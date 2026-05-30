@@ -9,6 +9,7 @@ import {
   createStatusState,
   executeCommand,
   processPrompt,
+  readLocalSyncStatusModel,
   saveAndSyncSession
 } from "./cli.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
@@ -18,6 +19,33 @@ function colorForRole(role) {
   if (role === "user") return "cyan";
   if (role === "assistant") return "green";
   return "magenta";
+}
+
+function backendFooterColor(backend) {
+  return backend?.hasError ? "red" : "gray";
+}
+
+function backendFooterLabel(backend) {
+  if (backend?.hasError) return "error";
+  if (backend?.enabled === false) return "off";
+  return "ok";
+}
+
+function backendStatusLabel(backend) {
+  if (backend?.hasError) return "ERROR";
+  if (backend?.enabled === false) return "DISABLED";
+  return "OK";
+}
+
+function formatTimestamp(value) {
+  const text = String(value || "").trim();
+  return text || "-";
+}
+
+function splitSnippet(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  return text.split(/\r?\n/).slice(-10);
 }
 
 export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
@@ -31,6 +59,9 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
   const [items, setItems] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [screen, setScreen] = useState("conversation");
+  const [syncStatus, setSyncStatus] = useState(() => readLocalSyncStatusModel());
+  const [syncNotice, setSyncNotice] = useState("");
   const [footer, setFooter] = useState(() =>
     createStatusLine(
       createStatusState({
@@ -56,6 +87,14 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         })
       )
     );
+  }, []);
+
+  const refreshSyncStatus = useCallback((override) => {
+    if (override && typeof override === "object") {
+      setSyncStatus(override);
+      return;
+    }
+    setSyncStatus(readLocalSyncStatusModel());
   }, []);
 
   const appendItem = useCallback((item) => {
@@ -152,12 +191,34 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
             panel: (title, lines) => appendPanel(title, lines)
           }
         });
+        const action = command?.action && typeof command.action === "object" ? command.action : null;
+        if (action?.type === "switch-screen") {
+          if (action.screen === "sync") {
+            setScreen("sync");
+            setSyncNotice("");
+            refreshSyncStatus(action.syncStatus);
+          } else if (action.screen === "conversation") {
+            setScreen("conversation");
+            setSyncNotice("");
+          }
+        }
+        if (line === "/sync" || line.startsWith("/sync ")) {
+          if (!action?.syncStatus) {
+            refreshSyncStatus();
+          }
+        }
         refreshFooter();
 
         if (command.handled) {
           if (command.exit) {
             await finalizeExit();
           }
+          return;
+        }
+
+        if (screen === "sync") {
+          setSyncNotice("sync screen active; run /conv before sending prompts");
+          refreshSyncStatus();
           return;
         }
 
@@ -197,6 +258,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
           replaceAssistantText(assistantMessageId, result.assistantText || "[no content]");
         }
         refreshFooter(result.routing);
+        refreshSyncStatus();
       } catch (error) {
         appendMessage("system", `[chat] ${error instanceof Error ? error.message : String(error)}`);
       } finally {
@@ -211,6 +273,8 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       createAssistantMessage,
       finalizeExit,
       isBusy,
+      screen,
+      refreshSyncStatus,
       refreshFooter,
       replaceAssistantText
     ]
@@ -241,16 +305,112 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
   }, [appendMessage]);
 
   useEffect(() => {
+    if (screen !== "sync") return;
+    refreshSyncStatus();
+    const timer = setInterval(() => {
+      refreshSyncStatus();
+    }, 2000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [refreshSyncStatus, screen]);
+
+  useEffect(() => {
     if (!driver || typeof driver !== "object") return;
     driver.submit = (line) => handleSubmit(String(line || ""));
     driver.exit = () => finalizeExit();
+    driver.getSessionState = () => ({
+      history: [...sessionRef.current.history],
+      screen
+    });
     return () => {
       delete driver.submit;
       delete driver.exit;
+      delete driver.getSessionState;
     };
-  }, [driver, finalizeExit, handleSubmit]);
+  }, [driver, finalizeExit, handleSubmit, screen]);
 
   const visibleItems = items.slice(-20);
+  const backendGit = syncStatus?.backends?.git || { enabled: null, hasError: false };
+  const backendDrive = syncStatus?.backends?.drive || { enabled: null, hasError: false };
+  const syncSections = [
+    {
+      id: "daemon",
+      title: "daemon",
+      color: "cyan",
+      lines: [
+        `running: ${syncStatus?.running ? "yes" : "no"} pid: ${syncStatus?.pid ?? "-"}`,
+        `paused: ${syncStatus?.paused ? "yes" : "no"}`,
+        `status: ${syncStatus?.status || "idle"} reason: ${syncStatus?.reason || "-"}`,
+        `queued_reason: ${syncStatus?.queuedReason || "-"}`,
+        `conflicts: ${Number(syncStatus?.conflictCount || 0)}`
+      ]
+    },
+    {
+      id: "git",
+      title: "github (git)",
+      color: "yellow",
+      lines: [
+        `state: ${backendStatusLabel(backendGit)}`,
+        `enabled: ${backendGit?.enabled === false ? "no" : backendGit?.enabled === true ? "yes" : "unknown"}`,
+        `reasons: ${(backendGit?.reasons || []).length ? backendGit.reasons.join(", ") : "-"}`,
+        `last_pull_at: ${formatTimestamp(syncStatus?.lastPullAt)}`,
+        `last_push_at: ${formatTimestamp(syncStatus?.lastPushAt)}`
+      ]
+    },
+    {
+      id: "drive",
+      title: "google drive",
+      color: "green",
+      lines: [
+        `state: ${backendStatusLabel(backendDrive)}`,
+        `enabled: ${backendDrive?.enabled === false ? "no" : backendDrive?.enabled === true ? "yes" : "unknown"}`,
+        `reasons: ${(backendDrive?.reasons || []).length ? backendDrive.reasons.join(", ") : "-"}`,
+        `import: ${backendDrive?.gdriveImport || "-"}`,
+        `review_needed: ${backendDrive?.reviewNeeded ? "yes" : "no"}`,
+        `requires_resync: ${backendDrive?.requiresResync ? "yes" : "no"}`,
+        `auto_resync: ${backendDrive?.autoResyncAttempted ? (backendDrive?.autoResyncApplied ? "applied" : "attempted") : "none"}`
+      ]
+    },
+    {
+      id: "timestamps",
+      title: "timestamps",
+      color: "magenta",
+      lines: [
+        `started_at: ${formatTimestamp(syncStatus?.startedAt)}`,
+        `finished_at: ${formatTimestamp(syncStatus?.finishedAt)}`,
+        `last_success_at: ${formatTimestamp(syncStatus?.lastSuccessAt)}`,
+        `updated_at: ${formatTimestamp(syncStatus?.updatedAt)}`,
+        `last_gdrive_attempt_at: ${formatTimestamp(syncStatus?.lastGDriveAttemptAt)}`,
+        `last_gdrive_sync_at: ${formatTimestamp(syncStatus?.lastGDriveSyncAt)}`,
+        `last_auto_resync_at: ${formatTimestamp(syncStatus?.lastGDriveAutoResyncAt)}`
+      ]
+    }
+  ];
+  const syncSnippets = [
+    { id: "alert", title: "alert", color: "yellow", lines: splitSnippet(syncStatus?.alert) },
+    { id: "sync-error", title: "sync error", color: "red", lines: splitSnippet(syncStatus?.lastError) },
+    { id: "git-pull", title: "git pull error", color: "red", lines: splitSnippet(backendGit?.lastPullError) },
+    { id: "git-push", title: "git push error", color: "red", lines: splitSnippet(backendGit?.lastPushError) },
+    {
+      id: "drive-error",
+      title: "drive error",
+      color: "red",
+      lines: splitSnippet(backendDrive?.lastGDriveError)
+    },
+    {
+      id: "drive-init-error",
+      title: "drive initial error",
+      color: "red",
+      lines: splitSnippet(backendDrive?.lastGDriveInitialError)
+    },
+    {
+      id: "drive-output",
+      title: "drive output",
+      color: "red",
+      lines: splitSnippet(backendDrive?.lastGDriveOutput)
+    }
+  ].filter((entry) => entry.lines.length);
 
   const renderItem = (item) => {
     if (item.kind === "panel") {
@@ -282,6 +442,12 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
     `gateway=${gatewayRef.current.gatewayUrl} ` +
     `model=${DEFAULT_GATEWAY_MODEL} ` +
     `auth=${gatewayRef.current.apiKey ? "on" : "off"}`;
+  const syncScreenActive = screen === "sync";
+  const inputPlaceholder = syncScreenActive
+    ? "Sync screen active. Type /conv to return"
+    : isBusy
+      ? "waiting for assistant..."
+      : "Type message or /help";
 
   return createElement(
     Box,
@@ -305,9 +471,50 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         marginBottom: 1,
         paddingX: 1
       },
-      visibleItems.length
-        ? visibleItems.map((item) => renderItem(item))
-        : createElement(Text, { dimColor: true }, "No messages yet.")
+      syncScreenActive
+        ? createElement(
+            Box,
+            { flexDirection: "column" },
+            createElement(Text, { color: "yellowBright", bold: true }, "sync status (refresh every 2s)"),
+            syncNotice ? createElement(Text, { color: "yellow" }, syncNotice) : null,
+            ...syncSections.map((section) =>
+              createElement(
+                Box,
+                {
+                  key: section.id,
+                  flexDirection: "column",
+                  marginTop: 1,
+                  borderStyle: "round",
+                  borderColor: section.color,
+                  paddingX: 1
+                },
+                createElement(Text, { color: section.color, bold: true }, `${section.title}:`),
+                ...section.lines.map((line, index) =>
+                  createElement(Text, { key: `${section.id}-${index}`, color: section.color }, line)
+                )
+              )
+            ),
+            ...syncSnippets.map((section) =>
+              createElement(
+                Box,
+                {
+                  key: section.id,
+                  flexDirection: "column",
+                  marginTop: 1,
+                  borderStyle: "round",
+                  borderColor: section.color,
+                  paddingX: 1
+                },
+                createElement(Text, { color: section.color, bold: true }, `${section.title}:`),
+                ...section.lines.map((line, index) =>
+                  createElement(Text, { key: `${section.id}-${index}`, color: section.color }, line)
+                )
+              )
+            )
+          )
+        : visibleItems.length
+          ? visibleItems.map((item) => renderItem(item))
+          : createElement(Text, { dimColor: true }, "No messages yet.")
     ),
     createElement(
       Box,
@@ -321,7 +528,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         value: inputValue,
         onChange: setInputValue,
         onSubmit: handleSubmit,
-        placeholder: isBusy ? "waiting for assistant..." : "Type message or /help",
+        placeholder: inputPlaceholder,
         focus: !isBusy
       })
     ),
@@ -333,7 +540,9 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         borderColor: "gray",
         paddingX: 1
       },
-      createElement(Text, { color: "gray" }, footer)
+      createElement(Text, { color: "gray" }, `${footer} `),
+      createElement(Text, { color: backendFooterColor(backendGit) }, `Git=${backendFooterLabel(backendGit)} `),
+      createElement(Text, { color: backendFooterColor(backendDrive) }, `Drive=${backendFooterLabel(backendDrive)}`)
     )
   );
 }

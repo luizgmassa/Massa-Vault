@@ -472,7 +472,7 @@ test("executeCommand /save and /sync delegate to save+sync hook", async () => {
   assert.match(messages.join("\n"), /sync status=idle/i);
 });
 
-test("executeCommand /sync status includes auto-resync attempt metadata", async () => {
+test("executeCommand /sync status in TUI returns sync-screen action without emitting panel/message", async () => {
   await withTempDir(async (tempDir) => {
     writeMinimalConfig(tempDir);
     const stateDir = path.join(tempDir, ".automation", "notes-automation");
@@ -522,11 +522,77 @@ test("executeCommand /sync status includes auto-resync attempt metadata", async 
 
     assert.equal(result.handled, true);
     assert.equal(result.exit, false);
-    assert.equal(panels.length, 1);
-    assert.match(messages.join("\n"), /auto_resync=attempted/i);
-    assert.match(messages.join("\n"), /mode=newer/i);
-    assert.match(messages.join("\n"), /gdrive_import=suspicious/i);
-    assert.match(messages.join("\n"), /changed=21/i);
-    assert.match(messages.join("\n"), /next_action=/i);
+    assert.equal(messages.length, 0);
+    assert.equal(panels.length, 0);
+    assert.equal(result.action?.type, "switch-screen");
+    assert.equal(result.action?.screen, "sync");
+    assert.equal(Boolean(result.action?.syncStatus), true);
+    assert.equal(result.action?.syncStatus?.status, "paused");
+    assert.equal(result.action?.syncStatus?.backends?.drive?.hasError, true);
+    assert.equal(result.action?.syncStatus?.backends?.drive?.autoResyncAttempted, true);
+    assert.equal(result.action?.syncStatus?.backends?.drive?.autoResyncApplied, false);
+  });
+});
+
+test("executeCommand /conv returns conversation-screen action in TUI", async () => {
+  const result = await executeCommand({
+    line: "/conv",
+    state: createReplState({ systemPrompt: "" }),
+    limitsByModel: {},
+    mode: "tui",
+    handlers: {}
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.equal(result.action?.type, "switch-screen");
+  assert.equal(result.action?.screen, "conversation");
+});
+
+test("executeCommand /sync status in plain mode preserves summary + JSON output", async () => {
+  await withTempDir(async (tempDir) => {
+    writeMinimalConfig(tempDir);
+    const stateDir = path.join(tempDir, ".automation", "notes-automation");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "state.json"),
+      JSON.stringify(
+        {
+          running: false,
+          pid: null,
+          paused: true,
+          sync: {
+            status: "paused",
+            conflictCount: 0,
+            lastError: "gdrive still failing"
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+      logs.push(args.map((value) => String(value)).join(" "));
+    };
+    try {
+      const result = await executeCommand({
+        line: "/sync status",
+        state: createReplState({ systemPrompt: "" }),
+        limitsByModel: {},
+        mode: "plain"
+      });
+      assert.equal(result.handled, true);
+      assert.equal(result.exit, false);
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.match(logs.join("\n"), /\[chat\] sync status=paused/i);
+    assert.match(logs.join("\n"), /"sync"\s*:/i);
+    assert.match(logs.join("\n"), /"status"\s*:\s*"paused"/i);
   });
 });
