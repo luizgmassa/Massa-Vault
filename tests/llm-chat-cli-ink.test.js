@@ -5,12 +5,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+process.env.MASSA_VAULT_CHAT_RAG = "off";
+
 async function loadInkStack(t) {
   try {
     const React = await import("react");
     const { render } = await import("ink-testing-library");
-    const { InkChatApp } = await import("../tools/llm-chat-cli/src/ink-repl.js");
-    return { React, render, InkChatApp };
+    const inkRepl = await import("../tools/llm-chat-cli/src/ink-repl.js");
+    return {
+      React,
+      render,
+      InkChatApp: inkRepl.InkChatApp,
+      CHAT_THEME: inkRepl.CHAT_THEME,
+      colorForRole: inkRepl.colorForRole
+    };
   } catch {
     t.skip("Ink dependencies are not installed in this environment");
     return null;
@@ -35,7 +43,12 @@ function writeState(tempDir, state) {
   fs.writeFileSync(path.join(stateDir, "state.json"), JSON.stringify(state, null, 2), "utf8");
 }
 
-test("Ink chat renders header, input prompt, and footer with Git/Drive labels", async (t) => {
+function extractTokenCount(frame) {
+  const match = String(frame || "").match(/\[\s*(\d+)\s+tokens\s*\]/);
+  return match ? Number(match[1]) : null;
+}
+
+test("Ink chat renders compact header/footer format", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
 
@@ -61,16 +74,129 @@ test("Ink chat renders header, input prompt, and footer with Git/Drive labels", 
 
     await delay(20);
     const frame = app.lastFrame();
-    assert.match(frame, /massa-vault chat/);
+    assert.match(frame, /Massa Vault AI Assistant/);
+    assert.match(frame, /Gateway: .* \| Model: pending @ unknown \| Auth: (On|Off)/);
+    assert.doesNotMatch(frame, /smart-router/);
     assert.match(frame, /you>/);
-    assert.match(frame, /\[tokens session=0/);
-    assert.match(frame, /Git=/);
-    assert.match(frame, /Drive=/);
+    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive ok \]/);
     app.unmount();
   });
 });
 
-test("Ink chat shows thinking state and updates one footer line after streaming", async (t) => {
+test("Ink chat exports role theme colors", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { CHAT_THEME, colorForRole } = stack;
+  assert.equal(CHAT_THEME.header, "#d97706");
+  assert.equal(CHAT_THEME.assistant, "#ffb86b");
+  assert.equal(CHAT_THEME.system, CHAT_THEME.assistant);
+  assert.equal(CHAT_THEME.user, "#2f9e44");
+  assert.equal(colorForRole("system"), colorForRole("assistant"));
+});
+
+test("Ink footer shows running labels while daemon sync is syncing", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: true,
+      pid: 1234,
+      paused: false,
+      sync: { status: "syncing", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        chatCompletion: async () => ({
+          assistantText: "",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          routing: null
+        })
+      })
+    );
+
+    await delay(20);
+    const frame = app.lastFrame();
+    assert.match(
+      frame,
+      /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git running \/ drive running \]/
+    );
+    app.unmount();
+  });
+});
+
+test("Ink chat shows thinking state and updates compact footer after streaming", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: false,
+      sync: { status: "idle", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const driver = {};
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        driver,
+        chatCompletion: async ({ onRouting, onDelta, onUsage }) => {
+          onRouting({
+            lane: "general",
+            confidence: "1.0000",
+            targetModel: "smart-router-general",
+            routedModel: "general_local",
+            providerModel: "ollama_chat/qwen3.5:9b",
+            displayModel: "qwen3.5:9b",
+            modelLocation: "local"
+          });
+          await delay(120);
+          onDelta("Hel");
+          await delay(10);
+          onDelta("lo");
+          onUsage({ prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 });
+          return {
+            assistantText: "Hello",
+            usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+            routing: {
+              lane: "general",
+              confidence: "1.0000",
+              targetModel: "smart-router-general",
+              routedModel: "general_local",
+              providerModel: "ollama_chat/qwen3.5:9b",
+              displayModel: "qwen3.5:9b",
+              modelLocation: "local"
+            }
+          };
+        }
+      })
+    );
+
+    await delay(10);
+    assert.equal(typeof driver.submit, "function");
+    const pending = driver.submit("ping");
+    await delay(30);
+    assert.match(app.lastFrame(), /Model: qwen3\.5:9b @ local/);
+    assert.match(app.lastFrame(), /assistant> thinking\.\.\. 00:00/);
+
+    await pending;
+    await delay(20);
+    const frame = app.lastFrame();
+    assert.match(frame, /assistant> Hello/);
+    assert.match(frame, /\[ 3 tokens \] \[ model: qwen3\.5:9b @ local \] \[ sync status: git ok \/ drive ok \]/);
+    assert.equal((frame.match(/\[\s*\d+\s+tokens\s*\]/g) || []).length, 1);
+    app.unmount();
+  });
+});
+
+test("Ink chat hides smart-router aliases when concrete model metadata is missing", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
 
@@ -84,20 +210,23 @@ test("Ink chat shows thinking state and updates one footer line after streaming"
         onRouting({
           lane: "general",
           confidence: "1.0000",
-          targetModel: "smart-router-general"
+          targetModel: "smart-router-general",
+          responseModel: "smart-router-general",
+          displayModel: "smart-router-general",
+          modelLocation: null
         });
-        await delay(25);
-        onDelta("Hel");
-        await delay(10);
-        onDelta("lo");
-        onUsage({ prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 });
+        onDelta("ok");
+        onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
         return {
-          assistantText: "Hello",
-          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+          assistantText: "ok",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
           routing: {
             lane: "general",
             confidence: "1.0000",
-            targetModel: "smart-router-general"
+            targetModel: "smart-router-general",
+            responseModel: "smart-router-general",
+            displayModel: "smart-router-general",
+            modelLocation: null
           }
         };
       }
@@ -105,18 +234,159 @@ test("Ink chat shows thinking state and updates one footer line after streaming"
   );
 
   await delay(10);
-  assert.equal(typeof driver.submit, "function");
-  const pending = driver.submit("ping");
-  await delay(5);
-  assert.match(app.lastFrame(), /thinking\.\.\./);
+  await driver.submit("old gateway");
+  await delay(30);
 
-  await pending;
-  await delay(20);
   const frame = app.lastFrame();
-  assert.match(frame, /assistant> Hello/);
-  assert.match(frame, /\[tokens session=3/);
-  assert.equal((frame.match(/\[tokens session=/g) || []).length, 1);
+  assert.match(frame, /Model: pending @ unknown/);
+  assert.match(frame, /\[ 2 tokens \] \[ model: pending @ unknown \]/);
+  assert.doesNotMatch(frame, /smart-router/);
   app.unmount();
+});
+
+test("Ink token counter updates during stream then reconciles on usage", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async ({ onDelta, onUsage }) => {
+        await delay(15);
+        onDelta("alpha alpha alpha alpha ");
+        await delay(120);
+        onDelta("beta beta beta beta ");
+        await delay(120);
+        onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        return {
+          assistantText: "alpha beta",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          routing: null
+        };
+      }
+    })
+  );
+
+  await delay(10);
+  const pending = driver.submit("stream me");
+  await delay(70);
+  const duringFirstChunk = extractTokenCount(app.lastFrame());
+  await delay(120);
+  const duringSecondChunk = extractTokenCount(app.lastFrame());
+  await pending;
+  await delay(30);
+  const finalTokens = extractTokenCount(app.lastFrame());
+
+  assert.equal(typeof duringFirstChunk, "number");
+  assert.equal(typeof duringSecondChunk, "number");
+  assert.equal(duringSecondChunk > duringFirstChunk, true);
+  assert.equal(finalTokens, 2);
+  app.unmount();
+});
+
+test("Ink renders assistant Markdown with aligned tables", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async ({ onUsage }) => {
+        onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        return {
+          assistantText: "# Title\n\n**Bold** text with `code`\n\n| A | Longer |\n| --- | --- |\n| x | y |",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          routing: null
+        };
+      }
+    })
+  );
+
+  await delay(10);
+  await driver.submit("markdown please");
+  await delay(30);
+
+  const frame = app.lastFrame();
+  assert.match(frame, /assistant> Title/);
+  assert.match(frame, /Bold text with code/);
+  assert.doesNotMatch(frame, /\*\*Bold\*\*/);
+  assert.match(frame, /\| A \| Longer \|/);
+  assert.match(frame, /\| x \| y\s+\|/);
+  app.unmount();
+});
+
+test("Ink shows thinking timer during delayed chat and animated delayed /sync command", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+
+  const chatDriver = {};
+  const chatApp = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver: chatDriver,
+      chatCompletion: async ({ onDelta, onUsage }) => {
+        await delay(420);
+        onDelta("done");
+        onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        return {
+          assistantText: "done",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          routing: null
+        };
+      }
+    })
+  );
+
+  await delay(10);
+  const pendingChat = chatDriver.submit("slow prompt");
+  await delay(40);
+  const thinkingFrameA = chatApp.lastFrame();
+  await delay(280);
+  const thinkingFrameB = chatApp.lastFrame();
+  assert.match(thinkingFrameA, /assistant> thinking\.\.\. 00:00/);
+  assert.match(thinkingFrameB, /assistant> thinking\.\.\. 00:00/);
+  assert.notEqual(thinkingFrameA, thinkingFrameB);
+  await pendingChat;
+  chatApp.unmount();
+
+  const syncDriver = {};
+  const syncApp = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver: syncDriver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      }),
+      commandExecutor: async ({ line }) => {
+        if (line === "/sync") {
+          await delay(420);
+        }
+        return { handled: true, exit: false };
+      }
+    })
+  );
+
+  await delay(10);
+  const pendingSync = syncDriver.submit("/sync");
+  await delay(40);
+  const syncFrameA = syncApp.lastFrame();
+  await delay(280);
+  const syncFrameB = syncApp.lastFrame();
+  assert.match(syncFrameA, /running \/sync\.{1,3}/);
+  assert.match(syncFrameB, /running \/sync\.{1,3}/);
+  assert.notEqual(syncFrameA, syncFrameB);
+  await pendingSync;
+  syncApp.unmount();
 });
 
 test("Ink /usage command renders compact usage panel", async (t) => {

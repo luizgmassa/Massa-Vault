@@ -2,33 +2,94 @@ import React, { createElement, useCallback, useEffect, useRef, useState } from "
 import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import {
-  DEFAULT_GATEWAY_MODEL,
   buildGatewayOptions,
   createReplState,
-  createStatusLine,
-  createStatusState,
   executeCommand,
   processPrompt,
   readLocalSyncStatusModel,
   saveAndSyncSession
 } from "./cli.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
-import { getUsageLedger } from "./usage.js";
 
-function colorForRole(role) {
-  if (role === "user") return "cyan";
-  if (role === "assistant") return "green";
-  return "magenta";
+export const CHAT_THEME = {
+  assistant: "#ffb86b",
+  system: "#ffb86b",
+  header: "#d97706",
+  user: "#2f9e44",
+  muted: "gray",
+  code: "yellow"
+};
+
+export function colorForRole(role) {
+  if (role === "system") return CHAT_THEME.system;
+  if (role === "user") return CHAT_THEME.user;
+  if (role === "assistant") return CHAT_THEME.assistant;
+  return CHAT_THEME.muted;
 }
 
-function backendFooterColor(backend) {
-  return backend?.hasError ? "red" : "gray";
+const ASSISTANT_PENDING_TOKEN = "__assistant_pending__";
+
+function useAnimatedEllipsis(active, intervalMs = 250) {
+  const frames = [".", "..", "..."];
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setIndex(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setIndex((value) => (value + 1) % frames.length);
+    }, intervalMs);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [active, intervalMs]);
+
+  return active ? frames[index] : "";
 }
 
-function backendFooterLabel(backend) {
-  if (backend?.hasError) return "error";
-  if (backend?.enabled === false) return "off";
-  return "ok";
+function useElapsedSeconds(active) {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    setSeconds(0);
+    const timer = setInterval(() => {
+      setSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [active]);
+
+  return seconds;
+}
+
+function formatElapsed(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safe / 60);
+  const remainder = safe % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function compactSyncLabel(syncStatus, backendName) {
+  if (String(syncStatus?.status || "").toLowerCase() === "syncing") {
+    return "running";
+  }
+  return syncStatus?.backends?.[backendName]?.hasError ? "error" : "ok";
+}
+
+function compactSyncColor(label) {
+  if (label === "error") return "red";
+  if (label === "running") return "yellow";
+  return "gray";
 }
 
 function backendStatusLabel(backend) {
@@ -48,7 +109,163 @@ function splitSnippet(value) {
   return text.split(/\r?\n/).slice(-10);
 }
 
-export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
+function modelStatusFromRouting(routing) {
+  const displayCandidates = [routing?.displayModel, routing?.responseModel, routing?.targetModel]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && !value.toLowerCase().startsWith("smart-router"));
+  const displayModel = displayCandidates[0] || "";
+  const modelLocation = String(routing?.modelLocation || "").trim();
+  return {
+    displayModel: displayModel || "pending",
+    modelLocation: modelLocation || "unknown"
+  };
+}
+
+function inlineSegments(text) {
+  const segments = [];
+  const source = String(text || "");
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = pattern.exec(source))) {
+    if (match.index > cursor) {
+      segments.push({ text: source.slice(cursor, match.index) });
+    }
+    const token = match[0];
+    if (token.startsWith("`")) {
+      segments.push({ text: token.slice(1, -1), code: true });
+    } else {
+      segments.push({ text: token.slice(2, -2), bold: true });
+    }
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < source.length) {
+    segments.push({ text: source.slice(cursor) });
+  }
+  return segments.length ? segments : [{ text: source }];
+}
+
+function isTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function parseTableRow(line) {
+  const trimmed = String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function formatTable(lines, startIndex) {
+  const header = parseTableRow(lines[startIndex]);
+  const rows = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length && String(lines[index] || "").includes("|") && lines[index].trim()) {
+    rows.push(parseTableRow(lines[index]));
+    index += 1;
+  }
+
+  const widthCount = Math.max(header.length, ...rows.map((row) => row.length), 0);
+  const widths = Array.from({ length: widthCount }, (_, column) =>
+    Math.max(
+      header[column]?.length || 0,
+      ...rows.map((row) => row[column]?.length || 0)
+    )
+  );
+  const renderRow = (row) => `| ${widths.map((width, column) => String(row[column] || "").padEnd(width)).join(" | ")} |`;
+  const separator = `| ${widths.map((width) => "-".repeat(Math.max(3, width))).join(" | ")} |`;
+
+  return {
+    lines: [renderRow(header), separator, ...rows.map((row) => renderRow(row))],
+    nextIndex: index
+  };
+}
+
+function markdownLines(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const rendered = [];
+  let inCodeBlock = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      rendered.push({ text: `  ${line}`, code: true });
+      continue;
+    }
+
+    if (
+      trimmed.includes("|") &&
+      index + 1 < lines.length &&
+      isTableSeparator(lines[index + 1])
+    ) {
+      const table = formatTable(lines, index);
+      rendered.push(...table.lines.map((text) => ({ text, code: true })));
+      index = table.nextIndex - 1;
+      continue;
+    }
+
+    if (!trimmed) {
+      rendered.push({ text: "" });
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      rendered.push({ text: heading[2], bold: true });
+      continue;
+    }
+
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      rendered.push({ text: "────────────────" });
+      continue;
+    }
+
+    const quote = trimmed.match(/^>\s?(.*)$/);
+    if (quote) {
+      rendered.push({ text: `│ ${quote[1]}` });
+      continue;
+    }
+
+    rendered.push({ text: line });
+  }
+
+  return rendered.length ? rendered : [{ text: "" }];
+}
+
+function renderInlineLine({ id, text, color, bold = false, code = false, prefix = "" }) {
+  const segments = inlineSegments(text);
+  return createElement(
+    Text,
+    { key: id, color: code ? CHAT_THEME.code : color, bold },
+    prefix,
+    ...segments.map((segment, index) =>
+      createElement(
+        Text,
+        {
+          key: `${id}-${index}`,
+          color: segment.code ? CHAT_THEME.code : color,
+          bold: bold || segment.bold
+        },
+        segment.text
+      )
+    )
+  );
+}
+
+export function InkChatApp({
+  systemPrompt,
+  chatCompletion,
+  driver,
+  commandExecutor = executeCommand
+}) {
   const { exit } = useApp();
   const sessionRef = useRef(createReplState({ systemPrompt }));
   const limitsByModelRef = useRef(readLiteLLMLimits());
@@ -59,34 +276,25 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
   const [items, setItems] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("");
   const [screen, setScreen] = useState("conversation");
   const [syncStatus, setSyncStatus] = useState(() => readLocalSyncStatusModel());
   const [syncNotice, setSyncNotice] = useState("");
-  const [footer, setFooter] = useState(() =>
-    createStatusLine(
-      createStatusState({
-        sessionUsage: sessionRef.current.sessionUsage,
-        estimatedTokens: sessionRef.current.estimatedTokensRef.value,
-        routing: sessionRef.current.latestRouting,
-        ledgerTotals: getUsageLedger().totals,
-        authEnabled: Boolean(gatewayRef.current.apiKey)
-      })
-    )
+  const [modelStatus, setModelStatus] = useState(() => modelStatusFromRouting(null));
+  const [liveTokenCount, setLiveTokenCount] = useState(() =>
+    Number(sessionRef.current.estimatedTokensRef.value || 0)
   );
+  const [assistantPendingId, setAssistantPendingId] = useState(null);
+  const inputBusyEllipsis = useAnimatedEllipsis(isBusy);
+  const thinkingSeconds = useElapsedSeconds(Boolean(assistantPendingId) && isBusy);
 
-  const refreshFooter = useCallback((routingOverride) => {
-    const state = sessionRef.current;
-    setFooter(
-      createStatusLine(
-        createStatusState({
-          sessionUsage: state.sessionUsage,
-          estimatedTokens: state.estimatedTokensRef.value,
-          routing: routingOverride ?? state.latestRouting,
-          ledgerTotals: getUsageLedger().totals,
-          authEnabled: Boolean(gatewayRef.current.apiKey)
-        })
-      )
-    );
+  const refreshLiveTokenCount = useCallback((overrideValue) => {
+    if (typeof overrideValue === "number" && Number.isFinite(overrideValue)) {
+      setLiveTokenCount(Math.max(0, Math.round(overrideValue)));
+      return;
+    }
+    const next = Number(sessionRef.current.estimatedTokensRef.value || 0);
+    setLiveTokenCount(Math.max(0, Math.round(next)));
   }, []);
 
   const refreshSyncStatus = useCallback((override) => {
@@ -95,6 +303,10 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       return;
     }
     setSyncStatus(readLocalSyncStatusModel());
+  }, []);
+
+  const refreshModelStatus = useCallback((routing) => {
+    setModelStatus(modelStatusFromRouting(routing));
   }, []);
 
   const appendItem = useCallback((item) => {
@@ -130,11 +342,12 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
   const createAssistantMessage = useCallback(() => {
     nextIdRef.current += 1;
     const id = `m-${nextIdRef.current}`;
+    setAssistantPendingId(id);
     appendItem({
       id,
       kind: "message",
       role: "assistant",
-      content: "thinking..."
+      content: ASSISTANT_PENDING_TOKEN
     });
     return id;
   }, [appendItem]);
@@ -152,7 +365,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
     setItems((previous) =>
       previous.map((item) => {
         if (item.id !== id || item.kind !== "message") return item;
-        const current = item.content === "thinking..." ? "" : item.content;
+        const current = item.content === ASSISTANT_PENDING_TOKEN ? "" : item.content;
         return { ...item, content: `${current}${chunk}` };
       })
     );
@@ -179,9 +392,10 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       if (!line || isBusy) return;
 
       const state = sessionRef.current;
+      setBusyLabel(line.startsWith("/") ? `running ${line}` : "processing prompt");
       setIsBusy(true);
       try {
-        const command = await executeCommand({
+        const command = await commandExecutor({
           line,
           state,
           limitsByModel: limitsByModelRef.current,
@@ -202,15 +416,17 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
             setSyncNotice("");
           }
         }
-        if (line === "/sync" || line.startsWith("/sync ")) {
+        if (line === "/save" || line === "/sync" || line.startsWith("/sync ")) {
           if (!action?.syncStatus) {
             refreshSyncStatus();
           }
         }
-        refreshFooter();
+        refreshLiveTokenCount();
+        refreshModelStatus(state.latestRouting);
 
         if (command.handled) {
           if (command.exit) {
+            setBusyLabel("running /exit");
             await finalizeExit();
           }
           return;
@@ -226,6 +442,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         const assistantMessageId = createAssistantMessage();
         let streamedAny = false;
         state.transcriptSavedPath = null;
+        setBusyLabel("processing prompt");
 
         const result = await processPrompt({
           prompt: line,
@@ -237,16 +454,27 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
           chatCompletion,
           onThinkingChange: (thinking) => {
             if (thinking) {
-              replaceAssistantText(assistantMessageId, "thinking...");
+              replaceAssistantText(assistantMessageId, ASSISTANT_PENDING_TOKEN);
+              setBusyLabel("waiting for model");
+              refreshLiveTokenCount();
             }
           },
           onAssistantDelta: (chunk) => {
             streamedAny = true;
+            setAssistantPendingId(null);
+            setBusyLabel("assistant responding");
             appendAssistantChunk(assistantMessageId, chunk);
+            refreshLiveTokenCount();
+          },
+          onUsage: (usage) => {
+            const nextTotal =
+              Number(state.sessionUsage.total_tokens || 0) + Number(usage?.total_tokens || 0);
+            refreshLiveTokenCount(nextTotal);
+            setBusyLabel("finalizing response");
           },
           onRouting: (routing) => {
             state.latestRouting = routing;
-            refreshFooter(routing);
+            refreshModelStatus(routing);
           },
           onWarning: (message) => {
             appendMessage("system", message);
@@ -254,14 +482,18 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         });
 
         state.latestRouting = result.routing;
+        refreshModelStatus(result.routing);
+        setAssistantPendingId(null);
         if (!streamedAny) {
           replaceAssistantText(assistantMessageId, result.assistantText || "[no content]");
         }
-        refreshFooter(result.routing);
+        refreshLiveTokenCount(state.sessionUsage.total_tokens);
         refreshSyncStatus();
       } catch (error) {
+        setAssistantPendingId(null);
         appendMessage("system", `[chat] ${error instanceof Error ? error.message : String(error)}`);
       } finally {
+        setBusyLabel("");
         setIsBusy(false);
       }
     },
@@ -270,12 +502,14 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       appendMessage,
       appendPanel,
       chatCompletion,
+      commandExecutor,
       createAssistantMessage,
       finalizeExit,
       isBusy,
       screen,
+      refreshLiveTokenCount,
+      refreshModelStatus,
       refreshSyncStatus,
-      refreshFooter,
       replaceAssistantText
     ]
   );
@@ -333,6 +567,8 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
   const visibleItems = items.slice(-20);
   const backendGit = syncStatus?.backends?.git || { enabled: null, hasError: false };
   const backendDrive = syncStatus?.backends?.drive || { enabled: null, hasError: false };
+  const gitFooterLabel = compactSyncLabel(syncStatus, "git");
+  const driveFooterLabel = compactSyncLabel(syncStatus, "drive");
   const syncSections = [
     {
       id: "daemon",
@@ -431,22 +667,43 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       );
     }
 
+    const color = colorForRole(item.role);
+    const prefix = `${item.role}> `;
+    if (item.role === "assistant" && item.content === ASSISTANT_PENDING_TOKEN) {
+      return createElement(
+        Box,
+        { key: item.id, marginBottom: 1 },
+        createElement(Text, { color }, `${prefix}thinking... ${formatElapsed(thinkingSeconds)}`)
+      );
+    }
+
+    const lines = markdownLines(item.content);
+    const indent = " ".repeat(prefix.length);
     return createElement(
       Box,
-      { key: item.id, marginBottom: 1 },
-      createElement(Text, { color: colorForRole(item.role) }, `${item.role}> ${item.content}`)
+      { key: item.id, marginBottom: 1, flexDirection: "column" },
+      ...lines.map((line, index) =>
+        renderInlineLine({
+          id: `${item.id}-${index}`,
+          text: line.text,
+          color,
+          bold: line.bold,
+          code: line.code,
+          prefix: index === 0 ? prefix : indent
+        })
+      )
     );
   };
 
   const headerMeta =
-    `gateway=${gatewayRef.current.gatewayUrl} ` +
-    `model=${DEFAULT_GATEWAY_MODEL} ` +
-    `auth=${gatewayRef.current.apiKey ? "on" : "off"}`;
+    `Gateway: ${gatewayRef.current.gatewayUrl} | ` +
+    `Model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} | ` +
+    `Auth: ${gatewayRef.current.apiKey ? "On" : "Off"}`;
   const syncScreenActive = screen === "sync";
   const inputPlaceholder = syncScreenActive
     ? "Sync screen active. Type /conv to return"
     : isBusy
-      ? "waiting for assistant..."
+      ? `${busyLabel || "working"}${inputBusyEllipsis || "."}`
       : "Type message or /help";
 
   return createElement(
@@ -456,11 +713,11 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
       Box,
       {
         borderStyle: "round",
-        borderColor: "cyan",
+        borderColor: CHAT_THEME.header,
         paddingX: 1,
         flexDirection: "column"
       },
-      createElement(Text, { color: "cyan", bold: true }, "massa-vault chat"),
+      createElement(Text, { color: CHAT_THEME.header, bold: true }, "Massa Vault AI Assistant"),
       createElement(Text, { color: "gray" }, headerMeta)
     ),
     createElement(
@@ -523,7 +780,7 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         borderColor: isBusy ? "yellow" : "green",
         paddingX: 1
       },
-      createElement(Text, { color: "green" }, "you> "),
+      createElement(Text, { color: CHAT_THEME.user }, "you> "),
       createElement(TextInput, {
         value: inputValue,
         onChange: setInputValue,
@@ -540,9 +797,15 @@ export function InkChatApp({ systemPrompt, chatCompletion, driver }) {
         borderColor: "gray",
         paddingX: 1
       },
-      createElement(Text, { color: "gray" }, `${footer} `),
-      createElement(Text, { color: backendFooterColor(backendGit) }, `Git=${backendFooterLabel(backendGit)} `),
-      createElement(Text, { color: backendFooterColor(backendDrive) }, `Drive=${backendFooterLabel(backendDrive)}`)
+      createElement(
+        Text,
+        { color: "gray" },
+        `[ ${liveTokenCount} tokens ] [ model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} ] [ sync status: git `
+      ),
+      createElement(Text, { color: compactSyncColor(gitFooterLabel) }, gitFooterLabel),
+      createElement(Text, { color: "gray" }, " / drive "),
+      createElement(Text, { color: compactSyncColor(driveFooterLabel) }, driveFooterLabel),
+      createElement(Text, { color: "gray" }, " ]")
     )
   );
 }

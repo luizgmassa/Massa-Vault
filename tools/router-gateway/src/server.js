@@ -1,6 +1,7 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { classifyRequest, loadPolicy } from "./classifier.js";
+import { loadLiteLLMModelConfig, resolveModelRoute } from "./model-resolution.js";
 import { forwardRequest } from "./proxy.js";
 import { loadLocalEnv } from "../../shared/env.js";
 
@@ -9,6 +10,7 @@ loadLocalEnv();
 const DEFAULT_PORT = Number(process.env.ROUTER_GATEWAY_PORT || 4100);
 const DEFAULT_HOST = process.env.ROUTER_GATEWAY_HOST || "127.0.0.1";
 const DEFAULT_POLICY_PATH = process.env.ROUTER_POLICY_PATH || ".litellm/router.json";
+const DEFAULT_LITELLM_CONFIG_PATH = process.env.LITELLM_CONFIG_PATH || ".litellm/litellm-config.yaml";
 const DEFAULT_LITELLM_BASE = process.env.ROUTER_LITELLM_BASE_URL || "http://127.0.0.1:4000";
 const REQUIRE_SMART_ROUTER_MODEL =
   String(process.env.ROUTER_GATEWAY_REQUIRE_SMART_ROUTER_MODEL || "true").toLowerCase() ===
@@ -64,9 +66,11 @@ async function pipeUpstream(upstream, res) {
 
 export function createGatewayServer({
   policyPath = DEFAULT_POLICY_PATH,
+  liteLLMConfigPath = DEFAULT_LITELLM_CONFIG_PATH,
   liteLLMBaseUrl = DEFAULT_LITELLM_BASE
 } = {}) {
   const policy = loadPolicy(policyPath);
+  const modelConfig = loadLiteLLMModelConfig(liteLLMConfigPath);
 
   return http.createServer(async (req, res) => {
     try {
@@ -98,7 +102,13 @@ export function createGatewayServer({
       }
 
       const routing = classifyRequest(body, policy);
-      const forwardedBody = { ...body, model: routing.targetModel };
+      const modelRouting = resolveModelRoute({
+        targetModel: routing.targetModel,
+        body,
+        models: modelConfig
+      });
+      const resolvedRouting = { ...routing, ...modelRouting, targetModel: routing.targetModel };
+      const forwardedBody = { ...body, model: resolvedRouting.routedModel || routing.targetModel };
       const headers = getForwardHeaders(req);
       const upstream = await forwardRequest({
         baseUrl: liteLLMBaseUrl,
@@ -113,14 +123,18 @@ export function createGatewayServer({
           error: {
             message: "Upstream LiteLLM call failed",
             upstream: text,
-            routing
+            routing: resolvedRouting
           }
         });
       }
 
-      res.setHeader("x-router-lane", routing.lane);
-      res.setHeader("x-router-confidence", String(routing.confidence.toFixed(4)));
-      res.setHeader("x-router-target-model", routing.targetModel);
+      res.setHeader("x-router-lane", resolvedRouting.lane);
+      res.setHeader("x-router-confidence", String(resolvedRouting.confidence.toFixed(4)));
+      res.setHeader("x-router-target-model", resolvedRouting.targetModel);
+      res.setHeader("x-router-routed-model", resolvedRouting.routedModel);
+      res.setHeader("x-router-provider-model", resolvedRouting.providerModel);
+      res.setHeader("x-router-display-model", resolvedRouting.displayModel);
+      res.setHeader("x-router-model-location", resolvedRouting.modelLocation);
       return pipeUpstream(upstream, res);
     } catch (error) {
       return writeJson(res, 500, {

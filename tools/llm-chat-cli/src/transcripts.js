@@ -27,21 +27,53 @@ function toLocalIso(date) {
 }
 
 function toFileSafeStamp(date) {
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}` +
-    `${formatTimezoneOffset(date, { includeColon: false })}`
-  );
+  return `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
 function escapeFrontmatterString(value) {
   return String(value || "").replace(/"/g, '\\"');
 }
 
-export function transcriptFilePath(vaultPath, now = new Date()) {
+export function summarizeTranscriptTitle(messages) {
+  const firstUserMessage = (messages || []).find(
+    (message) =>
+      message &&
+      String(message.role || "").toLowerCase() === "user" &&
+      typeof message.content === "string" &&
+      message.content.trim()
+  );
+  if (!firstUserMessage) return "chat";
+
+  const normalized = String(firstUserMessage.content || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[`*_#>[\\](){}[\]<>|"'.,!?;:=+~]/g, " ")
+    .replace(/[^a-z0-9\s-]/g, " ");
+  const words = normalized
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!words.length) return "chat";
+
+  const slug = words.join("-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  const capped = slug.slice(0, 60).replace(/-+$/g, "");
+  return capped || "chat";
+}
+
+export function transcriptFilePath(vaultPath, now = new Date(), summarySlug = "chat") {
   const day = localDay(now);
   const folder = path.join(vaultPath, "AI Chats", day);
-  const fileName = `${toFileSafeStamp(now)}.md`;
+  const safeSlug = String(summarySlug || "chat")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60) || "chat";
+  const fileName = `${toFileSafeStamp(now)}--${safeSlug}.md`;
   return path.join(folder, fileName);
 }
 
@@ -95,7 +127,8 @@ export function writeTranscript({
 }) {
   const candidate = createdAt ? new Date(createdAt) : new Date();
   const timestamp = Number.isNaN(candidate.getTime()) ? new Date() : candidate;
-  const filePath = transcriptFilePath(vaultPath, timestamp);
+  const summarySlug = summarizeTranscriptTitle(messages);
+  const filePath = transcriptFilePath(vaultPath, timestamp, summarySlug);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const content = formatTranscript({
     id,

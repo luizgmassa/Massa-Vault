@@ -20,7 +20,25 @@ function buildRoutingMetadata(response) {
   return {
     lane: response.headers.get("x-router-lane") || null,
     confidence: response.headers.get("x-router-confidence") || null,
-    targetModel: response.headers.get("x-router-target-model") || null
+    targetModel: response.headers.get("x-router-target-model") || null,
+    routedModel: response.headers.get("x-router-routed-model") || null,
+    providerModel: response.headers.get("x-router-provider-model") || null,
+    displayModel: response.headers.get("x-router-display-model") || null,
+    modelLocation: response.headers.get("x-router-model-location") || null,
+    responseModel: null
+  };
+}
+
+function withResponseModel(routing, value) {
+  const responseModel = String(value || "").trim();
+  if (!responseModel || routing?.responseModel === responseModel) return routing;
+  const displayModel = responseModel.toLowerCase().startsWith("smart-router")
+    ? routing?.displayModel
+    : routing?.displayModel || responseModel;
+  return {
+    ...routing,
+    responseModel,
+    displayModel
   };
 }
 
@@ -93,7 +111,7 @@ export async function streamChatCompletion({
     body: JSON.stringify(body)
   });
 
-  const routing = buildRoutingMetadata(response);
+  let routing = buildRoutingMetadata(response);
   if (onRouting) onRouting(routing);
 
   if (!response.ok) {
@@ -123,6 +141,12 @@ export async function streamChatCompletion({
       return { assistantText: trimmed, usage: null, routing };
     }
 
+    const nextRouting = withResponseModel(routing, payload?.model);
+    if (nextRouting !== routing) {
+      routing = nextRouting;
+      if (onRouting) onRouting(routing);
+    }
+
     const usage = payload?.usage && typeof payload.usage === "object" ? payload.usage : null;
     if (usage && onUsage) onUsage(usage);
     const assistantText = extractAssistantTextFromPayload(payload);
@@ -145,6 +169,12 @@ export async function streamChatCompletion({
     if (event.type !== "json") return;
 
     const payload = event.data;
+    const nextRouting = withResponseModel(routing, payload?.model);
+    if (nextRouting !== routing) {
+      routing = nextRouting;
+      if (onRouting) onRouting(routing);
+    }
+
     if (payload?.usage && typeof payload.usage === "object") {
       usage = payload.usage;
       if (onUsage) onUsage(usage);

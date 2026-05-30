@@ -50,7 +50,7 @@ test("router-gateway forwards Authorization header to upstream", async () => {
   try {
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const response = await fetch(`http://127.0.0.1:${address.port}/chat/completions`, {
+    const response = await originalFetch(`http://127.0.0.1:${address.port}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -72,5 +72,107 @@ test("router-gateway forwards Authorization header to upstream", async () => {
         else resolve();
       });
     });
+  }
+});
+
+test("router-gateway forwards concrete model and returns model metadata headers", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "router-model-"));
+  const policyPath = path.join(tempDir, "router.json");
+  const liteLLMConfigPath = path.join(tempDir, "litellm-config.yaml");
+  fs.writeFileSync(
+    policyPath,
+    JSON.stringify({
+      confidenceFloor: 0.3,
+      lanes: {
+        code: { model: "smart-router-code", phrases: ["debug"] },
+        multimodal: { model: "smart-router-multimodal", phrases: ["image"] },
+        general: { model: "smart-router-general", phrases: [] }
+      }
+    }),
+    "utf8"
+  );
+  fs.writeFileSync(
+    liteLLMConfigPath,
+    `
+model_list:
+  - model_name: code_local
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:7b
+      api_base: http://localhost:11434
+  - model_name: code_cloud
+    litellm_params:
+      model: ollama_chat/qwen3-coder-next:cloud
+      api_base: http://localhost:11434
+  - model_name: smart-router-code
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: code_local
+          MEDIUM: code_cloud
+          COMPLEX: code_cloud
+        token_thresholds:
+          simple: 24
+          complex: 300
+      complexity_router_default_model: code_local
+`,
+    "utf8"
+  );
+
+  let upstreamBody = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    upstreamBody = JSON.parse(init.body);
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-test",
+        object: "chat.completion",
+        choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }]
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
+  };
+
+  const server = createGatewayServer({
+    policyPath,
+    liteLLMConfigPath,
+    liteLLMBaseUrl: "http://127.0.0.1:4000"
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const response = await originalFetch(`http://127.0.0.1:${address.port}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "smart-router",
+        messages: [{ role: "user", content: "debug" }]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(upstreamBody.model, "code_local");
+    assert.equal(response.headers.get("x-router-target-model"), "smart-router-code");
+    assert.equal(response.headers.get("x-router-routed-model"), "code_local");
+    assert.equal(response.headers.get("x-router-provider-model"), "ollama_chat/qwen2.5-coder:7b");
+    assert.equal(response.headers.get("x-router-display-model"), "qwen2.5-coder:7b");
+    assert.equal(response.headers.get("x-router-model-location"), "local");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
