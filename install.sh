@@ -597,6 +597,7 @@ const config = {
   gdrive_first_run_resync: true,
   gdrive_args: [
     "--exclude", ".git/**",
+    "--exclude", ".gitignore",
     "--exclude", ".obsidian/workspace.json",
     "--exclude", ".automation/**",
     "--exclude", ".DS_Store",

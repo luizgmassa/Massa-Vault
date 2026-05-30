@@ -533,28 +533,95 @@ function printSearchPlain(searchResult) {
   }
 }
 
-function getHelpLines() {
-  return [
-    "/help                 Show commands",
-    "/save                 Save transcript and trigger sync",
-    "/sync                 Save transcript (if needed) and trigger sync",
-    "/sync status          Open live sync status screen (TUI) / print JSON status (plain)",
-    "/conv                 Return from sync status screen to conversation (TUI)",
-    "/exit                 Save transcript and exit",
-    "/clear                Clear conversation memory",
-    "/usage                Show token counters and quota estimates",
-    "/config               Show active gateway/system settings",
-    "/system show|set|clear Manage system prompt",
-    "/routing              Show latest router metadata",
-    "/search <query>       Semantic search in chats + vault markdown"
-  ];
+const CHAT_COMMAND_DEFINITIONS = Object.freeze([
+  {
+    command: "/sync",
+    description: "Save transcript (if needed) and trigger sync"
+  },
+  {
+    command: "/sync status",
+    description: "Open live sync status screen (TUI) / print JSON status (plain)"
+  },
+  {
+    command: "/sync conflicts",
+    description: "Show sync conflict details"
+  },
+  {
+    command: "/conv",
+    description: "Return from sync status screen to conversation (TUI)"
+  },
+  {
+    command: "/exit",
+    description: "Save transcript and exit"
+  },
+  {
+    command: "/clear",
+    description: "Clear conversation memory"
+  },
+  {
+    command: "/usage",
+    description: "Show token counters and quota estimates"
+  },
+  {
+    command: "/config",
+    description: "Show active gateway/system settings"
+  },
+  {
+    command: "/system show",
+    description: "Show system prompt"
+  },
+  {
+    command: "/system set",
+    description: "Set system prompt",
+    requiresInput: true
+  },
+  {
+    command: "/system clear",
+    description: "Clear system prompt"
+  },
+  {
+    command: "/routing",
+    description: "Show latest router metadata"
+  },
+  {
+    command: "/search",
+    description: "Semantic search in chats + vault markdown",
+    requiresInput: true
+  }
+]);
+
+function getCommandDefinitions() {
+  return CHAT_COMMAND_DEFINITIONS;
 }
 
-function printHelp() {
-  console.log("Commands:");
-  for (const line of getHelpLines()) {
-    console.log(`  ${line}`);
+function getCommandSuggestions(inputValue, definitions = CHAT_COMMAND_DEFINITIONS) {
+  const normalized = String(inputValue || "").trim().toLowerCase();
+  if (!normalized.startsWith("/")) return [];
+  return definitions.filter((definition) => definition.command.startsWith(normalized));
+}
+
+function completeCommandInput(inputValue, definitions = CHAT_COMMAND_DEFINITIONS) {
+  const suggestions = getCommandSuggestions(inputValue, definitions);
+  if (suggestions.length !== 1) return String(inputValue || "");
+  const selected = suggestions[0];
+  return selected.requiresInput ? `${selected.command} ` : selected.command;
+}
+
+function resolveCommandSubmission(definition) {
+  const command = String(definition?.command || "").trim();
+  if (!command) return null;
+  if (definition?.requiresInput) {
+    return { mode: "fill", line: `${command} ` };
   }
+  return { mode: "submit", line: command };
+}
+
+function getCommandPanelLines(definitions = CHAT_COMMAND_DEFINITIONS) {
+  const commandLabel = (definition) => (definition.requiresInput ? `${definition.command} ...` : definition.command);
+  const width = definitions.reduce((max, definition) => Math.max(max, commandLabel(definition).length), 0);
+  return definitions.map(
+    (definition) => `${commandLabel(definition).padEnd(width)}  ${definition.description}`
+  );
 }
 
 function buildTranscriptPayload({
@@ -774,11 +841,15 @@ async function executeCommand({
 }) {
   const tuiHandlers = createTuiCommandHandlers(handlers);
 
-  if (line === "/help") {
+  if (line === "/") {
+    const commandLines = getCommandPanelLines();
     if (mode === "plain") {
-      printHelp();
+      console.log("Commands:");
+      for (const commandLine of commandLines) {
+        console.log(`  ${commandLine}`);
+      }
     } else {
-      tuiHandlers.panel("commands", getHelpLines());
+      tuiHandlers.panel("commands", commandLines);
     }
     return { handled: true, exit: false };
   }
@@ -800,21 +871,6 @@ async function executeCommand({
         screen: "conversation"
       }
     };
-  }
-
-  if (line === "/save") {
-    const result = await onSaveAndSync(state, { reason: "chat-manual-save" });
-    const transcriptMessage = result.saveResult.path
-      ? `[chat] transcript saved: ${result.saveResult.path}`
-      : "[chat] nothing to save";
-    if (mode === "plain") {
-      console.log(transcriptMessage);
-      console.log(result.summary);
-    } else {
-      tuiHandlers.message(transcriptMessage);
-      tuiHandlers.message(result.summary);
-    }
-    return { handled: true, exit: false };
   }
 
   if (line === "/sync") {
@@ -978,6 +1034,16 @@ async function executeCommand({
       printSearchPlain(searchResult);
     } else {
       tuiHandlers.panel("search", formatSearchPanel(searchResult));
+    }
+    return { handled: true, exit: false };
+  }
+
+  if (line.startsWith("/")) {
+    const hint = `[chat] unknown command: ${line}. Type / to discover commands.`;
+    if (mode === "plain") {
+      console.log(hint);
+    } else {
+      tuiHandlers.message(hint);
     }
     return { handled: true, exit: false };
   }
@@ -1150,12 +1216,89 @@ async function processPrompt({
   };
 }
 
-async function runPlainRepl({ systemPrompt }) {
+function createStartupWarmup({
+  chatCompletion = streamChatCompletion,
+  onWarning
+} = {}) {
+  let promise = null;
+  const connectErrorCodes = new Set([
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ENOTFOUND",
+    "EAI_AGAIN",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_SOCKET"
+  ]);
+  const connectivityPattern =
+    /\b(fetch failed|network error|failed to fetch|econnrefused|enotfound|eai_again|etimedout|connect timeout|connection refused)\b/i;
+  const isConnectivityFailure = (error) => {
+    if (!error) return false;
+    const seen = new Set();
+    const queue = [error];
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current || seen.has(current)) continue;
+      seen.add(current);
+      const message = String(current?.message || current).trim();
+      const code = String(current?.code || current?.errno || "").trim().toUpperCase();
+      if (message && connectivityPattern.test(message)) return true;
+      if (code && connectErrorCodes.has(code)) return true;
+      if (current?.cause && typeof current.cause === "object") {
+        queue.push(current.cause);
+      }
+    }
+    return false;
+  };
+
+  const start = () => {
+    if (promise) return promise;
+
+    const gateway = buildGatewayOptions();
+    promise = chatCompletion({
+      baseUrl: gateway.gatewayUrl,
+      apiKey: gateway.apiKey,
+      body: {
+        model: DEFAULT_GATEWAY_MODEL,
+        stream: false,
+        messages: [{ role: "user", content: "warmup" }]
+      }
+    })
+      .then(() => ({ ok: true }))
+      .catch((error) => {
+        if (!isConnectivityFailure(error)) {
+          const message = `[chat] warning: startup warmup failed (${error instanceof Error ? error.message : String(error)}). continuing without warmup.`;
+          if (onWarning) {
+            onWarning(message);
+          }
+        }
+        return { ok: false, error };
+      });
+
+    return promise;
+  };
+
+  const wait = async () => {
+    if (!promise) return { ok: true, skipped: true };
+    return promise;
+  };
+
+  return { start, wait };
+}
+
+async function runPlainRepl({ systemPrompt, startupWarmup } = {}) {
   const rl = readlinePromises.createInterface({ input, output });
   const state = createReplState({ systemPrompt });
   const statusRenderer = createStatusRenderer();
   const limitsByModel = readLiteLLMLimits();
   const idleSyncMs = Number.isFinite(DEFAULT_IDLE_SYNC_MS) ? Math.max(DEFAULT_IDLE_SYNC_MS, 5000) : 30_000;
+  const warmup =
+    startupWarmup ||
+    createStartupWarmup({
+      onWarning: (message) => console.error(message)
+    });
+  warmup.start();
+  let firstPromptAwaitedWarmup = false;
   let nextIdleSyncAt = null;
   let closing = false;
 
@@ -1221,7 +1364,7 @@ async function runPlainRepl({ systemPrompt }) {
     }
   };
 
-  console.log("massa-vault chat started. type /help for commands.");
+  console.log("massa-vault chat started. type / to discover commands.");
 
   try {
     while (true) {
@@ -1252,6 +1395,10 @@ async function runPlainRepl({ systemPrompt }) {
       }
 
       try {
+        if (!firstPromptAwaitedWarmup) {
+          firstPromptAwaitedWarmup = true;
+          await warmup.wait();
+        }
         state.transcriptSavedPath = null;
         const result = await processPrompt({
           prompt: line,
@@ -1397,6 +1544,11 @@ export {
   buildVaultManifestPayload,
   buildGatewayOptions,
   classifyVaultContextIntent,
+  completeCommandInput,
+  createStartupWarmup,
+  resolveCommandSubmission,
+  getCommandDefinitions,
+  getCommandSuggestions,
   createReplState,
   createStatusLine,
   createStatusRenderer,
@@ -1405,7 +1557,6 @@ export {
   executeCommand,
   formatSearchPanel,
   formatUsagePanel,
-  getHelpLines,
   isInteractiveTuiSupported,
   isVaultContextEnabled,
   main,

@@ -17,7 +17,12 @@ async function loadInkStack(t) {
       render,
       InkChatApp: inkRepl.InkChatApp,
       CHAT_THEME: inkRepl.CHAT_THEME,
-      colorForRole: inkRepl.colorForRole
+      colorForRole: inkRepl.colorForRole,
+      getSlashCommandSuggestions: inkRepl.getSlashCommandSuggestions,
+      moveSlashSuggestionSelection: inkRepl.moveSlashSuggestionSelection,
+      resolveSlashEnterAction: inkRepl.resolveSlashEnterAction,
+      tabCompleteSlashCommandInput: inkRepl.tabCompleteSlashCommandInput,
+      navigatePromptHistory: inkRepl.navigatePromptHistory
     };
   } catch {
     t.skip("Ink dependencies are not installed in this environment");
@@ -93,6 +98,112 @@ test("Ink chat exports role theme colors", async (t) => {
   assert.equal(CHAT_THEME.system, CHAT_THEME.assistant);
   assert.equal(CHAT_THEME.user, "#2f9e44");
   assert.equal(colorForRole("system"), colorForRole("assistant"));
+});
+
+test("slash suggestions filter commands and tab completes only single match", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { getSlashCommandSuggestions, tabCompleteSlashCommandInput } = stack;
+  const root = getSlashCommandSuggestions("/");
+  const syncPrefix = getSlashCommandSuggestions("/sy");
+  const syncStatusPrefix = getSlashCommandSuggestions("/sync s");
+
+  assert.equal(root.length > 6, true);
+  assert.equal(root.some((entry) => entry.command === "/sync"), true);
+  assert.equal(root.some((entry) => entry.command === "/routing"), true);
+  assert.equal(root.some((entry) => entry.command === "/search"), true);
+  assert.equal(root.some((entry) => entry.command === "/save"), false);
+  assert.equal(root.some((entry) => entry.command === "/help"), false);
+  assert.equal(syncPrefix.length > 1, true);
+  assert.deepEqual(syncStatusPrefix.map((entry) => entry.command), ["/sync status"]);
+  assert.equal(tabCompleteSlashCommandInput("/sy"), "/sy");
+  assert.equal(tabCompleteSlashCommandInput("/sync s"), "/sync status");
+  assert.equal(tabCompleteSlashCommandInput("/search"), "/search ");
+  assert.equal(tabCompleteSlashCommandInput("/system set"), "/system set ");
+});
+
+test("slash selection cycles and enter action respects requiresInput", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { moveSlashSuggestionSelection, resolveSlashEnterAction } = stack;
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: null, suggestionCount: 3, direction: "down" }), 0);
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: 0, suggestionCount: 3, direction: "down" }), 1);
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: 2, suggestionCount: 3, direction: "down" }), 0);
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: null, suggestionCount: 3, direction: "up" }), 2);
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: 0, suggestionCount: 3, direction: "up" }), 2);
+  assert.equal(moveSlashSuggestionSelection({ currentIndex: null, suggestionCount: 0, direction: "up" }), null);
+
+  const submitAction = resolveSlashEnterAction({
+    inputValue: "/",
+    suggestions: [{ command: "/sync", description: "sync now" }],
+    selectedIndex: 0
+  });
+  assert.deepEqual(submitAction, { mode: "submit", line: "/sync" });
+
+  const fillAction = resolveSlashEnterAction({
+    inputValue: "/",
+    suggestions: [{ command: "/search", description: "search", requiresInput: true }],
+    selectedIndex: 0
+  });
+  assert.deepEqual(fillAction, { mode: "fill", line: "/search " });
+
+  const noAction = resolveSlashEnterAction({
+    inputValue: "hello",
+    suggestions: [{ command: "/sync", description: "sync now" }],
+    selectedIndex: 0
+  });
+  assert.equal(noAction, null);
+});
+
+test("prompt history navigation restores draft when returning past newest entry", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { navigatePromptHistory } = stack;
+  const history = ["first prompt", "second prompt", "third prompt"];
+
+  const up1 = navigatePromptHistory({
+    history,
+    cursor: null,
+    draft: "",
+    currentInput: "draft value",
+    direction: "up"
+  });
+  assert.equal(up1.cursor, 0);
+  assert.equal(up1.draft, "draft value");
+  assert.equal(up1.nextInput, "third prompt");
+
+  const up2 = navigatePromptHistory({
+    history,
+    cursor: up1.cursor,
+    draft: up1.draft,
+    currentInput: up1.nextInput,
+    direction: "up"
+  });
+  assert.equal(up2.cursor, 1);
+  assert.equal(up2.nextInput, "second prompt");
+
+  const down1 = navigatePromptHistory({
+    history,
+    cursor: up2.cursor,
+    draft: up2.draft,
+    currentInput: up2.nextInput,
+    direction: "down"
+  });
+  assert.equal(down1.cursor, 0);
+  assert.equal(down1.nextInput, "third prompt");
+
+  const down2 = navigatePromptHistory({
+    history,
+    cursor: down1.cursor,
+    draft: down1.draft,
+    currentInput: down1.nextInput,
+    direction: "down"
+  });
+  assert.equal(down2.cursor, null);
+  assert.equal(down2.nextInput, "draft value");
 });
 
 test("Ink footer shows running labels while daemon sync is syncing", async (t) => {
@@ -387,6 +498,77 @@ test("Ink shows thinking timer during delayed chat and animated delayed /sync co
   assert.notEqual(syncFrameA, syncFrameB);
   await pendingSync;
   syncApp.unmount();
+});
+
+test("Ink startup warmup starts once and first prompt waits in-flight warmup", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: false,
+      sync: { status: "idle", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const driver = {};
+    let chatCalls = 0;
+    let startCalls = 0;
+    let waitCalls = 0;
+    let releaseWarmup;
+    const warmupGate = new Promise((resolve) => {
+      releaseWarmup = resolve;
+    });
+    const startupWarmup = {
+      start() {
+        startCalls += 1;
+        return warmupGate;
+      },
+      async wait() {
+        waitCalls += 1;
+        await warmupGate;
+        return { ok: true };
+      }
+    };
+
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        driver,
+        startupWarmup,
+        chatCompletion: async ({ onDelta, onUsage }) => {
+          chatCalls += 1;
+          onDelta("ready");
+          onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+          return {
+            assistantText: "ready",
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            routing: null
+          };
+        }
+      })
+    );
+
+    await delay(20);
+    assert.equal(startCalls, 1);
+
+    const firstPrompt = driver.submit("hello");
+    await delay(30);
+    assert.equal(chatCalls, 0);
+    releaseWarmup();
+    await firstPrompt;
+    await delay(20);
+    assert.equal(chatCalls, 1);
+    assert.equal(waitCalls, 1);
+
+    await driver.submit("second");
+    await delay(20);
+    assert.equal(chatCalls, 2);
+    assert.equal(waitCalls, 1);
+    app.unmount();
+  });
 });
 
 test("Ink /usage command renders compact usage panel", async (t) => {

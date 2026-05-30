@@ -100,7 +100,8 @@ Repository Node entrypoints (`npm run vault*`, `npm run router-gateway`, `npm ru
 - `npm run vault -- chat "your prompt"` runs one-shot chat.
 - `npm run vault -- chat search "query"` runs semantic search over markdown notes + AI chats.
 - `npm run vault -- chat search index` forces/rebuilds local semantic index.
-- REPL commands include `/save` (save transcript + sync) and `/sync` (save if needed + sync).
+- REPL command `/sync` saves transcript if needed and triggers sync.
+- Type `/` in REPL input to see inline slash-command suggestions.
 - `/exit`, Ctrl-C, SIGTERM, and SIGHUP perform best-effort save+sync before exit.
 - Idle save+sync runs automatically after assistant responses (default 30 seconds).
 

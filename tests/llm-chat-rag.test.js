@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  createStartupWarmup,
   createReplState,
   createStatusRenderer,
   executeCommand,
@@ -426,7 +428,40 @@ test("MASSA_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports 
   }
 });
 
-test("executeCommand /save and /sync delegate to save+sync hook", async () => {
+test("executeCommand /sync delegates to save+sync hook", async () => {
+  const state = createReplState({ systemPrompt: "" });
+  const messages = [];
+  let calls = 0;
+
+  const hook = async () => {
+    calls += 1;
+    return {
+      saveResult: {
+        path: "/tmp/transcript.md",
+        saved: true
+      },
+      summary: "[chat] sync status=idle conflicts=0"
+    };
+  };
+
+  const syncResult = await executeCommand({
+    line: "/sync",
+    state,
+    limitsByModel: {},
+    mode: "tui",
+    handlers: {
+      message: (text) => messages.push(text)
+    },
+    onSaveAndSync: hook
+  });
+  assert.equal(syncResult.handled, true);
+  assert.equal(syncResult.exit, false);
+  assert.equal(calls, 1);
+  assert.match(messages.join("\n"), /transcript saved/i);
+  assert.match(messages.join("\n"), /sync status=idle/i);
+});
+
+test("executeCommand treats /save and /help as unknown commands", async () => {
   const state = createReplState({ systemPrompt: "" });
   const messages = [];
   let calls = 0;
@@ -452,11 +487,8 @@ test("executeCommand /save and /sync delegate to save+sync hook", async () => {
     },
     onSaveAndSync: hook
   });
-  assert.equal(saveResult.handled, true);
-  assert.equal(saveResult.exit, false);
-
-  const syncResult = await executeCommand({
-    line: "/sync",
+  const helpResult = await executeCommand({
+    line: "/help",
     state,
     limitsByModel: {},
     mode: "tui",
@@ -465,11 +497,125 @@ test("executeCommand /save and /sync delegate to save+sync hook", async () => {
     },
     onSaveAndSync: hook
   });
-  assert.equal(syncResult.handled, true);
-  assert.equal(syncResult.exit, false);
-  assert.equal(calls, 2);
-  assert.match(messages.join("\n"), /transcript saved/i);
-  assert.match(messages.join("\n"), /sync status=idle/i);
+
+  assert.equal(saveResult.handled, true);
+  assert.equal(helpResult.handled, true);
+  assert.equal(calls, 0);
+  assert.match(messages.join("\n"), /unknown command: \/save/i);
+  assert.match(messages.join("\n"), /unknown command: \/help/i);
+});
+
+test("createStartupWarmup starts once, reuses promise, and sends hidden non-stream request", async () => {
+  let calls = 0;
+  let capturedBody = null;
+  let resolveWarmup;
+  const gate = new Promise((resolve) => {
+    resolveWarmup = resolve;
+  });
+  const warmup = createStartupWarmup({
+    chatCompletion: async ({ body }) => {
+      calls += 1;
+      capturedBody = body;
+      await gate;
+      return { assistantText: "", usage: null, routing: null };
+    }
+  });
+
+  const first = warmup.start();
+  const second = warmup.start();
+  assert.equal(first, second);
+
+  let settled = false;
+  const waitPromise = warmup.wait().then(() => {
+    settled = true;
+  });
+  await delay(10);
+  assert.equal(settled, false);
+  resolveWarmup();
+  await waitPromise;
+
+  assert.equal(calls, 1);
+  assert.equal(capturedBody.model, "smart-router");
+  assert.equal(capturedBody.stream, false);
+  assert.deepEqual(capturedBody.messages, [{ role: "user", content: "warmup" }]);
+});
+
+test("createStartupWarmup connection failures are non-fatal and silent", async () => {
+  const warnings = [];
+  const error = new TypeError("fetch failed");
+  const warmup = createStartupWarmup({
+    chatCompletion: async () => {
+      throw error;
+    },
+    onWarning: (message) => warnings.push(message)
+  });
+
+  warmup.start();
+  const result = await warmup.wait();
+  assert.equal(result.ok, false);
+  assert.equal(result.error, error);
+  assert.equal(warnings.length, 0);
+});
+
+test("createStartupWarmup non-connectivity failures still emit warning", async () => {
+  const warnings = [];
+  const warmup = createStartupWarmup({
+    chatCompletion: async () => {
+      throw new Error("invalid warmup request");
+    },
+    onWarning: (message) => warnings.push(message)
+  });
+
+  warmup.start();
+  const result = await warmup.wait();
+  assert.equal(result.ok, false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /startup warmup failed/i);
+  assert.match(warnings[0], /continuing without warmup/i);
+});
+
+test("first prompt still works after silent warmup fallback", async () => {
+  await withTempDir(async (tempDir) => {
+    writeMinimalConfig(tempDir);
+    const warnings = [];
+    const warmup = createStartupWarmup({
+      chatCompletion: async () => {
+        throw new TypeError("fetch failed");
+      },
+      onWarning: (message) => warnings.push(message)
+    });
+
+    warmup.start();
+    const warmupResult = await warmup.wait();
+    assert.equal(warmupResult.ok, false);
+    assert.equal(warnings.length, 0);
+
+    const history = [];
+    const sessionUsage = createSessionUsage();
+    const estimatedTokensRef = { value: 0 };
+    const result = await processPrompt({
+      prompt: "hello after warmup",
+      history,
+      systemPrompt: "",
+      sessionUsage,
+      estimatedTokensRef,
+      renderMode: "silent",
+      statusRenderer: createStatusRenderer({ stream: { isTTY: false, write() {} } }),
+      vaultContextBuilder: async () => null,
+      chatCompletion: async ({ onUsage }) => {
+        onUsage?.({ prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 });
+        return {
+          assistantText: "ok",
+          usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+          routing: null
+        };
+      }
+    });
+
+    assert.equal(result.assistantText, "ok");
+    assert.equal(history.at(-2)?.content, "hello after warmup");
+    assert.equal(history.at(-1)?.role, "assistant");
+  });
 });
 
 test("executeCommand /sync status in TUI returns sync-screen action without emitting panel/message", async () => {

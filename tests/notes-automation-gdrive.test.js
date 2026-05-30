@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import {
   checkGoogleDriveRemote,
+  cleanupGoogleDriveProtectedArtifacts,
   prepareGoogleDriveSync,
   syncToGoogleDrive,
   validateRcloneRemotePath
 } from "../tools/notes-automation/src/gdrive.js";
+import { PROTECTED_ARTIFACT_GLOBS } from "../tools/notes-automation/src/protected-artifacts.js";
 
 function createResyncRequiredError(
   message = "CRITICAL: cannot find prior Path1 listing file. Must run --resync to recover"
@@ -54,11 +56,33 @@ test("prepareGoogleDriveSync appends required excludes and dry-run flag", () => 
   assert.equal(prepared.command, "bisync");
   assert.equal(prepared.args.includes("--dry-run"), true);
   assert.equal(prepared.args.includes(".git/**"), true);
+  assert.equal(prepared.args.includes(".gitignore"), true);
   assert.equal(prepared.args.includes(".obsidian/workspace.json"), true);
   assert.equal(prepared.args.includes(".automation/**"), true);
   assert.equal(prepared.args.includes(".logs/**"), true);
   assert.equal(prepared.args.includes(".DS_Store"), true);
   assert.equal(prepared.args.includes("**/.DS_Store"), true);
+});
+
+test("cleanupGoogleDriveProtectedArtifacts includes remote .gitignore only", () => {
+  const result = cleanupGoogleDriveProtectedArtifacts(
+    {
+      enabled: true,
+      binary: "rclone",
+      remotePath: "Personal:Obsidian",
+      mode: "bisync",
+      firstRunResync: false,
+      args: []
+    },
+    {
+      run: (_binary, args) => args.join(" "),
+      dryRun: true
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.args.includes(".gitignore"), true);
+  assert.equal(PROTECTED_ARTIFACT_GLOBS.includes(".gitignore"), false);
 });
 
 test("prepareGoogleDriveSync rejects one-way modes", () => {

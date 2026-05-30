@@ -3,10 +3,15 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import {
   buildGatewayOptions,
+  completeCommandInput,
+  createStartupWarmup,
   createReplState,
   executeCommand,
+  getCommandDefinitions,
+  getCommandSuggestions,
   processPrompt,
   readLocalSyncStatusModel,
+  resolveCommandSubmission,
   saveAndSyncSession
 } from "./cli.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
@@ -119,6 +124,82 @@ function modelStatusFromRouting(routing) {
     displayModel: displayModel || "pending",
     modelLocation: modelLocation || "unknown"
   };
+}
+
+export function getSlashCommandSuggestions(inputValue) {
+  const definitions = getCommandDefinitions();
+  return getCommandSuggestions(inputValue, definitions);
+}
+
+export function tabCompleteSlashCommandInput(inputValue) {
+  const definitions = getCommandDefinitions();
+  return completeCommandInput(inputValue, definitions);
+}
+
+export function moveSlashSuggestionSelection({ currentIndex, suggestionCount, direction }) {
+  const count = Math.max(0, Number(suggestionCount) || 0);
+  if (!count) return null;
+  if (direction !== "up" && direction !== "down") {
+    return Number.isInteger(currentIndex) && currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
+  }
+  if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex >= count) {
+    return direction === "up" ? count - 1 : 0;
+  }
+  if (direction === "up") {
+    return (currentIndex - 1 + count) % count;
+  }
+  return (currentIndex + 1) % count;
+}
+
+export function resolveSlashEnterAction({ inputValue, suggestions, selectedIndex }) {
+  if (!String(inputValue || "").trim().startsWith("/")) return null;
+  const visibleSuggestions = Array.isArray(suggestions) ? suggestions : [];
+  if (!visibleSuggestions.length) return null;
+  const nextIndex =
+    Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < visibleSuggestions.length
+      ? selectedIndex
+      : 0;
+  return resolveCommandSubmission(visibleSuggestions[nextIndex]);
+}
+
+export function navigatePromptHistory({
+  history,
+  cursor,
+  draft,
+  currentInput,
+  direction
+}) {
+  const entries = Array.isArray(history) ? history : [];
+  if (!entries.length) {
+    return { cursor, draft, nextInput: currentInput };
+  }
+
+  if (direction === "up") {
+    const nextCursor = cursor === null ? 0 : Math.min(cursor + 1, entries.length - 1);
+    const nextDraft = cursor === null ? currentInput : draft;
+    return {
+      cursor: nextCursor,
+      draft: nextDraft,
+      nextInput: entries[entries.length - 1 - nextCursor]
+    };
+  }
+
+  if (direction === "down") {
+    if (cursor === null) {
+      return { cursor, draft, nextInput: currentInput };
+    }
+    if (cursor === 0) {
+      return { cursor: null, draft, nextInput: draft };
+    }
+    const nextCursor = cursor - 1;
+    return {
+      cursor: nextCursor,
+      draft,
+      nextInput: entries[entries.length - 1 - nextCursor]
+    };
+  }
+
+  return { cursor, draft, nextInput: currentInput };
 }
 
 function inlineSegments(text) {
@@ -264,7 +345,8 @@ export function InkChatApp({
   systemPrompt,
   chatCompletion,
   driver,
-  commandExecutor = executeCommand
+  commandExecutor = executeCommand,
+  startupWarmup
 }) {
   const { exit } = useApp();
   const sessionRef = useRef(createReplState({ systemPrompt }));
@@ -272,9 +354,31 @@ export function InkChatApp({
   const gatewayRef = useRef(buildGatewayOptions());
   const nextIdRef = useRef(0);
   const exitingRef = useRef(false);
-
+  const promptHistoryRef = useRef([]);
+  const promptHistoryCursorRef = useRef(null);
+  const promptHistoryDraftRef = useRef("");
+  const warmupWarningsRef = useRef([]);
+  const warmupMessageSinkRef = useRef(null);
+  const shouldAutoWarmup = Boolean(startupWarmup || !chatCompletion);
+  const warmupRef = useRef(
+    shouldAutoWarmup
+      ? startupWarmup ||
+          createStartupWarmup({
+            onWarning: (message) => {
+              const sink = warmupMessageSinkRef.current;
+              if (sink) {
+                sink(message);
+              } else {
+                warmupWarningsRef.current.push(message);
+              }
+            }
+          })
+      : null
+  );
+  const warmupAwaitedRef = useRef(false);
   const [items, setItems] = useState([]);
   const [inputValue, setInputValue] = useState("");
+  const [slashSelectionIndex, setSlashSelectionIndex] = useState(null);
   const [isBusy, setIsBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
   const [screen, setScreen] = useState("conversation");
@@ -287,6 +391,19 @@ export function InkChatApp({
   const [assistantPendingId, setAssistantPendingId] = useState(null);
   const inputBusyEllipsis = useAnimatedEllipsis(isBusy);
   const thinkingSeconds = useElapsedSeconds(Boolean(assistantPendingId) && isBusy);
+  const slashSuggestions = getSlashCommandSuggestions(inputValue);
+  const showSlashSuggestions =
+    !isBusy && screen === "conversation" && String(inputValue || "").startsWith("/");
+  const effectiveSlashSelectionIndex = showSlashSuggestions
+    ? moveSlashSuggestionSelection({
+        currentIndex: slashSelectionIndex,
+        suggestionCount: slashSuggestions.length,
+        direction: null
+      })
+    : null;
+  const selectedSlashSuggestion = showSlashSuggestions
+    ? slashSuggestions[effectiveSlashSelectionIndex] || null
+    : null;
 
   const refreshLiveTokenCount = useCallback((overrideValue) => {
     if (typeof overrideValue === "number" && Number.isFinite(overrideValue)) {
@@ -325,6 +442,28 @@ export function InkChatApp({
     },
     [appendItem]
   );
+
+  const handleInputChange = useCallback((nextValue) => {
+    setInputValue(nextValue);
+    if (promptHistoryCursorRef.current !== null) {
+      promptHistoryCursorRef.current = null;
+      promptHistoryDraftRef.current = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showSlashSuggestions || !slashSuggestions.length) {
+      setSlashSelectionIndex(null);
+      return;
+    }
+    setSlashSelectionIndex((currentIndex) =>
+      moveSlashSuggestionSelection({
+        currentIndex,
+        suggestionCount: slashSuggestions.length,
+        direction: null
+      })
+    );
+  }, [showSlashSuggestions, slashSuggestions]);
 
   const appendPanel = useCallback(
     (title, lines) => {
@@ -387,9 +526,19 @@ export function InkChatApp({
 
   const handleSubmit = useCallback(
     async (value) => {
-      const line = String(value || "").trim();
+      if (isBusy) return;
+      const slashEnterAction = resolveSlashEnterAction({
+        inputValue: value,
+        suggestions: showSlashSuggestions ? slashSuggestions : [],
+        selectedIndex: slashSelectionIndex
+      });
+      if (slashEnterAction?.mode === "fill") {
+        setInputValue(slashEnterAction.line);
+        return;
+      }
+      const line = String(slashEnterAction?.line ?? value ?? "").trim();
       setInputValue("");
-      if (!line || isBusy) return;
+      if (!line) return;
 
       const state = sessionRef.current;
       setBusyLabel(line.startsWith("/") ? `running ${line}` : "processing prompt");
@@ -416,7 +565,7 @@ export function InkChatApp({
             setSyncNotice("");
           }
         }
-        if (line === "/save" || line === "/sync" || line.startsWith("/sync ")) {
+        if (line === "/sync" || line.startsWith("/sync ")) {
           if (!action?.syncStatus) {
             refreshSyncStatus();
           }
@@ -439,6 +588,16 @@ export function InkChatApp({
         }
 
         appendMessage("user", line);
+        if (promptHistoryRef.current.length >= 200) {
+          promptHistoryRef.current.shift();
+        }
+        promptHistoryRef.current.push(line);
+        promptHistoryCursorRef.current = null;
+        promptHistoryDraftRef.current = "";
+        if (!warmupAwaitedRef.current && warmupRef.current) {
+          warmupAwaitedRef.current = true;
+          await warmupRef.current.wait();
+        }
         const assistantMessageId = createAssistantMessage();
         let streamedAny = false;
         state.transcriptSavedPath = null;
@@ -506,6 +665,9 @@ export function InkChatApp({
       createAssistantMessage,
       finalizeExit,
       isBusy,
+      slashSelectionIndex,
+      slashSuggestions,
+      showSlashSuggestions,
       screen,
       refreshLiveTokenCount,
       refreshModelStatus,
@@ -517,8 +679,44 @@ export function InkChatApp({
   useInput((value, key) => {
     if (key.ctrl && value === "c") {
       void finalizeExit();
+      return;
     }
-  });
+    if (isBusy || screen !== "conversation") {
+      return;
+    }
+    if (key.tab) {
+      const completed = tabCompleteSlashCommandInput(inputValue);
+      if (completed !== inputValue) {
+        setInputValue(completed);
+      }
+      return;
+    }
+    if (key.upArrow || key.downArrow) {
+      const direction = key.upArrow ? "up" : "down";
+      if (showSlashSuggestions) {
+        setSlashSelectionIndex((currentIndex) =>
+          moveSlashSuggestionSelection({
+            currentIndex,
+            suggestionCount: slashSuggestions.length,
+            direction
+          })
+        );
+        return;
+      }
+      const next = navigatePromptHistory({
+        history: promptHistoryRef.current,
+        cursor: promptHistoryCursorRef.current,
+        draft: promptHistoryDraftRef.current,
+        currentInput: inputValue,
+        direction
+      });
+      promptHistoryCursorRef.current = next.cursor;
+      promptHistoryDraftRef.current = next.draft;
+      if (next.nextInput !== inputValue) {
+        setInputValue(next.nextInput);
+      }
+    }
+  }, [finalizeExit, inputValue, isBusy, screen, showSlashSuggestions, slashSuggestions]);
 
   useEffect(() => {
     const handleSignal = () => {
@@ -535,8 +733,23 @@ export function InkChatApp({
   }, [finalizeExit]);
 
   useEffect(() => {
-    appendMessage("system", "massa-vault chat started. type /help for commands.");
+    appendMessage("system", "massa-vault chat started. type / to discover commands.");
   }, [appendMessage]);
+
+  useEffect(() => {
+    warmupMessageSinkRef.current = (message) => appendMessage("system", message);
+    const pendingWarnings = warmupWarningsRef.current.splice(0);
+    for (const warning of pendingWarnings) {
+      appendMessage("system", warning);
+    }
+    return () => {
+      warmupMessageSinkRef.current = null;
+    };
+  }, [appendMessage]);
+
+  useEffect(() => {
+    warmupRef.current?.start();
+  }, []);
 
   useEffect(() => {
     if (screen !== "sync") return;
@@ -704,7 +917,7 @@ export function InkChatApp({
     ? "Sync screen active. Type /conv to return"
     : isBusy
       ? `${busyLabel || "working"}${inputBusyEllipsis || "."}`
-      : "Type message or /help";
+      : "Type message or /";
 
   return createElement(
     Box,
@@ -783,12 +996,38 @@ export function InkChatApp({
       createElement(Text, { color: CHAT_THEME.user }, "you> "),
       createElement(TextInput, {
         value: inputValue,
-        onChange: setInputValue,
+        onChange: handleInputChange,
         onSubmit: handleSubmit,
         placeholder: inputPlaceholder,
         focus: !isBusy
       })
     ),
+    showSlashSuggestions
+      ? createElement(
+          Box,
+          {
+            marginTop: 1,
+            borderStyle: "single",
+            borderColor: "gray",
+            paddingX: 1,
+            flexDirection: "column"
+          },
+          slashSuggestions.length
+            ? slashSuggestions.map((suggestion, index) => {
+                const isSelected = selectedSlashSuggestion?.command === suggestion.command && effectiveSlashSelectionIndex === index;
+                const commandLabel = suggestion.requiresInput ? `${suggestion.command} ...` : suggestion.command;
+                return createElement(
+                  Text,
+                  {
+                    key: suggestion.command,
+                    color: isSelected ? "green" : "gray"
+                  },
+                  `${isSelected ? "> " : "  "}${commandLabel}  ${suggestion.description}`
+                );
+              })
+            : createElement(Text, { color: "gray" }, "No command matches")
+        )
+      : null,
     createElement(
       Box,
       {
@@ -810,8 +1049,8 @@ export function InkChatApp({
   );
 }
 
-export async function runInkRepl({ systemPrompt }) {
-  const instance = render(createElement(InkChatApp, { systemPrompt }), {
+export async function runInkRepl({ systemPrompt, startupWarmup } = {}) {
+  const instance = render(createElement(InkChatApp, { systemPrompt, startupWarmup }), {
     exitOnCtrlC: false
   });
   await instance.waitUntilExit();

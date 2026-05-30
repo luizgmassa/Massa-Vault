@@ -121,6 +121,8 @@ function buildConfig({
       "--exclude",
       ".git/**",
       "--exclude",
+      ".gitignore",
+      "--exclude",
       ".obsidian/workspace.json",
       "--exclude",
       ".automation/**",

@@ -5,10 +5,12 @@ import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
 
 const REQUIRED_GDRIVE_EXCLUDES = [
   ".git/**",
+  ".gitignore",
   ".obsidian/workspace.json",
   ".logs/**",
   ...PROTECTED_ARTIFACT_GLOBS
 ];
+const REMOTE_CLEANUP_GLOBS = [...PROTECTED_ARTIFACT_GLOBS, ".gitignore"];
 const ALLOWED_RESYNC_MODES = new Set(["path1", "path2", "newer", "older"]);
 
 function resolveResyncMode(value, { fallback = "newer" } = {}) {
@@ -201,7 +203,7 @@ export function cleanupGoogleDriveProtectedArtifacts(
   { run = execFileSync, dryRun = false } = {}
 ) {
   const includeArgs = [];
-  for (const pattern of PROTECTED_ARTIFACT_GLOBS) {
+  for (const pattern of REMOTE_CLEANUP_GLOBS) {
     includeArgs.push("--include", pattern);
   }
 
