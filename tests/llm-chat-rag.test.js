@@ -981,3 +981,110 @@ test("executeCommand /history add_context queues transcript context without muta
     assert.equal(state.history[0].content, "keep this");
   });
 });
+
+test("executeCommand /history summary uses injected LLM runner and keeps transcript history unchanged", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const transcriptPath = path.join(chatDir, "16-00-00--summary.md");
+    fs.writeFileSync(
+      transcriptPath,
+      "---\nid: \"summary\"\n---\n\n## USER\nNeed rollout plan\n\n## ASSISTANT\nShip in phases.\n",
+      "utf8"
+    );
+
+    const state = createReplState({ systemPrompt: "" });
+    state.history.push({ role: "user", content: "keep conversation" });
+    state.historyVisibleRows = [
+      {
+        number: 1,
+        transcriptPath,
+        relativePath: "AI Chats/2026-05-30/16-00-00--summary.md",
+        fileName: "16-00-00--summary.md",
+        date: "2026-05-30",
+        time: "16:00:00",
+        title: "summary",
+        score: null,
+        snippet: ""
+      }
+    ];
+
+    let summaryCalls = 0;
+    let capturedMarkdown = "";
+    const result = await executeCommand({
+      line: "/history summary 1",
+      state,
+      limitsByModel: {},
+      mode: "tui",
+      historySummaryRunner: async ({ transcriptMarkdown }) => {
+        summaryCalls += 1;
+        capturedMarkdown = String(transcriptMarkdown || "");
+        return {
+          summary: "User asked for rollout plan. Assistant suggested phased delivery.",
+          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+          routing: { targetModel: "smart-router-general" }
+        };
+      }
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.action?.screen, "history");
+    assert.equal(result.action?.historyPanel?.renderMarkdown, true);
+    assert.match(result.action?.historyPanel?.lines?.join("\n") || "", /History summary/i);
+    assert.match(result.action?.historyPanel?.lines?.join("\n") || "", /User asked for rollout plan\./);
+    assert.match(capturedMarkdown, /## USER/);
+    assert.equal(summaryCalls, 1);
+    assert.equal(state.history.length, 1);
+    assert.equal(state.history[0].content, "keep conversation");
+    assert.equal(state.sessionUsage.total_tokens, 3);
+  });
+});
+
+test("executeCommand /history preview returns scrollable markdown preview and keeps transcript history unchanged", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const transcriptPath = path.join(chatDir, "17-00-00--preview.md");
+    fs.writeFileSync(
+      transcriptPath,
+      "---\nid: \"preview\"\n---\n\n## USER\nhello\n\n## ASSISTANT\nworld\n",
+      "utf8"
+    );
+
+    const state = createReplState({ systemPrompt: "" });
+    state.history.push({ role: "assistant", content: "keep chat" });
+    state.historyVisibleRows = [
+      {
+        number: 1,
+        transcriptPath,
+        relativePath: "AI Chats/2026-05-30/17-00-00--preview.md",
+        fileName: "17-00-00--preview.md",
+        date: "2026-05-30",
+        time: "17:00:00",
+        title: "preview",
+        score: null,
+        snippet: ""
+      }
+    ];
+
+    const result = await executeCommand({
+      line: "/history preview 1",
+      state,
+      limitsByModel: {},
+      mode: "tui"
+    });
+
+    const panelText = result.action?.historyPanel?.lines?.join("\n") || "";
+    assert.equal(result.handled, true);
+    assert.equal(result.action?.screen, "history");
+    assert.equal(result.action?.historyPanel?.scrollable, true);
+    assert.equal(result.action?.historyPanel?.previewMode, true);
+    assert.match(panelText, /```markdown/);
+    assert.match(panelText, /## USER/);
+    assert.match(panelText, /## ASSISTANT/);
+    assert.equal(state.history.length, 1);
+    assert.equal(state.history[0].content, "keep chat");
+  });
+});

@@ -33,6 +33,7 @@ export function colorForRole(role) {
 }
 
 const ASSISTANT_PENDING_TOKEN = "__assistant_pending__";
+const HISTORY_PREVIEW_VIEWPORT_LINES = 24;
 
 function useAnimatedEllipsis(active, intervalMs = 250) {
   const frames = [".", "..", "..."];
@@ -82,6 +83,10 @@ function formatElapsed(seconds) {
   const minutes = Math.floor(safe / 60);
   const remainder = safe % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function compactSyncLabel(syncStatus, backendName) {
@@ -275,7 +280,7 @@ function formatTable(lines, startIndex) {
     )
   );
   const renderRow = (row) => `| ${widths.map((width, column) => String(row[column] || "").padEnd(width)).join(" | ")} |`;
-  const separator = `| ${widths.map((width) => "-".repeat(Math.max(3, width))).join(" | ")} |`;
+  const separator = `| ${widths.map((width) => "-".repeat(Math.max(1, width))).join(" | ")} |`;
 
   return {
     lines: [renderRow(header), separator, ...rows.map((row) => renderRow(row))],
@@ -341,18 +346,27 @@ function markdownLines(markdown) {
   return rendered.length ? rendered : [{ text: "" }];
 }
 
-function renderInlineLine({ id, text, color, bold = false, code = false, prefix = "" }) {
+function renderInlineLine({
+  id,
+  text,
+  color,
+  bold = false,
+  code = false,
+  prefix = "",
+  forceColor = false
+}) {
+  const baseColor = code && !forceColor ? CHAT_THEME.code : color;
   const segments = inlineSegments(text);
   return createElement(
     Text,
-    { key: id, color: code ? CHAT_THEME.code : color, bold },
+    { key: id, color: baseColor, bold },
     prefix,
     ...segments.map((segment, index) =>
       createElement(
         Text,
         {
           key: `${id}-${index}`,
-          color: segment.code ? CHAT_THEME.code : color,
+          color: segment.code && !forceColor ? CHAT_THEME.code : baseColor,
           bold: bold || segment.bold
         },
         segment.text
@@ -405,10 +419,14 @@ export function InkChatApp({
   const [syncStatus, setSyncStatus] = useState(() => readLocalSyncStatusModel());
   const [syncNotice, setSyncNotice] = useState("");
   const [historyPanel, setHistoryPanel] = useState(() => ({
-    title: "history",
-    lines: ["run /history to load transcript dates"]
+    title: "History",
+    lines: ["Run /history to load transcript dates."],
+    renderMarkdown: true,
+    scrollable: false,
+    previewMode: false
   }));
   const [historyNotice, setHistoryNotice] = useState("");
+  const [historyScrollOffset, setHistoryScrollOffset] = useState(0);
   const [modelStatus, setModelStatus] = useState(() => modelStatusFromRouting(null));
   const [liveTokenCount, setLiveTokenCount] = useState(() =>
     Number(sessionRef.current.estimatedTokensRef.value || 0)
@@ -592,9 +610,13 @@ export function InkChatApp({
             setHistoryNotice("");
             if (action.historyPanel && Array.isArray(action.historyPanel.lines)) {
               setHistoryPanel({
-                title: String(action.historyPanel.title || "history"),
-                lines: action.historyPanel.lines
+                title: String(action.historyPanel.title || "History"),
+                lines: action.historyPanel.lines,
+                renderMarkdown: action.historyPanel.renderMarkdown !== false,
+                scrollable: Boolean(action.historyPanel.scrollable),
+                previewMode: Boolean(action.historyPanel.previewMode)
               });
+              setHistoryScrollOffset(0);
             }
           } else if (action.screen === "conversation") {
             setScreen("conversation");
@@ -631,7 +653,7 @@ export function InkChatApp({
           return;
         }
         if (screen === "history") {
-          setHistoryNotice("history screen active; run /conv or use /history commands");
+          setHistoryNotice("History screen active. Run /conv or use /history commands.");
           return;
         }
 
@@ -737,7 +759,20 @@ export function InkChatApp({
       void finalizeExit();
       return;
     }
-    if (isBusy || screen !== "conversation") {
+    if (isBusy) {
+      return;
+    }
+    if (screen === "history" && historyPanel.scrollable && (key.upArrow || key.downArrow)) {
+      const panelLines = Array.isArray(historyPanel.lines) ? historyPanel.lines : [];
+      const renderedCount = historyPanel.renderMarkdown
+        ? markdownLines(panelLines.join("\n")).length
+        : panelLines.length;
+      const maxOffset = Math.max(0, renderedCount - HISTORY_PREVIEW_VIEWPORT_LINES);
+      const delta = key.downArrow ? 1 : -1;
+      setHistoryScrollOffset((current) => clamp(current + delta, 0, maxOffset));
+      return;
+    }
+    if (screen !== "conversation") {
       return;
     }
     if (key.tab) {
@@ -772,7 +807,34 @@ export function InkChatApp({
         setInputValue(next.nextInput);
       }
     }
-  }, [finalizeExit, inputValue, isBusy, screen, showSlashSuggestions, slashSuggestions]);
+  }, [
+    finalizeExit,
+    historyPanel.lines,
+    historyPanel.renderMarkdown,
+    historyPanel.scrollable,
+    inputValue,
+    isBusy,
+    screen,
+    showSlashSuggestions,
+    slashSuggestions
+  ]);
+
+  useEffect(() => {
+    if (!historyPanel.scrollable) {
+      if (historyScrollOffset !== 0) {
+        setHistoryScrollOffset(0);
+      }
+      return;
+    }
+    const panelLines = Array.isArray(historyPanel.lines) ? historyPanel.lines : [];
+    const renderedCount = historyPanel.renderMarkdown
+      ? markdownLines(panelLines.join("\n")).length
+      : panelLines.length;
+    const maxOffset = Math.max(0, renderedCount - HISTORY_PREVIEW_VIEWPORT_LINES);
+    if (historyScrollOffset > maxOffset) {
+      setHistoryScrollOffset(maxOffset);
+    }
+  }, [historyPanel.lines, historyPanel.renderMarkdown, historyPanel.scrollable, historyScrollOffset]);
 
   useEffect(() => {
     const handleSignal = () => {
@@ -970,6 +1032,24 @@ export function InkChatApp({
     `Auth: ${gatewayRef.current.apiKey ? "On" : "Off"}`;
   const syncScreenActive = screen === "sync";
   const historyScreenActive = screen === "history";
+  const historyPanelLines = Array.isArray(historyPanel.lines) ? historyPanel.lines : [];
+  const historyRenderedLines = historyPanel.renderMarkdown
+    ? markdownLines(historyPanelLines.join("\n"))
+    : historyPanelLines.map((line) => ({ text: String(line || "") }));
+  const historyViewportSize = historyPanel.scrollable
+    ? HISTORY_PREVIEW_VIEWPORT_LINES
+    : historyRenderedLines.length;
+  const maxHistoryScrollOffset = Math.max(0, historyRenderedLines.length - historyViewportSize);
+  const safeHistoryScrollOffset = historyPanel.scrollable
+    ? clamp(historyScrollOffset, 0, maxHistoryScrollOffset)
+    : 0;
+  const visibleHistoryRenderedLines = historyPanel.scrollable
+    ? historyRenderedLines.slice(safeHistoryScrollOffset, safeHistoryScrollOffset + historyViewportSize)
+    : historyRenderedLines;
+  const historyScrollStart = historyRenderedLines.length ? safeHistoryScrollOffset + 1 : 0;
+  const historyScrollEnd = historyRenderedLines.length
+    ? Math.min(safeHistoryScrollOffset + historyViewportSize, historyRenderedLines.length)
+    : 0;
   const inputPlaceholder = syncScreenActive
     ? "Sync screen active. Type /conv to return"
     : historyScreenActive
@@ -1045,13 +1125,27 @@ export function InkChatApp({
           ? createElement(
               Box,
               { flexDirection: "column" },
-              createElement(Text, { color: "yellowBright", bold: true }, `${historyPanel.title || "history"}`),
-              historyNotice ? createElement(Text, { color: "yellow" }, historyNotice) : null,
-              ...(Array.isArray(historyPanel.lines) && historyPanel.lines.length
-                ? historyPanel.lines.map((line, index) =>
-                    createElement(Text, { key: `history-${index}`, color: "yellow" }, line)
+              createElement(Text, { color: CHAT_THEME.assistant, bold: true }, `${historyPanel.title || "History"}`),
+              historyNotice ? createElement(Text, { color: CHAT_THEME.assistant }, historyNotice) : null,
+              historyPanel.scrollable
+                ? createElement(
+                    Text,
+                    { color: CHAT_THEME.assistant },
+                    `Preview scroll : ${historyScrollStart}-${historyScrollEnd} / ${historyRenderedLines.length} (Up/Down)`
                   )
-                : [createElement(Text, { key: "history-empty", color: "gray" }, "no history output")])
+                : null,
+              ...(visibleHistoryRenderedLines.length
+                ? visibleHistoryRenderedLines.map((line, index) =>
+                    renderInlineLine({
+                      id: `history-${index}`,
+                      text: line.text === "" ? " " : line.text,
+                      color: CHAT_THEME.assistant,
+                      bold: line.bold,
+                      code: line.code,
+                      forceColor: true
+                    })
+                  )
+                : [createElement(Text, { key: "history-empty", color: CHAT_THEME.assistant }, "No history output.")])
             )
         : visibleItems.length
           ? visibleItems.map((item) => renderItem(item))

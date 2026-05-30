@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -34,6 +35,7 @@ const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_AUTOMATION_CLI_PATH = path.resolve("tools/notes-automation/src/cli.js");
 const DEFAULT_RAG_CHUNK_LIMIT = 5;
 const DEFAULT_RAG_MAX_CHARS = 6000;
+const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
 const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
 const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 const VAULT_CONTEXT_MODES = ["semantic", "manifest"];
@@ -588,49 +590,198 @@ function createHistoryRowsFromSearchResults(results, vaultPath) {
     });
 }
 
+function escapeHistoryTableCell(value) {
+  return String(value ?? "")
+    .replace(/\|/g, "\\|")
+    .replace(/\r?\n/g, " ")
+    .trim();
+}
+
+function buildHistoryMarkdownTable(headers, rows) {
+  const safeHeaders = (Array.isArray(headers) ? headers : []).map((header) =>
+    escapeHistoryTableCell(header)
+  );
+  const safeRows = (Array.isArray(rows) ? rows : []).map((row) =>
+    (Array.isArray(row) ? row : []).map((cell) => escapeHistoryTableCell(cell))
+  );
+
+  return [
+    `| ${safeHeaders.join(" | ")} |`,
+    `| ${safeHeaders.map(() => "---").join(" | ")} |`,
+    ...safeRows.map((row) => `| ${row.join(" | ")} |`)
+  ];
+}
+
+function spacingForHistorySentences(text) {
+  const source = String(text || "").trim();
+  if (!source) return [];
+  const lines = [];
+  const sentences = source.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [source];
+  for (const sentence of sentences.map((part) => part.trim()).filter(Boolean)) {
+    if (lines.length) lines.push("");
+    lines.push(sentence);
+  }
+  return lines.length ? lines : [source];
+}
+
 function formatHistoryDateLines({ rows }) {
   const list = Array.isArray(rows) ? rows : [];
-  const lines = ["history dates (newest first)"];
+  const lines = ["## History dates", "", "History dates (newest first).", ""];
   if (!list.length) {
-    lines.push("no transcript date folders found under AI Chats/");
-    lines.push("usage: /history date <number|YYYY-MM-DD>");
+    lines.push("No transcript date folders found under `AI Chats/`.");
+    lines.push("");
+    lines.push("Usage : `/history date <number|YYYY-MM-DD>`");
     return lines;
   }
 
-  for (const row of list) {
-    lines.push(`${String(row.number).padStart(2, " ")}  ${row.date}  conversations=${row.count}`);
-  }
-  lines.push("usage: /history date <number|YYYY-MM-DD>");
-  lines.push("tip: /history search <query>");
+  lines.push(
+    ...buildHistoryMarkdownTable(
+      ["#", "Date", "Conversations"],
+      list.map((row) => [String(row.number), row.date, String(row.count)])
+    )
+  );
+  lines.push("");
+  lines.push("Usage : `/history date <number|YYYY-MM-DD>`");
+  lines.push("Tip : `/history search <query>`");
   return lines;
 }
 
 function formatHistoryConversationLines({ rows, title, includeScore = false }) {
   const list = Array.isArray(rows) ? rows : [];
-  const lines = [title || "history conversations"];
+  const heading = String(title || "History conversations").trim() || "History conversations";
+  const lines = [`## ${heading}`];
   if (!list.length) {
-    lines.push("no conversations found");
-    lines.push("usage: /history date <number|YYYY-MM-DD> | /history search <query>");
+    lines.push("");
+    lines.push("No conversations found.");
+    lines.push("");
+    lines.push("Usage : `/history date <number|YYYY-MM-DD>` | `/history search <query>`");
     return lines;
   }
 
-  const header = includeScore ? "#  time      date        score   transcript" : "#  time      date        transcript";
-  lines.push(header);
-  lines.push(includeScore ? "-- -------- ---------- ------- ------------------------------" : "-- -------- ---------- ------------------------------");
-  for (const row of list) {
-    const label = truncateText(`${row.fileName}`, 42);
-    if (includeScore) {
-      const scoreText = Number.isFinite(row.score) ? row.score.toFixed(4) : "0.0000";
-      lines.push(`${String(row.number).padStart(2, " ")}  ${row.time}  ${row.date || "----------"}  ${scoreText}  ${label}`);
-    } else {
-      lines.push(`${String(row.number).padStart(2, " ")}  ${row.time}  ${row.date || "----------"}  ${label}`);
-    }
-    if (row.snippet) {
-      lines.push(`    ${truncateText(row.snippet, 90)}`);
-    }
-  }
-  lines.push("usage: /history switch <number> | /history add_context <number> | /conv");
+  lines.push("");
+  const headers = includeScore
+    ? ["#", "Time", "Date", "Score", "Transcript", "Snippet"]
+    : ["#", "Time", "Date", "Transcript", "Snippet"];
+  lines.push(
+    ...buildHistoryMarkdownTable(
+      headers,
+      list.map((row) => {
+        const transcriptLabel = truncateText(`${row.fileName}`, 54);
+        const snippet = row.snippet ? truncateText(row.snippet, 90) : "-";
+        if (includeScore) {
+          const scoreText = Number.isFinite(row.score) ? row.score.toFixed(4) : "0.0000";
+          return [
+            String(row.number),
+            row.time || "--:--:--",
+            row.date || "-",
+            scoreText,
+            transcriptLabel,
+            snippet
+          ];
+        }
+        return [String(row.number), row.time || "--:--:--", row.date || "-", transcriptLabel, snippet];
+      })
+    )
+  );
+  lines.push("");
+  lines.push("Usage : `/history switch <number>` | `/history add_context <number>` | `/conv`");
   return lines;
+}
+
+function formatHistorySummaryLines({ row, summary }) {
+  const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
+  const lines = ["## History summary", ""];
+  lines.push(
+    ...buildHistoryMarkdownTable(
+      ["Field", "Value"],
+      [
+        ["Conversation", title],
+        ["Date", row?.date || "-"],
+        ["Time", row?.time || "--:--:--"]
+      ]
+    )
+  );
+  lines.push("");
+  lines.push("### Summary");
+  lines.push("");
+  const sentenceLines = spacingForHistorySentences(summary);
+  lines.push(...(sentenceLines.length ? sentenceLines : ["No summary generated."]));
+  lines.push("");
+  lines.push("Usage : `/history preview <number>` | `/history switch <number>` | `/conv`");
+  return lines;
+}
+
+function formatHistoryPreviewLines({ row, transcriptMarkdown }) {
+  const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
+  const lines = ["## History preview", ""];
+  lines.push(
+    ...buildHistoryMarkdownTable(
+      ["Field", "Value"],
+      [
+        ["Conversation", title],
+        ["Date", row?.date || "-"],
+        ["Time", row?.time || "--:--:--"]
+      ]
+    )
+  );
+  lines.push("");
+  lines.push("### Transcript");
+  lines.push("");
+  lines.push("```markdown");
+  lines.push(...String(transcriptMarkdown || "").split(/\r?\n/));
+  lines.push("```");
+  lines.push("");
+  lines.push("Usage : `Up/Down scroll` | `/conv`");
+  return lines;
+}
+
+function readTranscriptMarkdownFile(filePath) {
+  return fs.readFileSync(filePath, "utf8");
+}
+
+async function summarizeHistoryTranscript({
+  row,
+  transcriptMarkdown,
+  chatCompletion = streamChatCompletion
+}) {
+  const gateway = buildGatewayOptions();
+  const source = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
+  const transcriptText = String(transcriptMarkdown || "").trim();
+  const cappedTranscript =
+    transcriptText.length > DEFAULT_HISTORY_SUMMARY_MAX_CHARS
+      ? `${transcriptText.slice(0, DEFAULT_HISTORY_SUMMARY_MAX_CHARS)}\n\n[truncated for summary]`
+      : transcriptText;
+  const response = await chatCompletion({
+    baseUrl: gateway.gatewayUrl,
+    apiKey: gateway.apiKey,
+    body: {
+      model: DEFAULT_GATEWAY_MODEL,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You summarize saved AI chat transcripts. Be concise. Return plain Markdown text with short sentences."
+        },
+        {
+          role: "user",
+          content: [
+            "Summarize this transcript in 3 to 5 short sentences.",
+            "Include: user goal, key answer/result, and any follow-up action.",
+            "Do not include code fences.",
+            `Transcript source: ${source}`,
+            "",
+            cappedTranscript || "[empty transcript]"
+          ].join("\n")
+        }
+      ]
+    }
+  });
+  return {
+    summary: String(response?.assistantText || "").trim(),
+    usage: response?.usage || null,
+    routing: response?.routing || null
+  };
 }
 
 function buildHistoryContextText({ row, transcript, maxChars = DEFAULT_RAG_MAX_CHARS }) {
@@ -760,6 +911,16 @@ const CHAT_COMMAND_DEFINITIONS = Object.freeze([
   {
     command: "/history add_context",
     description: "Inject selected history conversation into next prompt",
+    requiresInput: true
+  },
+  {
+    command: "/history summary",
+    description: "Generate short LLM summary for selected history row",
+    requiresInput: true
+  },
+  {
+    command: "/history preview",
+    description: "Open full transcript preview for selected history row",
     requiresInput: true
   },
   {
@@ -1059,6 +1220,25 @@ function createTuiCommandHandlers(handlers) {
   };
 }
 
+function createHistoryScreenAction({
+  title = "History",
+  lines = [],
+  scrollable = false,
+  previewMode = false
+} = {}) {
+  return {
+    type: "switch-screen",
+    screen: "history",
+    historyPanel: {
+      title,
+      lines,
+      renderMarkdown: true,
+      scrollable,
+      previewMode
+    }
+  };
+}
+
 async function executeCommand({
   line,
   state,
@@ -1067,7 +1247,9 @@ async function executeCommand({
   handlers = {},
   onSaveAndSync = saveAndSyncSession,
   historySearchRunner = runSearch,
-  transcriptReader = readTranscript
+  transcriptReader = readTranscript,
+  transcriptMarkdownReader = readTranscriptMarkdownFile,
+  historySummaryRunner = summarizeHistoryTranscript
 }) {
   const tuiHandlers = createTuiCommandHandlers(handlers);
 
@@ -1124,21 +1306,17 @@ async function executeCommand({
     return {
       handled: true,
       exit: false,
-      action: {
-        type: "switch-screen",
-        screen: "history",
-        historyPanel: {
-          title: "history",
-          lines: historyLines
-        }
-      }
+      action: createHistoryScreenAction({
+        title: "History",
+        lines: historyLines
+      })
     };
   }
 
   if (line === "/history date" || line.startsWith("/history date ")) {
     const rawInput = line.slice("/history date".length).trim();
     if (!rawInput) {
-      const usage = "usage: /history date <number|YYYY-MM-DD>";
+      const usage = "Usage : /history date <number|YYYY-MM-DD>";
       if (mode === "plain") {
         console.log(usage);
       } else {
@@ -1159,7 +1337,7 @@ async function executeCommand({
     }
 
     if (!selectedDate) {
-      const notFound = `[history] date not found: ${rawInput}`;
+      const notFound = `[History] Date not found : ${rawInput}`;
       if (mode === "plain") {
         console.log(notFound);
       } else {
@@ -1173,7 +1351,7 @@ async function executeCommand({
     state.historyVisibleRows = rows;
     const historyLines = formatHistoryConversationLines({
       rows,
-      title: `history conversations for ${selectedDate}`
+      title: `History conversations for ${selectedDate}`
     });
 
     if (mode === "plain") {
@@ -1186,21 +1364,17 @@ async function executeCommand({
     return {
       handled: true,
       exit: false,
-      action: {
-        type: "switch-screen",
-        screen: "history",
-        historyPanel: {
-          title: "history",
-          lines: historyLines
-        }
-      }
+      action: createHistoryScreenAction({
+        title: "History",
+        lines: historyLines
+      })
     };
   }
 
   if (line === "/history search" || line.startsWith("/history search ")) {
     const query = line.slice("/history search".length).trim();
     if (!query) {
-      const usage = "usage: /history search <query>";
+      const usage = "Usage : /history search <query>";
       if (mode === "plain") {
         console.log(usage);
       } else {
@@ -1219,11 +1393,11 @@ async function executeCommand({
     state.historyVisibleRows = rows;
     const historyLines = formatHistoryConversationLines({
       rows,
-      title: `history search: ${query}`,
+      title: `History search : ${query}`,
       includeScore: true
     });
     if (result.rebuilt) {
-      historyLines.splice(1, 0, "index rebuilt");
+      historyLines.splice(2, 0, "Index rebuilt.", "");
     }
 
     if (mode === "plain") {
@@ -1236,14 +1410,10 @@ async function executeCommand({
     return {
       handled: true,
       exit: false,
-      action: {
-        type: "switch-screen",
-        screen: "history",
-        historyPanel: {
-          title: "history",
-          lines: historyLines
-        }
-      }
+      action: createHistoryScreenAction({
+        title: "History",
+        lines: historyLines
+      })
     };
   }
 
@@ -1251,7 +1421,7 @@ async function executeCommand({
     const rawIndex = line.slice("/history switch".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
-      const usage = "usage: /history switch <number> (pick from current history table)";
+      const usage = "Usage : /history switch <number> (pick from current history table)";
       if (mode === "plain") {
         console.log(usage);
       } else {
@@ -1281,7 +1451,7 @@ async function executeCommand({
     state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
     state.addedContextEntries = [];
 
-    const switchSummary = `[history] switched to ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName}`;
+    const switchSummary = `[History] Switched to : ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName}`;
     const transcriptMessage = result.saveResult.path
       ? result.saveResult.saved
         ? `[chat] transcript saved: ${result.saveResult.path}`
@@ -1314,7 +1484,7 @@ async function executeCommand({
     const rawIndex = line.slice("/history add_context".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
-      const usage = "usage: /history add_context <number> (pick from current history table)";
+      const usage = "Usage : /history add_context <number> (pick from current history table)";
       if (mode === "plain") {
         console.log(usage);
       } else {
@@ -1326,7 +1496,7 @@ async function executeCommand({
     const transcript = transcriptReader(row.transcriptPath);
     const content = buildHistoryContextText({ row, transcript, maxChars: DEFAULT_RAG_MAX_CHARS });
     if (!content) {
-      const empty = `[history] no usable messages in ${row.fileName}`;
+      const empty = `[History] No usable messages in ${row.fileName}`;
       if (mode === "plain") {
         console.log(empty);
       } else {
@@ -1342,13 +1512,96 @@ async function executeCommand({
         content
       }
     ];
-    const addedMessage = `[history] added context from ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName} for next prompt`;
+    const addedMessage = `[History] Added context from ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName} for next prompt.`;
     if (mode === "plain") {
       console.log(addedMessage);
     } else {
       tuiHandlers.message(addedMessage);
     }
     return { handled: true, exit: false };
+  }
+
+  if (line === "/history summary" || line.startsWith("/history summary ")) {
+    const rawIndex = line.slice("/history summary".length).trim();
+    const row = getHistoryRowFromSelection(state, rawIndex);
+    if (!row) {
+      const usage = "Usage : /history summary <number> (pick from current history table)";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const transcriptMarkdown = transcriptMarkdownReader(row.transcriptPath);
+    const summaryResult = await historySummaryRunner({
+      row,
+      transcriptPath: row.transcriptPath,
+      transcriptMarkdown
+    });
+    const summaryText = String(summaryResult?.summary || "").trim() || "No summary generated.";
+    const summaryUsage = asUsage(summaryResult?.usage || null);
+    if (summaryUsage.total_tokens > 0) {
+      accumulateSessionUsage(state.sessionUsage, summaryUsage);
+      addUsageToLedger({
+        usage: summaryUsage,
+        modelName: summaryResult?.routing?.targetModel || DEFAULT_GATEWAY_MODEL
+      });
+      state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
+    }
+
+    const historyLines = formatHistorySummaryLines({
+      row,
+      summary: summaryText
+    });
+    if (mode === "plain") {
+      for (const historyLine of historyLines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+    return {
+      handled: true,
+      exit: false,
+      action: createHistoryScreenAction({
+        title: "History summary",
+        lines: historyLines
+      })
+    };
+  }
+
+  if (line === "/history preview" || line.startsWith("/history preview ")) {
+    const rawIndex = line.slice("/history preview".length).trim();
+    const row = getHistoryRowFromSelection(state, rawIndex);
+    if (!row) {
+      const usage = "Usage : /history preview <number> (pick from current history table)";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const transcriptMarkdown = transcriptMarkdownReader(row.transcriptPath);
+    const historyLines = formatHistoryPreviewLines({ row, transcriptMarkdown });
+    if (mode === "plain") {
+      for (const historyLine of historyLines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+    return {
+      handled: true,
+      exit: false,
+      action: createHistoryScreenAction({
+        title: "History preview",
+        lines: historyLines,
+        scrollable: true,
+        previewMode: true
+      })
+    };
   }
 
   if (line === "/sync") {

@@ -53,6 +53,22 @@ function extractTokenCount(frame) {
   return match ? Number(match[1]) : null;
 }
 
+function extractMarkdownTableLine(frame, startsWithCell) {
+  const lines = String(frame || "").split("\n");
+  return (
+    lines.find((line) => line.trimStart().startsWith(startsWithCell)) || ""
+  ).trimStart();
+}
+
+function pipePositions(line) {
+  const positions = [];
+  const text = String(line || "");
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "|") positions.push(index);
+  }
+  return positions;
+}
+
 test("Ink chat renders compact header/footer format", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
@@ -115,6 +131,8 @@ test("slash suggestions filter commands and tab completes only single match", as
   assert.equal(root.some((entry) => entry.command === "/search"), true);
   assert.equal(root.some((entry) => entry.command === "/history"), true);
   assert.equal(root.some((entry) => entry.command === "/history date"), true);
+  assert.equal(root.some((entry) => entry.command === "/history summary"), true);
+  assert.equal(root.some((entry) => entry.command === "/history preview"), true);
   assert.equal(root.some((entry) => entry.command === "/save"), false);
   assert.equal(root.some((entry) => entry.command === "/help"), false);
   assert.equal(syncPrefix.length > 1, true);
@@ -780,7 +798,7 @@ test("Ink /history screen blocks prompts, allows /history commands, and /history
   await delay(20);
   assert.equal(chatCalls, 0);
   frame = app.lastFrame();
-  assert.match(frame, /history screen active; run \/conv or use \/history commands/i);
+  assert.match(frame, /history screen active\. run \/conv or use \/history commands\./i);
   assert.equal(driver.getSessionState().history.length, 0);
 
   await driver.submit("/history date 1");
@@ -803,5 +821,181 @@ test("Ink /history screen blocks prompts, allows /history commands, and /history
   await driver.submit("resume chat");
   await delay(30);
   assert.equal(chatCalls, 1);
+  app.unmount();
+});
+
+test("Ink History markdown table keeps header/separator/data pipe alignment", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      }),
+      commandExecutor: async ({ line }) => {
+        if (line === "/history") {
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "History",
+                renderMarkdown: true,
+                lines: [
+                  "## History dates",
+                  "",
+                  "| # | Date | Conversations |",
+                  "| --- | --- | --- |",
+                  "| 1 | 2026-05-30 | 9 |"
+                ]
+              }
+            }
+          };
+        }
+        return { handled: false, exit: false };
+      }
+    })
+  );
+
+  await delay(20);
+  await driver.submit("/history");
+  await delay(30);
+  const frame = app.lastFrame();
+  const header = extractMarkdownTableLine(frame, "| # |");
+  const separator = extractMarkdownTableLine(frame, "| -");
+  const row = extractMarkdownTableLine(frame, "| 1 |");
+  assert.ok(header);
+  assert.ok(separator);
+  assert.ok(row);
+  assert.deepEqual(pipePositions(separator), pipePositions(header));
+  assert.deepEqual(pipePositions(row), pipePositions(header));
+  app.unmount();
+});
+
+test("Ink History summary preserves blank sentence spacing", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      }),
+      commandExecutor: async ({ line }) => {
+        if (line === "/history summary 1") {
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "History summary",
+                renderMarkdown: true,
+                lines: ["## History summary", "", "Sentence one.", "", "Sentence two."]
+              }
+            }
+          };
+        }
+        return { handled: false, exit: false };
+      }
+    })
+  );
+
+  await delay(20);
+  await driver.submit("/history summary 1");
+  await delay(30);
+  const frame = app.lastFrame();
+  assert.match(frame, /Sentence one\.\n[^\S\r\n]*\n[^\S\r\n]*Sentence two\./);
+  app.unmount();
+});
+
+test("Ink /history preview screen scrolls with Up/Down arrows", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const transcriptLines = Array.from({ length: 40 }, (_, index) => `line-${String(index + 1).padStart(2, "0")}`);
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      }),
+      commandExecutor: async ({ line }) => {
+        if (line === "/history preview 1") {
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "History preview",
+                renderMarkdown: true,
+                scrollable: true,
+                previewMode: true,
+                lines: [
+                  "## History preview",
+                  "",
+                  "### Transcript",
+                  "",
+                  "```markdown",
+                  ...transcriptLines,
+                  "```"
+                ]
+              }
+            }
+          };
+        }
+        return { handled: false, exit: false };
+      }
+    })
+  );
+
+  await delay(20);
+  await driver.submit("/history preview 1");
+  await delay(30);
+  let frame = app.lastFrame();
+  assert.match(frame, /Preview scroll : 1-24 \/ \d+ \(Up\/Down\)/);
+  assert.match(frame, /line-01/);
+  assert.doesNotMatch(frame, /line-40/);
+
+  app.stdin.write("\u001b[B");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /Preview scroll : 2-25 \/ \d+ \(Up\/Down\)/);
+
+  for (let i = 0; i < 12; i += 1) {
+    app.stdin.write("\u001b[B");
+  }
+  await delay(30);
+  frame = app.lastFrame();
+  assert.match(frame, /Preview scroll : 14-37 \/ \d+ \(Up\/Down\)/);
+  assert.match(frame, /line-33/);
+
+  app.stdin.write("\u001b[A");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /Preview scroll : 13-36 \/ \d+ \(Up\/Down\)/);
   app.unmount();
 });
