@@ -126,6 +126,26 @@ function modelStatusFromRouting(routing) {
   };
 }
 
+function itemsFromConversationHistory(history, { startAt = 0 } = {}) {
+  const entries = Array.isArray(history) ? history : [];
+  const items = [];
+  let next = Math.max(0, Number(startAt) || 0);
+  for (const entry of entries) {
+    const role = String(entry?.role || "").trim().toLowerCase();
+    const content = String(entry?.content || "").trim();
+    if (!content) continue;
+    if (role !== "user" && role !== "assistant" && role !== "system") continue;
+    next += 1;
+    items.push({
+      id: `h-${next}`,
+      kind: "message",
+      role,
+      content
+    });
+  }
+  return { items, nextId: next };
+}
+
 export function getSlashCommandSuggestions(inputValue) {
   const definitions = getCommandDefinitions();
   return getCommandSuggestions(inputValue, definitions);
@@ -384,6 +404,11 @@ export function InkChatApp({
   const [screen, setScreen] = useState("conversation");
   const [syncStatus, setSyncStatus] = useState(() => readLocalSyncStatusModel());
   const [syncNotice, setSyncNotice] = useState("");
+  const [historyPanel, setHistoryPanel] = useState(() => ({
+    title: "history",
+    lines: ["run /history to load transcript dates"]
+  }));
+  const [historyNotice, setHistoryNotice] = useState("");
   const [modelStatus, setModelStatus] = useState(() => modelStatusFromRouting(null));
   const [liveTokenCount, setLiveTokenCount] = useState(() =>
     Number(sessionRef.current.estimatedTokensRef.value || 0)
@@ -559,10 +584,29 @@ export function InkChatApp({
           if (action.screen === "sync") {
             setScreen("sync");
             setSyncNotice("");
+            setHistoryNotice("");
             refreshSyncStatus(action.syncStatus);
+          } else if (action.screen === "history") {
+            setScreen("history");
+            setSyncNotice("");
+            setHistoryNotice("");
+            if (action.historyPanel && Array.isArray(action.historyPanel.lines)) {
+              setHistoryPanel({
+                title: String(action.historyPanel.title || "history"),
+                lines: action.historyPanel.lines
+              });
+            }
           } else if (action.screen === "conversation") {
             setScreen("conversation");
             setSyncNotice("");
+            setHistoryNotice("");
+            if (Array.isArray(action.historyLoaded?.history)) {
+              const hydrated = itemsFromConversationHistory(action.historyLoaded.history, {
+                startAt: nextIdRef.current
+              });
+              nextIdRef.current = hydrated.nextId;
+              setItems(hydrated.items);
+            }
           }
         }
         if (line === "/sync" || line.startsWith("/sync ")) {
@@ -586,6 +630,10 @@ export function InkChatApp({
           refreshSyncStatus();
           return;
         }
+        if (screen === "history") {
+          setHistoryNotice("history screen active; run /conv or use /history commands");
+          return;
+        }
 
         appendMessage("user", line);
         if (promptHistoryRef.current.length >= 200) {
@@ -601,6 +649,12 @@ export function InkChatApp({
         const assistantMessageId = createAssistantMessage();
         let streamedAny = false;
         state.transcriptSavedPath = null;
+        const extraContextMessages = state.addedContextEntries
+          .map((entry) => ({
+            role: "system",
+            content: String(entry?.content || "").trim()
+          }))
+          .filter((entry) => entry.content);
         setBusyLabel("processing prompt");
 
         const result = await processPrompt({
@@ -637,7 +691,8 @@ export function InkChatApp({
           },
           onWarning: (message) => {
             appendMessage("system", message);
-          }
+          },
+          extraContextMessages
         });
 
         state.latestRouting = result.routing;
@@ -646,6 +701,7 @@ export function InkChatApp({
         if (!streamedAny) {
           replaceAssistantText(assistantMessageId, result.assistantText || "[no content]");
         }
+        state.addedContextEntries = [];
         refreshLiveTokenCount(state.sessionUsage.total_tokens);
         refreshSyncStatus();
       } catch (error) {
@@ -913,8 +969,11 @@ export function InkChatApp({
     `Model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} | ` +
     `Auth: ${gatewayRef.current.apiKey ? "On" : "Off"}`;
   const syncScreenActive = screen === "sync";
+  const historyScreenActive = screen === "history";
   const inputPlaceholder = syncScreenActive
     ? "Sync screen active. Type /conv to return"
+    : historyScreenActive
+      ? "History screen active. Type /conv to return"
     : isBusy
       ? `${busyLabel || "working"}${inputBusyEllipsis || "."}`
       : "Type message or /";
@@ -982,6 +1041,18 @@ export function InkChatApp({
               )
             )
           )
+        : historyScreenActive
+          ? createElement(
+              Box,
+              { flexDirection: "column" },
+              createElement(Text, { color: "yellowBright", bold: true }, `${historyPanel.title || "history"}`),
+              historyNotice ? createElement(Text, { color: "yellow" }, historyNotice) : null,
+              ...(Array.isArray(historyPanel.lines) && historyPanel.lines.length
+                ? historyPanel.lines.map((line, index) =>
+                    createElement(Text, { key: `history-${index}`, color: "yellow" }, line)
+                  )
+                : [createElement(Text, { key: "history-empty", color: "gray" }, "no history output")])
+            )
         : visibleItems.length
           ? visibleItems.map((item) => renderItem(item))
           : createElement(Text, { dimColor: true }, "No messages yet.")

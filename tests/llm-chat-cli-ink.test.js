@@ -113,6 +113,8 @@ test("slash suggestions filter commands and tab completes only single match", as
   assert.equal(root.some((entry) => entry.command === "/sync"), true);
   assert.equal(root.some((entry) => entry.command === "/routing"), true);
   assert.equal(root.some((entry) => entry.command === "/search"), true);
+  assert.equal(root.some((entry) => entry.command === "/history"), true);
+  assert.equal(root.some((entry) => entry.command === "/history date"), true);
   assert.equal(root.some((entry) => entry.command === "/save"), false);
   assert.equal(root.some((entry) => entry.command === "/help"), false);
   assert.equal(syncPrefix.length > 1, true);
@@ -678,4 +680,128 @@ test("Ink /sync status switches to sync screen, blocks prompts, and /conv restor
 
     app.unmount();
   });
+});
+
+test("Ink /history screen blocks prompts, allows /history commands, and /history switch hydrates messages", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  let chatCalls = 0;
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async ({ onDelta, onUsage }) => {
+        chatCalls += 1;
+        onDelta("ok");
+        onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        return {
+          assistantText: "ok",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          routing: null
+        };
+      },
+      commandExecutor: async ({ line, state }) => {
+        if (line === "/history") {
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "history",
+                lines: ["history dates (newest first)", " 1  2026-05-30  conversations=1"]
+              }
+            }
+          };
+        }
+        if (line === "/history date 1") {
+          state.historyVisibleRows = [
+            {
+              number: 1,
+              fileName: "10-00-00--loaded.md"
+            }
+          ];
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "history conversations for 2026-05-30",
+                lines: ["#  time      date        transcript", " 1  10:00:00  2026-05-30  10-00-00--loaded.md"]
+              }
+            }
+          };
+        }
+        if (line === "/history switch 1") {
+          state.history = [
+            { role: "user", content: "loaded user" },
+            { role: "assistant", content: "loaded assistant" }
+          ];
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "conversation",
+              historyLoaded: {
+                history: [...state.history]
+              }
+            }
+          };
+        }
+        if (line === "/conv") {
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "conversation"
+            }
+          };
+        }
+        return { handled: false, exit: false };
+      }
+    })
+  );
+
+  await delay(20);
+  await driver.submit("/history");
+  await delay(20);
+  let frame = app.lastFrame();
+  assert.match(frame, /history dates/i);
+
+  await driver.submit("blocked prompt");
+  await delay(20);
+  assert.equal(chatCalls, 0);
+  frame = app.lastFrame();
+  assert.match(frame, /history screen active; run \/conv or use \/history commands/i);
+  assert.equal(driver.getSessionState().history.length, 0);
+
+  await driver.submit("/history date 1");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /history conversations for 2026-05-30/i);
+  assert.equal(driver.getSessionState().history.length, 0);
+
+  await driver.submit("/history switch 1");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /user> loaded user/i);
+  assert.match(frame, /assistant> loaded assistant/i);
+  assert.equal(driver.getSessionState().history.length, 2);
+  assert.equal(
+    driver.getSessionState().history.some((entry) => /history dates|history conversations/i.test(entry.content || "")),
+    false
+  );
+
+  await driver.submit("resume chat");
+  await delay(30);
+  assert.equal(chatCalls, 1);
+  app.unmount();
 });

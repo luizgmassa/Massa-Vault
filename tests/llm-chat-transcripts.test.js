@@ -4,6 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  listTranscriptDates,
+  listTranscriptsForDate,
+  parseTranscriptMarkdown,
+  readTranscript,
   summarizeTranscriptTitle,
   transcriptFilePath,
   writeTranscript
@@ -77,4 +81,74 @@ test("writeTranscript stores created_at local offset and filename summary/fallba
     path.basename(filePathWithSummary),
     /^\d{2}-\d{2}-\d{2}--summarize-sync-status-for-git-and-drive-now\.md$/
   );
+});
+
+test("listTranscriptDates and listTranscriptsForDate are newest-first", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-transcript-list-"));
+  const chatsDir = path.join(tempDir, "AI Chats");
+  fs.mkdirSync(path.join(chatsDir, "2026-05-29"), { recursive: true });
+  fs.mkdirSync(path.join(chatsDir, "2026-05-30"), { recursive: true });
+  fs.mkdirSync(path.join(chatsDir, "invalid-date"), { recursive: true });
+
+  fs.writeFileSync(
+    path.join(chatsDir, "2026-05-30", "10-00-00--alpha.md"),
+    "---\nid: \"a\"\n---\n\n## USER\nhi\n",
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(chatsDir, "2026-05-30", "12-30-00--beta.md"),
+    "---\nid: \"b\"\n---\n\n## USER\nhello\n",
+    "utf8"
+  );
+  fs.writeFileSync(path.join(chatsDir, "2026-05-29", "09-00-00--older.md"), "## USER\nx\n", "utf8");
+
+  const dates = listTranscriptDates(tempDir);
+  assert.deepEqual(dates, ["2026-05-30", "2026-05-29"]);
+
+  const rows = listTranscriptsForDate(tempDir, "2026-05-30");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].fileName, "12-30-00--beta.md");
+  assert.equal(rows[1].fileName, "10-00-00--alpha.md");
+  assert.equal(rows[0].time, "12:30:00");
+  assert.match(rows[0].relativePath, /^AI Chats\/2026-05-30\/12-30-00--beta\.md$/);
+});
+
+test("parseTranscriptMarkdown and readTranscript map USER/ASSISTANT/SYSTEM sections", () => {
+  const markdown = [
+    "---",
+    "id: \"session-1\"",
+    "created_at: \"2026-05-30T12:00:00-03:00\"",
+    "prompt_tokens: 4",
+    "---",
+    "",
+    "# Chat session-1",
+    "",
+    "## SYSTEM",
+    "",
+    "system note",
+    "",
+    "## USER",
+    "",
+    "hello there",
+    "",
+    "## ASSISTANT",
+    "",
+    "hi",
+    ""
+  ].join("\n");
+
+  const parsed = parseTranscriptMarkdown(markdown);
+  assert.equal(parsed.metadata.id, "session-1");
+  assert.equal(parsed.metadata.prompt_tokens, 4);
+  assert.deepEqual(parsed.messages, [
+    { role: "system", content: "system note" },
+    { role: "user", content: "hello there" },
+    { role: "assistant", content: "hi" }
+  ]);
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-transcript-parse-"));
+  const filePath = path.join(tempDir, "chat.md");
+  fs.writeFileSync(filePath, markdown, "utf8");
+  const fromFile = readTranscript(filePath);
+  assert.deepEqual(fromFile.messages, parsed.messages);
 });

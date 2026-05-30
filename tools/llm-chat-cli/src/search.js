@@ -43,9 +43,19 @@ function defaultIgnoreGlobs() {
   ];
 }
 
-function listMarkdownFiles(vaultPath, ignoreGlobs) {
+function normalizeGlobs(globs) {
+  if (!Array.isArray(globs)) return [];
+  return globs
+    .map((glob) => String(glob || "").trim())
+    .filter(Boolean)
+    .map(toPosix);
+}
+
+function listMarkdownFiles(vaultPath, { ignoreGlobs = [], includeGlobs = [] } = {}) {
   const files = [];
   const stack = [vaultPath];
+  const normalizedIgnore = normalizeGlobs(ignoreGlobs);
+  const normalizedInclude = normalizeGlobs(includeGlobs);
 
   while (stack.length) {
     const current = stack.pop();
@@ -57,14 +67,15 @@ function listMarkdownFiles(vaultPath, ignoreGlobs) {
       if (!relativePath || relativePath === ".") continue;
 
       if (entry.isDirectory()) {
-        if (matchesGlobs(`${relativePath}/`, ignoreGlobs)) continue;
+        if (matchesGlobs(`${relativePath}/`, normalizedIgnore)) continue;
         stack.push(absolutePath);
         continue;
       }
 
       if (entry.isFile()) {
         if (!relativePath.endsWith(".md")) continue;
-        if (matchesGlobs(relativePath, ignoreGlobs)) continue;
+        if (matchesGlobs(relativePath, normalizedIgnore)) continue;
+        if (normalizedInclude.length && !matchesGlobs(relativePath, normalizedInclude)) continue;
         files.push(absolutePath);
       }
     }
@@ -167,6 +178,27 @@ function createSnapshot(vaultPath, files) {
   return snapshot;
 }
 
+function normalizeScope(scope) {
+  return {
+    ignoreGlobs: normalizeGlobs(scope?.ignoreGlobs || []),
+    includeGlobs: normalizeGlobs(scope?.includeGlobs || [])
+  };
+}
+
+function hasSameScope(left, right) {
+  const first = normalizeScope(left);
+  const second = normalizeScope(right);
+  if (first.ignoreGlobs.length !== second.ignoreGlobs.length) return false;
+  if (first.includeGlobs.length !== second.includeGlobs.length) return false;
+  for (let i = 0; i < first.ignoreGlobs.length; i += 1) {
+    if (first.ignoreGlobs[i] !== second.ignoreGlobs[i]) return false;
+  }
+  for (let i = 0; i < first.includeGlobs.length; i += 1) {
+    if (first.includeGlobs[i] !== second.includeGlobs[i]) return false;
+  }
+  return true;
+}
+
 export function isIndexStale(indexData, currentSnapshot) {
   if (!indexData || typeof indexData !== "object") return true;
   const oldSnapshot = indexData.snapshot || {};
@@ -185,11 +217,16 @@ export function isIndexStale(indexData, currentSnapshot) {
 export async function buildSearchIndex({
   vaultPath,
   ignoreGlobs = [],
+  includeGlobs = [],
   baseUrl = DEFAULT_OLLAMA_BASE_URL,
   model = DEFAULT_EMBED_MODEL
 }) {
   const mergedIgnoreGlobs = [...defaultIgnoreGlobs(), ...ignoreGlobs];
-  const files = listMarkdownFiles(vaultPath, mergedIgnoreGlobs);
+  const normalizedIncludeGlobs = normalizeGlobs(includeGlobs);
+  const files = listMarkdownFiles(vaultPath, {
+    ignoreGlobs: mergedIgnoreGlobs,
+    includeGlobs: normalizedIncludeGlobs
+  });
   const snapshot = createSnapshot(vaultPath, files);
 
   const items = [];
@@ -233,6 +270,10 @@ export async function buildSearchIndex({
     vaultPath: path.resolve(vaultPath),
     createdAt: now,
     updatedAt: now,
+    scope: {
+      ignoreGlobs: normalizeGlobs(mergedIgnoreGlobs),
+      includeGlobs: normalizedIncludeGlobs
+    },
     snapshot,
     items
   };
@@ -243,18 +284,32 @@ export async function buildSearchIndex({
 export async function ensureSearchIndex({
   vaultPath,
   ignoreGlobs = [],
+  includeGlobs = [],
   baseUrl = DEFAULT_OLLAMA_BASE_URL,
   model = DEFAULT_EMBED_MODEL
 }) {
   const existing = readSearchIndex();
   const mergedIgnoreGlobs = [...defaultIgnoreGlobs(), ...ignoreGlobs];
-  const files = listMarkdownFiles(vaultPath, mergedIgnoreGlobs);
+  const normalizedIncludeGlobs = normalizeGlobs(includeGlobs);
+  const scope = {
+    ignoreGlobs: normalizeGlobs(mergedIgnoreGlobs),
+    includeGlobs: normalizedIncludeGlobs
+  };
+  const files = listMarkdownFiles(vaultPath, {
+    ignoreGlobs: mergedIgnoreGlobs,
+    includeGlobs: normalizedIncludeGlobs
+  });
   const snapshot = createSnapshot(vaultPath, files);
 
-  if (isIndexStale(existing, snapshot) || existing?.embeddingModel !== model) {
+  if (
+    isIndexStale(existing, snapshot) ||
+    existing?.embeddingModel !== model ||
+    !hasSameScope(existing?.scope, scope)
+  ) {
     const rebuilt = await buildSearchIndex({
       vaultPath,
       ignoreGlobs,
+      includeGlobs,
       baseUrl,
       model
     });

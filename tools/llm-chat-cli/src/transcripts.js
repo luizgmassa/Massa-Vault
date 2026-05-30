@@ -34,6 +34,92 @@ function escapeFrontmatterString(value) {
   return String(value || "").replace(/"/g, '\\"');
 }
 
+function toPosix(value) {
+  return String(value || "").split(path.sep).join("/");
+}
+
+function parseFrontmatterValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
+    return text
+      .slice(1, -1)
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'");
+  }
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return Number(text);
+  }
+  return text;
+}
+
+function parseFrontmatter(markdown) {
+  const text = String(markdown || "");
+  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) {
+    return { metadata: {}, body: text };
+  }
+
+  const lines = text.split(/\r?\n/);
+  if (lines[0].trim() !== "---") {
+    return { metadata: {}, body: text };
+  }
+
+  const metadata = {};
+  let index = 1;
+  for (; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "---") {
+      index += 1;
+      break;
+    }
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    const key = line.slice(0, separator).trim();
+    if (!key) continue;
+    const value = line.slice(separator + 1);
+    metadata[key] = parseFrontmatterValue(value);
+  }
+
+  return {
+    metadata,
+    body: lines.slice(index).join("\n")
+  };
+}
+
+function headingToRole(heading) {
+  const normalized = String(heading || "").trim().toUpperCase();
+  if (normalized === "USER") return "user";
+  if (normalized === "ASSISTANT") return "assistant";
+  if (normalized === "SYSTEM") return "system";
+  return null;
+}
+
+function buildMessage(role, lines) {
+  if (!role) return null;
+  const content = lines.join("\n").trim();
+  if (!content) return null;
+  return { role, content };
+}
+
+function transcriptTitleFromFileName(fileName) {
+  const stem = String(fileName || "").replace(/\.md$/i, "");
+  const separator = stem.indexOf("--");
+  if (separator < 0) return stem || "chat";
+  return stem
+    .slice(separator + 2)
+    .replace(/-/g, " ")
+    .trim();
+}
+
+function transcriptTimeFromFileName(fileName) {
+  const match = String(fileName || "").match(/^(\d{2})-(\d{2})-(\d{2})/);
+  if (!match) return "--:--:--";
+  return `${match[1]}:${match[2]}:${match[3]}`;
+}
+
 export function summarizeTranscriptTitle(messages) {
   const firstUserMessage = (messages || []).find(
     (message) =>
@@ -77,6 +163,85 @@ export function transcriptFilePath(vaultPath, now = new Date(), summarySlug = "c
   return path.join(folder, fileName);
 }
 
+export function parseTranscriptMarkdown(markdown) {
+  const { metadata, body } = parseFrontmatter(markdown);
+  const lines = String(body || "").split(/\r?\n/);
+  const messages = [];
+  let activeRole = null;
+  let block = [];
+
+  const flush = () => {
+    const message = buildMessage(activeRole, block);
+    if (message) messages.push(message);
+    block = [];
+  };
+
+  for (const line of lines) {
+    const heading = line.match(/^##\s+(.+)$/);
+    if (heading) {
+      flush();
+      activeRole = headingToRole(heading[1]);
+      continue;
+    }
+    block.push(line);
+  }
+  flush();
+
+  return {
+    metadata,
+    messages
+  };
+}
+
+export function readTranscript(filePath) {
+  const markdown = fs.readFileSync(filePath, "utf8");
+  return parseTranscriptMarkdown(markdown);
+}
+
+export function listTranscriptDates(vaultPath) {
+  const root = path.join(vaultPath, "AI Chats");
+  let entries = [];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => b.localeCompare(a));
+}
+
+export function listTranscriptsForDate(vaultPath, date) {
+  const normalizedDate = String(date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) return [];
+  const folder = path.join(vaultPath, "AI Chats", normalizedDate);
+
+  let entries = [];
+  try {
+    entries = fs.readdirSync(folder, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isFile() && /\.md$/i.test(entry.name))
+    .map((entry) => {
+      const absolutePath = path.join(folder, entry.name);
+      const relativePath = toPosix(path.relative(vaultPath, absolutePath));
+      return {
+        date: normalizedDate,
+        fileName: entry.name,
+        transcriptPath: absolutePath,
+        relativePath,
+        time: transcriptTimeFromFileName(entry.name),
+        title: transcriptTitleFromFileName(entry.name)
+      };
+    })
+    .sort((a, b) => b.fileName.localeCompare(a.fileName));
+}
+
 export function formatTranscript({
   id,
   createdAt,
@@ -116,6 +281,7 @@ export function formatTranscript({
 }
 
 export function writeTranscript({
+  filePath,
   vaultPath,
   id,
   createdAt,
@@ -128,8 +294,11 @@ export function writeTranscript({
   const candidate = createdAt ? new Date(createdAt) : new Date();
   const timestamp = Number.isNaN(candidate.getTime()) ? new Date() : candidate;
   const summarySlug = summarizeTranscriptTitle(messages);
-  const filePath = transcriptFilePath(vaultPath, timestamp, summarySlug);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const outputPath =
+    filePath && String(filePath || "").trim()
+      ? path.resolve(String(filePath))
+      : transcriptFilePath(vaultPath, timestamp, summarySlug);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const content = formatTranscript({
     id,
     createdAt: toLocalIso(timestamp),
@@ -139,6 +308,6 @@ export function writeTranscript({
     usage,
     messages
   });
-  fs.writeFileSync(filePath, content, "utf8");
-  return filePath;
+  fs.writeFileSync(outputPath, content, "utf8");
+  return outputPath;
 }

@@ -742,3 +742,242 @@ test("executeCommand /sync status in plain mode preserves summary + JSON output"
     assert.match(logs.join("\n"), /"status"\s*:\s*"paused"/i);
   });
 });
+
+test("processPrompt injects extra history context messages before latest user prompt", async () => {
+  await withTempDir(async () => {
+    writeMinimalConfig(process.cwd());
+    const history = [{ role: "user", content: "previous" }];
+    let capturedBody = null;
+
+    await processPrompt({
+      prompt: "current question",
+      history,
+      systemPrompt: "",
+      sessionUsage: createSessionUsage(),
+      estimatedTokensRef: { value: 0 },
+      renderMode: "silent",
+      statusRenderer: createStatusRenderer({ stream: { isTTY: false, write() {} } }),
+      vaultContextBuilder: async () => null,
+      extraContextMessages: [
+        {
+          role: "system",
+          content: "Context from transcript AI Chats/2026-05-30/10-00-00--alpha.md:\n[USER]\nhello"
+        }
+      ],
+      chatCompletion: async ({ body, onUsage }) => {
+        capturedBody = body;
+        onUsage?.({ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
+        return {
+          assistantText: "done",
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+          routing: null
+        };
+      }
+    });
+
+    assert.ok(capturedBody);
+    const secondToLast = capturedBody.messages.at(-2);
+    assert.equal(secondToLast.role, "system");
+    assert.match(secondToLast.content, /Context from transcript/);
+    assert.equal(capturedBody.messages.at(-1).role, "user");
+    assert.equal(capturedBody.messages.at(-1).content, "current question");
+    assert.equal(history.some((entry) => /Context from transcript/i.test(entry.content || "")), false);
+  });
+});
+
+test("executeCommand /history and /history date build visible rows and keep transcript history clean", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const day = "2026-05-30";
+    const chatsDir = path.join(vaultPath, "AI Chats", day);
+    fs.mkdirSync(chatsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatsDir, "11-00-00--alpha.md"),
+      "---\nid: \"alpha\"\n---\n\n## USER\nhello\n\n## ASSISTANT\nhi\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(chatsDir, "12-00-00--beta.md"),
+      "---\nid: \"beta\"\n---\n\n## USER\nyo\n\n## ASSISTANT\nhey\n",
+      "utf8"
+    );
+
+    await withEnvValue("VAULT_PATH", vaultPath, async () => {
+      const state = createReplState({ systemPrompt: "" });
+      const openResult = await executeCommand({
+        line: "/history",
+        state,
+        limitsByModel: {},
+        mode: "tui"
+      });
+      assert.equal(openResult.handled, true);
+      assert.equal(openResult.action?.screen, "history");
+      assert.match(openResult.action?.historyPanel?.lines?.join("\n") || "", /history dates/i);
+      assert.equal(state.history.length, 0);
+
+      const dateResult = await executeCommand({
+        line: "/history date 1",
+        state,
+        limitsByModel: {},
+        mode: "tui"
+      });
+      assert.equal(dateResult.handled, true);
+      assert.equal(dateResult.action?.screen, "history");
+      assert.equal(state.historySelectedDate, day);
+      assert.equal(state.historyVisibleRows.length, 2);
+      assert.equal(state.historyVisibleRows[0].fileName, "12-00-00--beta.md");
+      assert.equal(state.history.length, 0);
+    });
+  });
+});
+
+test("executeCommand /history search scopes results to AI Chats files only", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    fs.writeFileSync(path.join(vaultPath, "General.md"), "# General\nalpha appears in regular vault note", "utf8");
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatDir, "13-00-00--alpha-chat.md"),
+      "# Chat\n\n## USER\nalpha from chat transcript",
+      "utf8"
+    );
+
+    await withEnvValue("VAULT_PATH", vaultPath, async () => {
+      const state = createReplState({ systemPrompt: "" });
+      await withMockEmbeddings(async () => {
+        const result = await executeCommand({
+          line: "/history search alpha",
+          state,
+          limitsByModel: {},
+          mode: "tui"
+        });
+        assert.equal(result.handled, true);
+        assert.equal(result.action?.screen, "history");
+        assert.equal(state.historyVisibleRows.length > 0, true);
+        assert.equal(state.historyVisibleRows.every((row) => row.relativePath.startsWith("AI Chats/")), true);
+        assert.equal(state.historyVisibleRows.some((row) => /General\.md/.test(row.relativePath)), false);
+      });
+    });
+  });
+});
+
+test("executeCommand /history switch saves current session, loads selected transcript, and sets active path", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const transcriptPath = path.join(chatDir, "14-00-00--switch-target.md");
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        "---",
+        "id: \"switch-session\"",
+        "created_at: \"2026-05-30T14:00:00-03:00\"",
+        "gateway_url: \"http://127.0.0.1:4100\"",
+        "model: \"smart-router\"",
+        "router_lane: \"general\"",
+        "router_target_model: \"smart-router-general\"",
+        "router_confidence: \"1.0000\"",
+        "prompt_tokens: 7",
+        "completion_tokens: 3",
+        "total_tokens: 10",
+        "---",
+        "",
+        "## USER",
+        "",
+        "loaded user",
+        "",
+        "## ASSISTANT",
+        "",
+        "loaded assistant",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const state = createReplState({ systemPrompt: "" });
+    state.history.push({ role: "user", content: "current" }, { role: "assistant", content: "chat" });
+    state.historyVisibleRows = [
+      {
+        number: 1,
+        transcriptPath,
+        relativePath: "AI Chats/2026-05-30/14-00-00--switch-target.md",
+        fileName: "14-00-00--switch-target.md",
+        date: "2026-05-30",
+        time: "14:00:00",
+        title: "switch target",
+        score: null,
+        snippet: ""
+      }
+    ];
+
+    let saveCalls = 0;
+    const result = await executeCommand({
+      line: "/history switch 1",
+      state,
+      limitsByModel: {},
+      mode: "tui",
+      onSaveAndSync: async () => {
+        saveCalls += 1;
+        return {
+          saveResult: { path: "/tmp/current.md", saved: true },
+          summary: "[chat] sync status=idle conflicts=0"
+        };
+      }
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.action?.screen, "conversation");
+    assert.equal(saveCalls, 1);
+    assert.equal(state.history.length, 2);
+    assert.equal(state.history[0].content, "loaded user");
+    assert.equal(state.history[1].content, "loaded assistant");
+    assert.equal(state.activeTranscript?.path, transcriptPath);
+    assert.equal(state.transcriptSavedPath, transcriptPath);
+    assert.equal(state.lastSavedHistoryLength, 2);
+    assert.equal(state.sessionUsage.total_tokens, 10);
+  });
+});
+
+test("executeCommand /history add_context queues transcript context without mutating state.history", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const transcriptPath = path.join(chatDir, "15-00-00--context.md");
+    fs.writeFileSync(
+      transcriptPath,
+      "---\nid: \"ctx\"\n---\n\n## USER\nhello\n\n## ASSISTANT\nworld\n",
+      "utf8"
+    );
+
+    const state = createReplState({ systemPrompt: "" });
+    state.history.push({ role: "user", content: "keep this" });
+    state.historyVisibleRows = [
+      {
+        number: 1,
+        transcriptPath,
+        relativePath: "AI Chats/2026-05-30/15-00-00--context.md",
+        fileName: "15-00-00--context.md",
+        date: "2026-05-30",
+        time: "15:00:00",
+        title: "context",
+        score: null,
+        snippet: ""
+      }
+    ];
+
+    const result = await executeCommand({
+      line: "/history add_context 1",
+      state,
+      limitsByModel: {},
+      mode: "tui"
+    });
+    assert.equal(result.handled, true);
+    assert.equal(state.addedContextEntries.length, 1);
+    assert.match(state.addedContextEntries[0].content, /Context from transcript/);
+    assert.equal(state.history.length, 1);
+    assert.equal(state.history[0].content, "keep this");
+  });
+});

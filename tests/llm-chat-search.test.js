@@ -75,3 +75,55 @@ test("semantic search indexes markdown files and ranks query matches", async () 
     process.chdir(previousCwd);
   }
 });
+
+test("ensureSearchIndex includeGlobs scopes index to transcript folder", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-search-scope-"));
+  const previousCwd = process.cwd();
+  process.chdir(tempRoot);
+
+  const vaultPath = path.join(tempRoot, "vault");
+  fs.mkdirSync(path.join(vaultPath, "AI Chats", "2026-05-30"), { recursive: true });
+  fs.writeFileSync(path.join(vaultPath, "Notes.md"), "# note\nalpha from regular note", "utf8");
+  fs.writeFileSync(
+    path.join(vaultPath, "AI Chats", "2026-05-30", "10-00-00--chat.md"),
+    "# chat\nalpha from chat transcript",
+    "utf8"
+  );
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    const embeddings = inputs.map(vectorForText);
+    return new Response(JSON.stringify({ embeddings }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const scoped = await ensureSearchIndex({
+      vaultPath,
+      ignoreGlobs: [],
+      includeGlobs: ["AI Chats/**/*.md"],
+      baseUrl: "http://127.0.0.1:11434",
+      model: "embeddinggemma"
+    });
+
+    const indexedFiles = new Set(scoped.index.items.map((item) => item.relativePath));
+    assert.equal(indexedFiles.has("Notes.md"), false);
+    assert.equal(indexedFiles.has("AI Chats/2026-05-30/10-00-00--chat.md"), true);
+
+    const results = await searchIndex({
+      indexData: scoped.index,
+      query: "alpha",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "embeddinggemma",
+      limit: 5
+    });
+    assert.equal(results.every((entry) => entry.filePath.startsWith("AI Chats/")), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(previousCwd);
+  }
+});

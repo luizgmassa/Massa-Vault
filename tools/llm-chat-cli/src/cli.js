@@ -11,7 +11,12 @@ import { readLiteLLMLimits } from "./litellm-limits.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "./search.js";
 import { buildSyncStatusModelFromResult } from "./sync-status.js";
 import { estimateTokensFromText } from "./token-estimator.js";
-import { writeTranscript } from "./transcripts.js";
+import {
+  listTranscriptDates,
+  listTranscriptsForDate,
+  readTranscript,
+  writeTranscript
+} from "./transcripts.js";
 import { loadLocalEnv } from "../../shared/env.js";
 import {
   accumulateSessionUsage,
@@ -480,13 +485,14 @@ async function buildVaultContext({
   };
 }
 
-async function runSearch({ query }) {
+async function runSearch({ query, includeGlobs = [] }) {
   const vaultPath = resolveVaultPath();
   const config = loadConfig(DEFAULT_CONFIG_PATH);
   const defaults = getSearchDefaults();
   const { index, rebuilt } = await ensureSearchIndex({
     vaultPath,
     ignoreGlobs: config.ignoreGlobs || [],
+    includeGlobs,
     baseUrl: defaults.baseUrl,
     model: defaults.model
   });
@@ -499,6 +505,188 @@ async function runSearch({ query }) {
   });
 
   return { rebuilt, results };
+}
+
+function normalizeHistoryDateInput(value) {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
+function parsePositiveIndex(value) {
+  const numeric = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+function truncateText(value, limit = 72) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function extractTimeFromFileName(fileName) {
+  const match = String(fileName || "").match(/^(\d{2})-(\d{2})-(\d{2})/);
+  if (!match) return "--:--:--";
+  return `${match[1]}:${match[2]}:${match[3]}`;
+}
+
+function formatRelativeTranscriptLabel(relativePath) {
+  const normalized = normalizeSourcePath(relativePath);
+  if (!normalized) return "";
+  return normalized.replace(/^AI Chats\//, "");
+}
+
+function createHistoryRowsFromDateEntries(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  return list.map((entry, index) => ({
+    number: index + 1,
+    transcriptPath: entry.transcriptPath,
+    relativePath: entry.relativePath,
+    date: entry.date,
+    fileName: entry.fileName,
+    time: entry.time || extractTimeFromFileName(entry.fileName),
+    title: entry.title || "chat",
+    score: null,
+    snippet: ""
+  }));
+}
+
+function createHistoryRowsFromSearchResults(results, vaultPath) {
+  const grouped = new Map();
+  for (const result of Array.isArray(results) ? results : []) {
+    const filePath = normalizeSourcePath(result?.filePath);
+    if (!filePath) continue;
+    if (!filePath.startsWith("AI Chats/")) continue;
+    const current = grouped.get(filePath);
+    const score = Number(result?.score || 0);
+    if (!current || score > current.score) {
+      grouped.set(filePath, {
+        filePath,
+        score,
+        snippet: truncateText(result?.snippet || "")
+      });
+    }
+  }
+
+  return [...grouped.values()]
+    .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
+    .map((item, index) => {
+      const baseName = path.basename(item.filePath);
+      const dateMatch = item.filePath.match(/^AI Chats\/(\d{4}-\d{2}-\d{2})\//);
+      return {
+        number: index + 1,
+        transcriptPath: path.join(vaultPath, item.filePath),
+        relativePath: item.filePath,
+        date: dateMatch ? dateMatch[1] : "",
+        fileName: baseName,
+        time: extractTimeFromFileName(baseName),
+        title: baseName.replace(/\.md$/i, "").replace(/^\d{2}-\d{2}-\d{2}--/, "").replace(/-/g, " "),
+        score: item.score,
+        snippet: item.snippet
+      };
+    });
+}
+
+function formatHistoryDateLines({ rows }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const lines = ["history dates (newest first)"];
+  if (!list.length) {
+    lines.push("no transcript date folders found under AI Chats/");
+    lines.push("usage: /history date <number|YYYY-MM-DD>");
+    return lines;
+  }
+
+  for (const row of list) {
+    lines.push(`${String(row.number).padStart(2, " ")}  ${row.date}  conversations=${row.count}`);
+  }
+  lines.push("usage: /history date <number|YYYY-MM-DD>");
+  lines.push("tip: /history search <query>");
+  return lines;
+}
+
+function formatHistoryConversationLines({ rows, title, includeScore = false }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const lines = [title || "history conversations"];
+  if (!list.length) {
+    lines.push("no conversations found");
+    lines.push("usage: /history date <number|YYYY-MM-DD> | /history search <query>");
+    return lines;
+  }
+
+  const header = includeScore ? "#  time      date        score   transcript" : "#  time      date        transcript";
+  lines.push(header);
+  lines.push(includeScore ? "-- -------- ---------- ------- ------------------------------" : "-- -------- ---------- ------------------------------");
+  for (const row of list) {
+    const label = truncateText(`${row.fileName}`, 42);
+    if (includeScore) {
+      const scoreText = Number.isFinite(row.score) ? row.score.toFixed(4) : "0.0000";
+      lines.push(`${String(row.number).padStart(2, " ")}  ${row.time}  ${row.date || "----------"}  ${scoreText}  ${label}`);
+    } else {
+      lines.push(`${String(row.number).padStart(2, " ")}  ${row.time}  ${row.date || "----------"}  ${label}`);
+    }
+    if (row.snippet) {
+      lines.push(`    ${truncateText(row.snippet, 90)}`);
+    }
+  }
+  lines.push("usage: /history switch <number> | /history add_context <number> | /conv");
+  return lines;
+}
+
+function buildHistoryContextText({ row, transcript, maxChars = DEFAULT_RAG_MAX_CHARS }) {
+  const messages = Array.isArray(transcript?.messages) ? transcript.messages : [];
+  if (!messages.length) return "";
+  const source = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown transcript";
+  let content = `Context from transcript ${source}:`;
+
+  for (const message of messages) {
+    const role = String(message?.role || "unknown").toUpperCase();
+    const body = String(message?.content || "").trim();
+    if (!body) continue;
+    const block = `\n\n[${role}]\n${body}`;
+    if (content.length + block.length > maxChars) {
+      const remaining = maxChars - content.length;
+      if (remaining > 16) {
+        content += block.slice(0, remaining).trimEnd();
+      }
+      content += "\n\n[context truncated]";
+      break;
+    }
+    content += block;
+  }
+
+  return content.trim();
+}
+
+function getHistoryRowFromSelection(state, value) {
+  const index = parsePositiveIndex(value);
+  if (!index) return null;
+  const rows = Array.isArray(state?.historyVisibleRows) ? state.historyVisibleRows : [];
+  return rows.find((row) => Number(row?.number) === index) || null;
+}
+
+function captureRoutingFromTranscriptMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const lane = String(metadata.router_lane || "").trim();
+  const targetModel = String(metadata.router_target_model || "").trim();
+  const confidence = String(metadata.router_confidence || "").trim();
+  if (!lane && !targetModel && !confidence) return null;
+  return {
+    lane: lane || "unknown",
+    targetModel: targetModel || "unknown",
+    confidence: confidence || "unknown"
+  };
+}
+
+function usageFromTranscriptMetadata(metadata) {
+  const prompt = Number(metadata?.prompt_tokens || 0);
+  const completion = Number(metadata?.completion_tokens || 0);
+  const total = Number(metadata?.total_tokens || 0);
+  return {
+    prompt_tokens: Number.isFinite(prompt) ? prompt : 0,
+    completion_tokens: Number.isFinite(completion) ? completion : 0,
+    total_tokens: Number.isFinite(total) ? total : 0
+  };
 }
 
 function formatSearchPanel({ rebuilt, results }) {
@@ -549,6 +737,30 @@ const CHAT_COMMAND_DEFINITIONS = Object.freeze([
   {
     command: "/conv",
     description: "Return from sync status screen to conversation (TUI)"
+  },
+  {
+    command: "/history",
+    description: "Open history screen with transcript dates"
+  },
+  {
+    command: "/history date",
+    description: "Show conversation rows for date number or YYYY-MM-DD",
+    requiresInput: true
+  },
+  {
+    command: "/history search",
+    description: "Semantic search only in AI Chats transcripts",
+    requiresInput: true
+  },
+  {
+    command: "/history switch",
+    description: "Switch active conversation to selected history row",
+    requiresInput: true
+  },
+  {
+    command: "/history add_context",
+    description: "Inject selected history conversation into next prompt",
+    requiresInput: true
   },
   {
     command: "/exit",
@@ -629,6 +841,7 @@ function buildTranscriptPayload({
   createdAt,
   gatewayUrl,
   history,
+  model,
   routing,
   usage
 }) {
@@ -636,7 +849,7 @@ function buildTranscriptPayload({
     id,
     createdAt,
     gatewayUrl,
-    model: DEFAULT_GATEWAY_MODEL,
+    model: model || DEFAULT_GATEWAY_MODEL,
     routing,
     usage,
     messages: history
@@ -648,19 +861,23 @@ async function saveTranscript({
   sessionStartedAt,
   history,
   latestRouting,
-  sessionUsage
+  sessionUsage,
+  activeTranscript
 }) {
   if (!history.length) return null;
   const vaultPath = resolveVaultPath();
   const gateway = buildGatewayOptions();
+  const metadata = activeTranscript && typeof activeTranscript === "object" ? activeTranscript : null;
   return writeTranscript({
+    filePath: metadata?.path || null,
     vaultPath,
     ...buildTranscriptPayload({
-      id: sessionId,
-      createdAt: sessionStartedAt,
-      gatewayUrl: gateway.gatewayUrl,
+      id: metadata?.id || sessionId,
+      createdAt: metadata?.createdAt || sessionStartedAt,
+      gatewayUrl: metadata?.gatewayUrl || gateway.gatewayUrl,
       history,
-      routing: latestRouting,
+      model: metadata?.model || DEFAULT_GATEWAY_MODEL,
+      routing: latestRouting || metadata?.routing || null,
       usage: sessionUsage
     })
   });
@@ -773,7 +990,8 @@ async function persistTranscriptForSession(state) {
     sessionStartedAt: state.sessionStartedAt,
     history: state.history,
     latestRouting: state.latestRouting,
-    sessionUsage: state.sessionUsage
+    sessionUsage: state.sessionUsage,
+    activeTranscript: state.activeTranscript
   });
   if (!path) {
     return { path: null, saved: false };
@@ -805,7 +1023,12 @@ function createReplState({ systemPrompt }) {
     sessionId: randomUUID(),
     sessionStartedAt: new Date().toISOString(),
     transcriptSavedPath: null,
-    lastSavedHistoryLength: 0
+    lastSavedHistoryLength: 0,
+    historySelectedDate: null,
+    historyVisibleRows: [],
+    historyDateRows: [],
+    activeTranscript: null,
+    addedContextEntries: []
   };
 }
 
@@ -818,6 +1041,11 @@ function resetConversation(state) {
   state.latestRouting = null;
   state.transcriptSavedPath = null;
   state.lastSavedHistoryLength = 0;
+  state.historySelectedDate = null;
+  state.historyVisibleRows = [];
+  state.historyDateRows = [];
+  state.activeTranscript = null;
+  state.addedContextEntries = [];
 }
 
 function createTuiCommandHandlers(handlers) {
@@ -837,7 +1065,9 @@ async function executeCommand({
   limitsByModel,
   mode = "plain",
   handlers = {},
-  onSaveAndSync = saveAndSyncSession
+  onSaveAndSync = saveAndSyncSession,
+  historySearchRunner = runSearch,
+  transcriptReader = readTranscript
 }) {
   const tuiHandlers = createTuiCommandHandlers(handlers);
 
@@ -871,6 +1101,254 @@ async function executeCommand({
         screen: "conversation"
       }
     };
+  }
+
+  if (line === "/history") {
+    const vaultPath = resolveVaultPath();
+    const dates = listTranscriptDates(vaultPath);
+    const rows = dates.map((date, index) => ({
+      number: index + 1,
+      date,
+      count: listTranscriptsForDate(vaultPath, date).length
+    }));
+    state.historyDateRows = rows;
+    state.historySelectedDate = null;
+    state.historyVisibleRows = [];
+    const historyLines = formatHistoryDateLines({ rows });
+    if (mode === "plain") {
+      for (const historyLine of historyLines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+    return {
+      handled: true,
+      exit: false,
+      action: {
+        type: "switch-screen",
+        screen: "history",
+        historyPanel: {
+          title: "history",
+          lines: historyLines
+        }
+      }
+    };
+  }
+
+  if (line === "/history date" || line.startsWith("/history date ")) {
+    const rawInput = line.slice("/history date".length).trim();
+    if (!rawInput) {
+      const usage = "usage: /history date <number|YYYY-MM-DD>";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const vaultPath = resolveVaultPath();
+    const dates = listTranscriptDates(vaultPath);
+    const selectedByIndex = parsePositiveIndex(rawInput);
+    const selectedByValue = normalizeHistoryDateInput(rawInput);
+    let selectedDate = "";
+    if (selectedByIndex) {
+      selectedDate = dates[selectedByIndex - 1] || "";
+    } else if (selectedByValue && dates.includes(selectedByValue)) {
+      selectedDate = selectedByValue;
+    }
+
+    if (!selectedDate) {
+      const notFound = `[history] date not found: ${rawInput}`;
+      if (mode === "plain") {
+        console.log(notFound);
+      } else {
+        tuiHandlers.message(notFound);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const rows = createHistoryRowsFromDateEntries(listTranscriptsForDate(vaultPath, selectedDate));
+    state.historySelectedDate = selectedDate;
+    state.historyVisibleRows = rows;
+    const historyLines = formatHistoryConversationLines({
+      rows,
+      title: `history conversations for ${selectedDate}`
+    });
+
+    if (mode === "plain") {
+      for (const historyLine of historyLines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+
+    return {
+      handled: true,
+      exit: false,
+      action: {
+        type: "switch-screen",
+        screen: "history",
+        historyPanel: {
+          title: "history",
+          lines: historyLines
+        }
+      }
+    };
+  }
+
+  if (line === "/history search" || line.startsWith("/history search ")) {
+    const query = line.slice("/history search".length).trim();
+    if (!query) {
+      const usage = "usage: /history search <query>";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const vaultPath = resolveVaultPath();
+    const result = await historySearchRunner({
+      query,
+      includeGlobs: ["AI Chats/**/*.md"]
+    });
+    const rows = createHistoryRowsFromSearchResults(result.results, vaultPath);
+    state.historySelectedDate = null;
+    state.historyVisibleRows = rows;
+    const historyLines = formatHistoryConversationLines({
+      rows,
+      title: `history search: ${query}`,
+      includeScore: true
+    });
+    if (result.rebuilt) {
+      historyLines.splice(1, 0, "index rebuilt");
+    }
+
+    if (mode === "plain") {
+      for (const historyLine of historyLines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+
+    return {
+      handled: true,
+      exit: false,
+      action: {
+        type: "switch-screen",
+        screen: "history",
+        historyPanel: {
+          title: "history",
+          lines: historyLines
+        }
+      }
+    };
+  }
+
+  if (line === "/history switch" || line.startsWith("/history switch ")) {
+    const rawIndex = line.slice("/history switch".length).trim();
+    const row = getHistoryRowFromSelection(state, rawIndex);
+    if (!row) {
+      const usage = "usage: /history switch <number> (pick from current history table)";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const result = await onSaveAndSync(state, {
+      reason: "chat-history-switch"
+    });
+    const transcript = transcriptReader(row.transcriptPath);
+    const metadata = transcript.metadata || {};
+    state.history = Array.isArray(transcript.messages) ? [...transcript.messages] : [];
+    state.activeTranscript = {
+      path: row.transcriptPath,
+      id: String(metadata.id || "").trim() || state.sessionId,
+      createdAt: String(metadata.created_at || "").trim() || state.sessionStartedAt,
+      gatewayUrl: String(metadata.gateway_url || "").trim() || buildGatewayOptions().gatewayUrl,
+      model: String(metadata.model || "").trim() || DEFAULT_GATEWAY_MODEL,
+      routing: captureRoutingFromTranscriptMetadata(metadata)
+    };
+    state.latestRouting = state.activeTranscript.routing;
+    state.transcriptSavedPath = row.transcriptPath;
+    state.lastSavedHistoryLength = state.history.length;
+    state.sessionUsage = usageFromTranscriptMetadata(metadata);
+    state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
+    state.addedContextEntries = [];
+
+    const switchSummary = `[history] switched to ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName}`;
+    const transcriptMessage = result.saveResult.path
+      ? result.saveResult.saved
+        ? `[chat] transcript saved: ${result.saveResult.path}`
+        : "[chat] transcript already up to date"
+      : "[chat] nothing to save";
+    if (mode === "plain") {
+      console.log(transcriptMessage);
+      console.log(result.summary);
+      console.log(switchSummary);
+      return { handled: true, exit: false };
+    }
+
+    tuiHandlers.message(transcriptMessage);
+    tuiHandlers.message(result.summary);
+    tuiHandlers.message(switchSummary);
+    return {
+      handled: true,
+      exit: false,
+      action: {
+        type: "switch-screen",
+        screen: "conversation",
+        historyLoaded: {
+          history: [...state.history]
+        }
+      }
+    };
+  }
+
+  if (line === "/history add_context" || line.startsWith("/history add_context ")) {
+    const rawIndex = line.slice("/history add_context".length).trim();
+    const row = getHistoryRowFromSelection(state, rawIndex);
+    if (!row) {
+      const usage = "usage: /history add_context <number> (pick from current history table)";
+      if (mode === "plain") {
+        console.log(usage);
+      } else {
+        tuiHandlers.message(usage);
+      }
+      return { handled: true, exit: false };
+    }
+
+    const transcript = transcriptReader(row.transcriptPath);
+    const content = buildHistoryContextText({ row, transcript, maxChars: DEFAULT_RAG_MAX_CHARS });
+    if (!content) {
+      const empty = `[history] no usable messages in ${row.fileName}`;
+      if (mode === "plain") {
+        console.log(empty);
+      } else {
+        tuiHandlers.message(empty);
+      }
+      return { handled: true, exit: false };
+    }
+
+    state.addedContextEntries = [
+      ...state.addedContextEntries,
+      {
+        source: row.relativePath,
+        content
+      }
+    ];
+    const addedMessage = `[history] added context from ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName} for next prompt`;
+    if (mode === "plain") {
+      console.log(addedMessage);
+    } else {
+      tuiHandlers.message(addedMessage);
+    }
+    return { handled: true, exit: false };
   }
 
   if (line === "/sync") {
@@ -1066,7 +1544,8 @@ async function processPrompt({
   onAssistantDelta,
   onUsage,
   onRouting,
-  onWarning
+  onWarning,
+  extraContextMessages = []
 }) {
   const gateway = buildGatewayOptions();
   const emitWarning = (message) => {
@@ -1094,6 +1573,12 @@ async function processPrompt({
   estimatedTokensRef.value += estimatedPromptTokens;
 
   const requestMessages = buildMessages(history, systemPrompt);
+  const normalizedExtraContextMessages = (Array.isArray(extraContextMessages) ? extraContextMessages : [])
+    .map((message) => ({
+      role: message?.role || "system",
+      content: String(message?.content || "").trim()
+    }))
+    .filter((message) => message.content);
   const vaultMessages = Array.isArray(vaultContext?.messages)
     ? vaultContext.messages
     : vaultContext?.message
@@ -1105,8 +1590,9 @@ async function processPrompt({
       content: String(message?.content || "").trim()
     }))
     .filter((message) => message.content);
-  if (normalizedVaultMessages.length && requestMessages.length) {
-    requestMessages.splice(requestMessages.length - 1, 0, ...normalizedVaultMessages);
+  const contextMessages = [...normalizedExtraContextMessages, ...normalizedVaultMessages];
+  if (contextMessages.length && requestMessages.length) {
+    requestMessages.splice(requestMessages.length - 1, 0, ...contextMessages);
   }
 
   let routing = null;
@@ -1400,15 +1886,23 @@ async function runPlainRepl({ systemPrompt, startupWarmup } = {}) {
           await warmup.wait();
         }
         state.transcriptSavedPath = null;
+        const extraContextMessages = state.addedContextEntries
+          .map((entry) => ({
+            role: "system",
+            content: String(entry?.content || "").trim()
+          }))
+          .filter((entry) => entry.content);
         const result = await processPrompt({
           prompt: line,
           history: state.history,
           systemPrompt: state.activeSystemPrompt,
           sessionUsage: state.sessionUsage,
           estimatedTokensRef: state.estimatedTokensRef,
-          statusRenderer
+          statusRenderer,
+          extraContextMessages
         });
         state.latestRouting = result.routing;
+        state.addedContextEntries = [];
         nextIdleSyncAt = Date.now() + idleSyncMs;
       } catch (error) {
         output.write("\n");
