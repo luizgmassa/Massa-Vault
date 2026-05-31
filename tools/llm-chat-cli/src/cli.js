@@ -39,6 +39,10 @@ const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
 const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
 const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 const VAULT_CONTEXT_MODES = ["semantic", "manifest"];
+const HISTORY_FLOW_DATES = "dates";
+const HISTORY_FLOW_CONVERSATIONS = "conversations";
+const HISTORY_FLOW_SUMMARY = "summary";
+const HISTORY_FLOW_PREVIEW = "preview";
 
 function parseArguments(argv) {
   const args = [...argv];
@@ -520,6 +524,14 @@ function parsePositiveIndex(value) {
   return numeric;
 }
 
+function createHistoryDateRows(vaultPath) {
+  return listTranscriptDates(vaultPath).map((date, index) => ({
+    number: index + 1,
+    date,
+    count: listTranscriptsForDate(vaultPath, date).length
+  }));
+}
+
 function truncateText(value, limit = 72) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
@@ -631,6 +643,7 @@ function formatHistoryDateLines({ rows }) {
     lines.push("No transcript date folders found under `AI Chats/`.");
     lines.push("");
     lines.push("Usage : `/history date <number|YYYY-MM-DD>`");
+    lines.push("Tip : type date row number (example: `1`) | `/back`");
     return lines;
   }
 
@@ -642,7 +655,7 @@ function formatHistoryDateLines({ rows }) {
   );
   lines.push("");
   lines.push("Usage : `/history date <number|YYYY-MM-DD>`");
-  lines.push("Tip : `/history search <query>`");
+  lines.push("Tip : `/history search <query>` | type date row number (example: `1`) | `/back`");
   return lines;
 }
 
@@ -684,7 +697,12 @@ function formatHistoryConversationLines({ rows, title, includeScore = false }) {
     )
   );
   lines.push("");
-  lines.push("Usage : `/history switch <number>` | `/history add_context <number>` | `/conv`");
+  lines.push(
+    "Usage : `/history switch <n>` | `/switch <n>` | `/history add_context <n>` | `/add_context <n>`"
+  );
+  lines.push(
+    "More : `/history summary <n>` | `/summary <n>` | `/history preview <n>` | `/preview <n>` | `/back` | `/conv`"
+  );
   return lines;
 }
 
@@ -707,7 +725,7 @@ function formatHistorySummaryLines({ row, summary }) {
   const sentenceLines = spacingForHistorySentences(summary);
   lines.push(...(sentenceLines.length ? sentenceLines : ["No summary generated."]));
   lines.push("");
-  lines.push("Usage : `/history preview <number>` | `/history switch <number>` | `/conv`");
+  lines.push("Usage : `/history preview <n>` | `/preview <n>` | `/back` | `/conv`");
   return lines;
 }
 
@@ -731,7 +749,7 @@ function formatHistoryPreviewLines({ row, transcriptMarkdown }) {
   lines.push(...String(transcriptMarkdown || "").split(/\r?\n/));
   lines.push("```");
   lines.push("");
-  lines.push("Usage : `Up/Down scroll` | `/conv`");
+  lines.push("Usage : `Up/Down scroll` | `/back` | `/conv`");
   return lines;
 }
 
@@ -888,6 +906,10 @@ const CHAT_COMMAND_DEFINITIONS = Object.freeze([
   {
     command: "/conv",
     description: "Return from sync status screen to conversation (TUI)"
+  },
+  {
+    command: "/back",
+    description: "Back in history flow (preview/summary -> conversations -> dates -> conversation)"
   },
   {
     command: "/history",
@@ -1188,6 +1210,7 @@ function createReplState({ systemPrompt }) {
     historySelectedDate: null,
     historyVisibleRows: [],
     historyDateRows: [],
+    historyFlowStack: [],
     activeTranscript: null,
     addedContextEntries: []
   };
@@ -1205,6 +1228,7 @@ function resetConversation(state) {
   state.historySelectedDate = null;
   state.historyVisibleRows = [];
   state.historyDateRows = [];
+  state.historyFlowStack = [];
   state.activeTranscript = null;
   state.addedContextEntries = [];
 }
@@ -1239,6 +1263,151 @@ function createHistoryScreenAction({
   };
 }
 
+function createHistoryPanelState({
+  title = "History",
+  lines = [],
+  scrollable = false,
+  previewMode = false
+} = {}) {
+  return {
+    title: String(title || "History"),
+    lines: Array.isArray(lines) ? lines : [],
+    scrollable: Boolean(scrollable),
+    previewMode: Boolean(previewMode)
+  };
+}
+
+function createHistoryFlowEntry({ screen, panel } = {}) {
+  return {
+    screen: String(screen || "").trim(),
+    panel: createHistoryPanelState(panel)
+  };
+}
+
+function ensureHistoryFlowStack(state) {
+  if (!Array.isArray(state.historyFlowStack)) {
+    state.historyFlowStack = [];
+  }
+  return state.historyFlowStack;
+}
+
+function clearHistoryFlowStack(state) {
+  state.historyFlowStack = [];
+}
+
+function getHistoryFlowTop(state) {
+  const stack = ensureHistoryFlowStack(state);
+  return stack.length ? stack[stack.length - 1] : null;
+}
+
+function getCurrentHistoryFlowScreen(state) {
+  return String(getHistoryFlowTop(state)?.screen || "");
+}
+
+function isHistoryConversationsScreen(state) {
+  return getCurrentHistoryFlowScreen(state) === HISTORY_FLOW_CONVERSATIONS;
+}
+
+function setHistoryFlowDatesRoot(state, panel) {
+  state.historyFlowStack = [createHistoryFlowEntry({ screen: HISTORY_FLOW_DATES, panel })];
+}
+
+function setHistoryFlowConversations(state, { datePanel, conversationsPanel }) {
+  const stack = ensureHistoryFlowStack(state);
+  const rootEntry = createHistoryFlowEntry({
+    screen: HISTORY_FLOW_DATES,
+    panel: datePanel
+  });
+  if (!stack.length) {
+    stack.push(rootEntry);
+  } else {
+    stack[0] = rootEntry;
+    if (stack.length > 1) {
+      stack.splice(1);
+    }
+  }
+  stack.push(
+    createHistoryFlowEntry({
+      screen: HISTORY_FLOW_CONVERSATIONS,
+      panel: conversationsPanel
+    })
+  );
+}
+
+function pushHistoryFlowDetail(state, { screen, panel }) {
+  const stack = ensureHistoryFlowStack(state);
+  if (!stack.length) return;
+  const nextEntry = createHistoryFlowEntry({ screen, panel });
+  const top = stack[stack.length - 1];
+  if (top?.screen === screen) {
+    stack[stack.length - 1] = nextEntry;
+    return;
+  }
+  stack.push(nextEntry);
+}
+
+function historyBackStep(state) {
+  const stack = ensureHistoryFlowStack(state);
+  if (!stack.length) {
+    return { type: "none" };
+  }
+  const currentScreen = stack[stack.length - 1]?.screen;
+  if (currentScreen === HISTORY_FLOW_DATES) {
+    clearHistoryFlowStack(state);
+    return { type: "exit-conversation" };
+  }
+  stack.pop();
+  if (!stack.length) {
+    clearHistoryFlowStack(state);
+    return { type: "exit-conversation" };
+  }
+  return {
+    type: "panel",
+    panel: stack[stack.length - 1].panel
+  };
+}
+
+function parseHistoryConversationAlias(line) {
+  const source = String(line || "").trim();
+  if (!source.startsWith("/")) return null;
+  const patterns = [
+    ["/switch", "/history switch"],
+    ["/add_context", "/history add_context"],
+    ["/summary", "/history summary"],
+    ["/preview", "/history preview"]
+  ];
+  for (const [alias, full] of patterns) {
+    if (source === alias || source.startsWith(`${alias} `)) {
+      return {
+        alias,
+        full: `${full}${source.slice(alias.length)}`
+      };
+    }
+  }
+  return null;
+}
+
+function normalizeHistoryInputShortcut(line, state) {
+  const source = String(line || "").trim();
+  if (!source) return source;
+  const screen = getCurrentHistoryFlowScreen(state);
+  if (screen === HISTORY_FLOW_DATES && !source.startsWith("/")) {
+    const index = parsePositiveIndex(source);
+    if (index) {
+      return `/history date ${index}`;
+    }
+  }
+  if (screen === HISTORY_FLOW_CONVERSATIONS) {
+    const alias = parseHistoryConversationAlias(source);
+    if (alias?.full) return alias.full;
+  }
+  return source;
+}
+
+function createHistoryConversationsOnlyMessage(command) {
+  return `[History] ${command} available only in History conversations screen.`;
+}
+
 async function executeCommand({
   line,
   state,
@@ -1252,6 +1421,18 @@ async function executeCommand({
   historySummaryRunner = summarizeHistoryTranscript
 }) {
   const tuiHandlers = createTuiCommandHandlers(handlers);
+  const typedLine = String(line || "").trim();
+  const alias = parseHistoryConversationAlias(typedLine);
+  if (alias && !isHistoryConversationsScreen(state)) {
+    const message = createHistoryConversationsOnlyMessage(alias.alias);
+    if (mode === "plain") {
+      console.log(message);
+    } else {
+      tuiHandlers.message(message);
+    }
+    return { handled: true, exit: false };
+  }
+  line = normalizeHistoryInputShortcut(typedLine, state);
 
   if (line === "/") {
     const commandLines = getCommandPanelLines();
@@ -1271,6 +1452,7 @@ async function executeCommand({
   }
 
   if (line === "/conv") {
+    clearHistoryFlowStack(state);
     if (mode === "plain") {
       console.log("[chat] conversation mode");
       return { handled: true, exit: false };
@@ -1285,18 +1467,61 @@ async function executeCommand({
     };
   }
 
+  if (line === "/back") {
+    const back = historyBackStep(state);
+    if (back.type === "none") {
+      const message = "[History] /back available only inside history flow.";
+      if (mode === "plain") {
+        console.log(message);
+      } else {
+        tuiHandlers.message(message);
+      }
+      return { handled: true, exit: false };
+    }
+
+    if (back.type === "exit-conversation") {
+      if (mode === "plain") {
+        console.log("[chat] conversation mode");
+        return { handled: true, exit: false };
+      }
+      return {
+        handled: true,
+        exit: false,
+        action: {
+          type: "switch-screen",
+          screen: "conversation"
+        }
+      };
+    }
+
+    const panel = createHistoryPanelState(back.panel);
+    if (mode === "plain") {
+      for (const historyLine of panel.lines) {
+        console.log(historyLine);
+      }
+      return { handled: true, exit: false };
+    }
+    return {
+      handled: true,
+      exit: false,
+      action: createHistoryScreenAction(panel)
+    };
+  }
+
   if (line === "/history") {
     const vaultPath = resolveVaultPath();
-    const dates = listTranscriptDates(vaultPath);
-    const rows = dates.map((date, index) => ({
-      number: index + 1,
-      date,
-      count: listTranscriptsForDate(vaultPath, date).length
-    }));
+    const rows = createHistoryDateRows(vaultPath);
     state.historyDateRows = rows;
     state.historySelectedDate = null;
     state.historyVisibleRows = [];
     const historyLines = formatHistoryDateLines({ rows });
+    setHistoryFlowDatesRoot(
+      state,
+      createHistoryPanelState({
+        title: "History",
+        lines: historyLines
+      })
+    );
     if (mode === "plain") {
       for (const historyLine of historyLines) {
         console.log(historyLine);
@@ -1326,12 +1551,14 @@ async function executeCommand({
     }
 
     const vaultPath = resolveVaultPath();
-    const dates = listTranscriptDates(vaultPath);
+    const dateRows = createHistoryDateRows(vaultPath);
+    const dates = dateRows.map((row) => row.date);
+    state.historyDateRows = dateRows;
     const selectedByIndex = parsePositiveIndex(rawInput);
     const selectedByValue = normalizeHistoryDateInput(rawInput);
     let selectedDate = "";
     if (selectedByIndex) {
-      selectedDate = dates[selectedByIndex - 1] || "";
+      selectedDate = dateRows[selectedByIndex - 1]?.date || "";
     } else if (selectedByValue && dates.includes(selectedByValue)) {
       selectedDate = selectedByValue;
     }
@@ -1352,6 +1579,16 @@ async function executeCommand({
     const historyLines = formatHistoryConversationLines({
       rows,
       title: `History conversations for ${selectedDate}`
+    });
+    setHistoryFlowConversations(state, {
+      datePanel: createHistoryPanelState({
+        title: "History",
+        lines: formatHistoryDateLines({ rows: dateRows })
+      }),
+      conversationsPanel: createHistoryPanelState({
+        title: "History",
+        lines: historyLines
+      })
     });
 
     if (mode === "plain") {
@@ -1384,6 +1621,8 @@ async function executeCommand({
     }
 
     const vaultPath = resolveVaultPath();
+    const dateRows = createHistoryDateRows(vaultPath);
+    state.historyDateRows = dateRows;
     const result = await historySearchRunner({
       query,
       includeGlobs: ["AI Chats/**/*.md"]
@@ -1399,6 +1638,16 @@ async function executeCommand({
     if (result.rebuilt) {
       historyLines.splice(2, 0, "Index rebuilt.", "");
     }
+    setHistoryFlowConversations(state, {
+      datePanel: createHistoryPanelState({
+        title: "History",
+        lines: formatHistoryDateLines({ rows: dateRows })
+      }),
+      conversationsPanel: createHistoryPanelState({
+        title: "History",
+        lines: historyLines
+      })
+    });
 
     if (mode === "plain") {
       for (const historyLine of historyLines) {
@@ -1418,6 +1667,15 @@ async function executeCommand({
   }
 
   if (line === "/history switch" || line.startsWith("/history switch ")) {
+    if (!isHistoryConversationsScreen(state)) {
+      const message = createHistoryConversationsOnlyMessage("/history switch");
+      if (mode === "plain") {
+        console.log(message);
+      } else {
+        tuiHandlers.message(message);
+      }
+      return { handled: true, exit: false };
+    }
     const rawIndex = line.slice("/history switch".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
@@ -1450,6 +1708,7 @@ async function executeCommand({
     state.sessionUsage = usageFromTranscriptMetadata(metadata);
     state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
     state.addedContextEntries = [];
+    clearHistoryFlowStack(state);
 
     const switchSummary = `[History] Switched to : ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName}`;
     const transcriptMessage = result.saveResult.path
@@ -1481,6 +1740,15 @@ async function executeCommand({
   }
 
   if (line === "/history add_context" || line.startsWith("/history add_context ")) {
+    if (!isHistoryConversationsScreen(state)) {
+      const message = createHistoryConversationsOnlyMessage("/history add_context");
+      if (mode === "plain") {
+        console.log(message);
+      } else {
+        tuiHandlers.message(message);
+      }
+      return { handled: true, exit: false };
+    }
     const rawIndex = line.slice("/history add_context".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
@@ -1522,6 +1790,15 @@ async function executeCommand({
   }
 
   if (line === "/history summary" || line.startsWith("/history summary ")) {
+    if (!isHistoryConversationsScreen(state)) {
+      const message = createHistoryConversationsOnlyMessage("/history summary");
+      if (mode === "plain") {
+        console.log(message);
+      } else {
+        tuiHandlers.message(message);
+      }
+      return { handled: true, exit: false };
+    }
     const rawIndex = line.slice("/history summary".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
@@ -1555,6 +1832,13 @@ async function executeCommand({
       row,
       summary: summaryText
     });
+    pushHistoryFlowDetail(state, {
+      screen: HISTORY_FLOW_SUMMARY,
+      panel: createHistoryPanelState({
+        title: "History summary",
+        lines: historyLines
+      })
+    });
     if (mode === "plain") {
       for (const historyLine of historyLines) {
         console.log(historyLine);
@@ -1572,6 +1856,15 @@ async function executeCommand({
   }
 
   if (line === "/history preview" || line.startsWith("/history preview ")) {
+    if (!isHistoryConversationsScreen(state)) {
+      const message = createHistoryConversationsOnlyMessage("/history preview");
+      if (mode === "plain") {
+        console.log(message);
+      } else {
+        tuiHandlers.message(message);
+      }
+      return { handled: true, exit: false };
+    }
     const rawIndex = line.slice("/history preview".length).trim();
     const row = getHistoryRowFromSelection(state, rawIndex);
     if (!row) {
@@ -1586,6 +1879,15 @@ async function executeCommand({
 
     const transcriptMarkdown = transcriptMarkdownReader(row.transcriptPath);
     const historyLines = formatHistoryPreviewLines({ row, transcriptMarkdown });
+    pushHistoryFlowDetail(state, {
+      screen: HISTORY_FLOW_PREVIEW,
+      panel: createHistoryPanelState({
+        title: "History preview",
+        lines: historyLines,
+        scrollable: true,
+        previewMode: true
+      })
+    });
     if (mode === "plain") {
       for (const historyLine of historyLines) {
         console.log(historyLine);

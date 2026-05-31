@@ -653,7 +653,7 @@ export function InkChatApp({
           return;
         }
         if (screen === "history") {
-          setHistoryNotice("History screen active. Run /conv or use /history commands.");
+          setHistoryNotice("History screen active. Run /back or /conv or use /history commands.");
           return;
         }
 
@@ -1053,7 +1053,7 @@ export function InkChatApp({
   const inputPlaceholder = syncScreenActive
     ? "Sync screen active. Type /conv to return"
     : historyScreenActive
-      ? "History screen active. Type /conv to return"
+      ? "History screen active. Type /back or /conv to return"
     : isBusy
       ? `${busyLabel || "working"}${inputBusyEllipsis || "."}`
       : "Type message or /";

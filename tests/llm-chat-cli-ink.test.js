@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { executeCommand } from "../tools/llm-chat-cli/src/cli.js";
 
 process.env.MASSA_VAULT_CHAT_RAG = "off";
 
@@ -130,6 +131,7 @@ test("slash suggestions filter commands and tab completes only single match", as
   assert.equal(root.some((entry) => entry.command === "/routing"), true);
   assert.equal(root.some((entry) => entry.command === "/search"), true);
   assert.equal(root.some((entry) => entry.command === "/history"), true);
+  assert.equal(root.some((entry) => entry.command === "/back"), true);
   assert.equal(root.some((entry) => entry.command === "/history date"), true);
   assert.equal(root.some((entry) => entry.command === "/history summary"), true);
   assert.equal(root.some((entry) => entry.command === "/history preview"), true);
@@ -798,7 +800,7 @@ test("Ink /history screen blocks prompts, allows /history commands, and /history
   await delay(20);
   assert.equal(chatCalls, 0);
   frame = app.lastFrame();
-  assert.match(frame, /history screen active\. run \/conv or use \/history commands\./i);
+  assert.match(frame, /history screen active\. run \/back or \/conv or use \/history commands\./i);
   assert.equal(driver.getSessionState().history.length, 0);
 
   await driver.submit("/history date 1");
@@ -822,6 +824,184 @@ test("Ink /history screen blocks prompts, allows /history commands, and /history
   await delay(30);
   assert.equal(chatCalls, 1);
   app.unmount();
+});
+
+test("Ink history flow supports /back stack navigation end-to-end", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    const day = "2026-05-30";
+    const chatDir = path.join(vaultPath, "AI Chats", day);
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatDir, "10-00-00--flow.md"),
+      "---\nid: \"flow\"\n---\n\n## USER\nhello\n\n## ASSISTANT\nworld\n",
+      "utf8"
+    );
+
+    const previousVaultPath = process.env.VAULT_PATH;
+    process.env.VAULT_PATH = vaultPath;
+    try {
+      const { React, render, InkChatApp } = stack;
+      const driver = {};
+      let chatCalls = 0;
+      const app = render(
+        React.createElement(InkChatApp, {
+          systemPrompt: "",
+          driver,
+          chatCompletion: async ({ onDelta, onUsage }) => {
+            chatCalls += 1;
+            onDelta("ok");
+            onUsage({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+            return {
+              assistantText: "ok",
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+              routing: null
+            };
+          },
+          commandExecutor: (params) =>
+            executeCommand({
+              ...params,
+              onSaveAndSync: async () => ({
+                saveResult: { path: null, saved: false },
+                summary: "[chat] sync status=idle conflicts=0"
+              }),
+              historySummaryRunner: async () => ({
+                summary: "Flow summary line.",
+                usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                routing: null
+              })
+            })
+        })
+      );
+
+      await delay(20);
+      await driver.submit("/history");
+      await delay(20);
+      let frame = app.lastFrame();
+      assert.match(frame, /History dates/i);
+
+      await driver.submit("blocked prompt");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.equal(chatCalls, 0);
+      assert.match(frame, /history screen active\. run \/back or \/conv or use \/history commands\./i);
+
+      await driver.submit("1");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.match(frame, /History conversations for 2026-05-30/i);
+
+      await driver.submit("/summary 1");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.match(frame, /History summary/i);
+      assert.match(frame, /Flow summary line\./);
+
+      await driver.submit("/back");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.match(frame, /History conversations for 2026-05-30/i);
+
+      await driver.submit("/back");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.match(frame, /History dates/i);
+
+      await driver.submit("/back");
+      await delay(20);
+      frame = app.lastFrame();
+      assert.match(frame, /massa-vault chat started/i);
+
+      await driver.submit("resume chat");
+      await delay(30);
+      assert.equal(chatCalls, 1);
+      app.unmount();
+    } finally {
+      if (previousVaultPath === undefined) {
+        delete process.env.VAULT_PATH;
+      } else {
+        process.env.VAULT_PATH = previousVaultPath;
+      }
+    }
+  });
+});
+
+test("Ink history conversations support alias dispatch for /summary and /switch", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    const day = "2026-05-30";
+    const chatDir = path.join(vaultPath, "AI Chats", day);
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatDir, "10-00-00--alias.md"),
+      "---\nid: \"alias\"\n---\n\n## USER\nloaded user\n\n## ASSISTANT\nloaded assistant\n",
+      "utf8"
+    );
+
+    const previousVaultPath = process.env.VAULT_PATH;
+    process.env.VAULT_PATH = vaultPath;
+    try {
+      const { React, render, InkChatApp } = stack;
+      const driver = {};
+      const app = render(
+        React.createElement(InkChatApp, {
+          systemPrompt: "",
+          driver,
+          chatCompletion: async () => ({
+            assistantText: "",
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            routing: null
+          }),
+          commandExecutor: (params) =>
+            executeCommand({
+              ...params,
+              onSaveAndSync: async () => ({
+                saveResult: { path: null, saved: false },
+                summary: "[chat] sync status=idle conflicts=0"
+              }),
+              historySummaryRunner: async () => ({
+                summary: "Alias summary line.",
+                usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                routing: null
+              })
+            })
+        })
+      );
+
+      await delay(20);
+      await driver.submit("/history");
+      await delay(20);
+      await driver.submit("1");
+      await delay(20);
+
+      await driver.submit("/summary 1");
+      await delay(20);
+      let frame = app.lastFrame();
+      assert.match(frame, /History summary/i);
+      assert.match(frame, /Alias summary line\./);
+
+      await driver.submit("/back");
+      await delay(20);
+      await driver.submit("/switch 1");
+      await delay(30);
+      frame = app.lastFrame();
+      assert.match(frame, /user> loaded user/i);
+      assert.match(frame, /assistant> loaded assistant/i);
+      app.unmount();
+    } finally {
+      if (previousVaultPath === undefined) {
+        delete process.env.VAULT_PATH;
+      } else {
+        process.env.VAULT_PATH = previousVaultPath;
+      }
+    }
+  });
 });
 
 test("Ink History markdown table keeps header/separator/data pipe alignment", async (t) => {
