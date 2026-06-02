@@ -3,32 +3,31 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import {
-  gitAdd,
-  gitAddAll,
-  gitAbortReconcile,
-  gitCachedNames,
-  gitCommit,
-  gitEnsureIgnoreEntries,
-  gitFetchBranch,
-  gitHasRepo,
-  gitInit,
-  gitListConflictedFiles,
-  gitRebaseOnto,
-  gitListTracked,
-  gitRevParse,
-  gitTrackedFiles,
-  gitWorkingTreeChanges,
-  gitPush,
-  gitReadStageFile,
-  gitRemoveCached,
-  gitRemoteSetUrl
-} from "./git.js";
-import { syncToGoogleDrive } from "./gdrive.js";
+  captureGDriveImportBaseline as captureGDriveImportBaselineImpl,
+  collectInternalArtifactPaths as collectInternalArtifactPathsImpl,
+  collectProtectedArtifacts as collectProtectedArtifactsImpl,
+  commitAllChanges as commitAllChangesImpl,
+  commitAllChangesWithSubject as commitAllChangesWithSubjectImpl,
+  commitQueuedChanges as commitQueuedChangesImpl,
+  commitStagedChanges as commitStagedChangesImpl,
+  commitStagedWithSubject as commitStagedWithSubjectImpl,
+  createPreGDriveSnapshot as createPreGDriveSnapshotImpl,
+  enforceProtectedArtifacts as enforceProtectedArtifactsImpl,
+  ensureVaultGitRepo as ensureVaultGitRepoImpl,
+  isInternalArtifactPath as isInternalArtifactPathImpl
+} from "./daemon-git.js";
+import { pollRequestedAction } from "./daemon-controller.js";
 import {
-  PROTECTED_GITIGNORE_LINES,
-  PROTECTED_GIT_PATHS,
-  isProtectedArtifactPath,
-  normalizeRelativePath
+  captureTrackedSnapshot as captureTrackedSnapshotImpl,
+  pollForChanges as pollForChangesImpl,
+  recordWatchFailure as recordWatchFailureImpl,
+  shouldSkipDirectory as shouldSkipDirectoryImpl,
+  startPollingFallback as startPollingFallbackImpl,
+  walkDirectory as walkDirectoryImpl,
+  watchOne as watchOneImpl
+} from "./daemon-watch.js";
+import {
+  isProtectedArtifactPath
 } from "./protected-artifacts.js";
 import {
   classifyGDriveImport as classifyGDriveImportImpl,
@@ -103,10 +102,6 @@ function createSyncState(overrides = {}) {
     reviewNeeded: false,
     ...overrides
   };
-}
-
-function ensureParentDir(filePath) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
 export class NotesAutomationService {
@@ -229,227 +224,59 @@ export class NotesAutomationService {
   }
 
   recordWatchFailure(watchPath, error) {
-    const code = error && typeof error === "object" ? error.code || "UNKNOWN" : "UNKNOWN";
-    const message = error instanceof Error ? error.message : String(error);
-    const failure = {
-      watchPath,
-      code: String(code),
-      message: String(message),
-      at: new Date().toISOString()
-    };
-    this.watchFailures.push(failure);
-    if (this.watchFailures.length > 10) {
-      this.watchFailures = this.watchFailures.slice(-10);
-    }
-    this.updateState({
-      watchFailures: this.watchFailures,
-      watchAlert: `watcher failure at ${watchPath}: [${failure.code}] ${failure.message}`
-    });
+    return recordWatchFailureImpl(this, watchPath, error);
   }
 
   shouldSkipDirectory(relativePath) {
-    const normalized = relativePath.endsWith("/") ? relativePath : `${relativePath}/`;
-    if (matchesGlob(relativePath, this.config.ignoreGlobs)) return true;
-    if (matchesGlob(normalized, this.config.ignoreGlobs)) return true;
-    return false;
+    return shouldSkipDirectoryImpl(this, relativePath);
   }
 
   captureTrackedSnapshot() {
-    const next = new Map();
-    for (const watchPath of this.config.watchPaths) {
-      const absoluteRoot = path.resolve(this.vaultPath, watchPath);
-      this.walkDirectory(absoluteRoot, next);
-    }
-    return next;
+    return captureTrackedSnapshotImpl(this);
   }
 
   walkDirectory(absolutePath, snapshot) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(absolutePath, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const entryAbsolutePath = path.join(absolutePath, entry.name);
-      const relativePath = toPosix(path.relative(this.vaultPath, entryAbsolutePath));
-      if (!relativePath || relativePath.startsWith("..")) continue;
-
-      if (entry.isDirectory()) {
-        if (this.shouldSkipDirectory(relativePath)) continue;
-        this.walkDirectory(entryAbsolutePath, snapshot);
-        continue;
-      }
-
-      if (!entry.isFile()) continue;
-      if (!this.shouldTrack(relativePath)) continue;
-
-      try {
-        const stat = fs.statSync(entryAbsolutePath);
-        snapshot.set(relativePath, `${stat.mtimeMs}:${stat.size}`);
-      } catch {}
-    }
+    return walkDirectoryImpl(this, absolutePath, snapshot);
   }
 
   startPollingFallback(reason) {
-    if (this.pollTimer) return;
-    this.watchMode = "polling";
-    this.trackedSnapshot = this.captureTrackedSnapshot();
-    this.pollIntervalMs = Math.max(this.config.debounceMs * 2, 5000);
-    this.pollTimer = setInterval(() => {
-      this.pollForChanges();
-    }, this.pollIntervalMs);
-    this.updateState({
-      watchMode: this.watchMode,
-      watchAlert: reason,
-      watchFailures: this.watchFailures,
-      pollIntervalMs: this.pollIntervalMs
-    });
+    return startPollingFallbackImpl(this, reason);
   }
 
   pollForChanges() {
-    if (this.paused) return;
-    try {
-      const nextSnapshot = this.captureTrackedSnapshot();
-      for (const [relativePath, signature] of nextSnapshot.entries()) {
-        if (this.trackedSnapshot.get(relativePath) !== signature) {
-          this.queue(relativePath);
-        }
-      }
-      this.trackedSnapshot = nextSnapshot;
-    } catch (error) {
-      this.updateState({
-        watchAlert: `polling watcher error: ${String(error?.message || error)}`
-      });
-    }
+    return pollForChangesImpl(this);
   }
 
   ensureVaultGitRepo() {
-    if (!this.config.git.enabled) return true;
-    if (this.vaultGitReady) return true;
-    try {
-      if (!gitHasRepo(this.vaultPath)) {
-        gitInit(this.vaultPath);
-      }
-
-      if (this.config.git.mode === "remote" && this.config.git.repoUrl) {
-        gitRemoteSetUrl(this.config.git.remote, this.config.git.repoUrl, this.vaultPath);
-      }
-    } catch (error) {
-      this.updateState({
-        lastError: `git repo setup failure: ${String(error?.message || error)}`
-      });
-      return false;
-    }
-
-    this.vaultGitReady = true;
-    return true;
+    return ensureVaultGitRepoImpl(this);
   }
 
   collectProtectedArtifacts() {
-    const dsStoreFiles = [];
-    const stack = [this.vaultPath];
-
-    while (stack.length) {
-      const next = stack.pop();
-      let entries = [];
-      try {
-        entries = fs.readdirSync(next, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-
-      for (const entry of entries) {
-        const absolute = path.join(next, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name === ".git") continue;
-          stack.push(absolute);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        if (entry.name !== ".DS_Store") continue;
-        dsStoreFiles.push(absolute);
-      }
-    }
-
-    return dsStoreFiles;
+    return collectProtectedArtifactsImpl(this);
   }
 
   enforceProtectedArtifacts() {
-    if (!this.config.git.enabled) return;
-    if (!this.ensureVaultGitRepo()) return;
-
-    gitEnsureIgnoreEntries(PROTECTED_GITIGNORE_LINES, this.vaultPath);
-
-    for (const absolute of this.collectProtectedArtifacts()) {
-      try {
-        fs.unlinkSync(absolute);
-      } catch {}
-    }
-
-    const tracked = gitListTracked(PROTECTED_GIT_PATHS, this.vaultPath);
-    if (!tracked.length) return;
-    gitRemoveCached(PROTECTED_GIT_PATHS, this.vaultPath);
+    return enforceProtectedArtifactsImpl(this);
   }
 
   commitQueuedChanges(label) {
-    if (!this.config.git.enabled) return;
-    const files = [...new Set([...this.changedFiles].map(normalizeRelativePath))];
-    this.changedFiles.clear();
-    if (!files.length) return;
-
-    if (!this.ensureVaultGitRepo()) return;
-    for (const relPath of files) {
-      if (!relPath || isProtectedArtifactPath(relPath)) continue;
-      gitAdd(relPath, this.vaultPath);
-    }
-    return this.commitStagedChanges(label);
+    return commitQueuedChangesImpl(this, label);
   }
 
   commitAllChanges(label) {
-    if (!this.config.git.enabled) return;
-    if (!this.ensureVaultGitRepo()) return;
-    gitAddAll(this.vaultPath);
-    return this.commitStagedChanges(label);
+    return commitAllChangesImpl(this, label);
   }
 
   commitAllChangesWithSubject(subject, extraBody = []) {
-    if (!this.config.git.enabled) return { committed: false, staged: [] };
-    if (!this.ensureVaultGitRepo()) return { committed: false, staged: [], error: "git repo not ready" };
-    gitAddAll(this.vaultPath);
-    return this.commitStagedWithSubject(subject, { extraBody });
+    return commitAllChangesWithSubjectImpl(this, subject, extraBody);
   }
 
   commitStagedChanges(label) {
-    const staged = gitCachedNames(this.vaultPath);
-    const subject = `notes(sync): ${label}`;
-    return this.commitStagedWithSubject(subject);
+    return commitStagedChangesImpl(this, label);
   }
 
   commitStagedWithSubject(subject, { extraBody = [] } = {}) {
-    const staged = gitCachedNames(this.vaultPath);
-    if (!staged.length) return { committed: false, staged: [] };
-    const body = [
-      "source=notes-automation",
-      `files=${staged.slice(0, 10).join(", ")}`,
-      ...extraBody.filter(Boolean)
-    ];
-    gitCommit(subject, body, this.vaultPath);
-    let commitHash = null;
-    try {
-      commitHash = gitRevParse("HEAD", this.vaultPath);
-    } catch {}
-    this.updateState({
-      lastCommitAt: new Date().toISOString(),
-      lastCommitFiles: staged,
-      lastCommitHash: commitHash
-    });
-    return {
-      committed: true,
-      staged,
-      commitHash
-    };
+    return commitStagedWithSubjectImpl(this, subject, { extraBody });
   }
 
   quarantineGitConflicts(errorOutput = "") {
@@ -469,91 +296,19 @@ export class NotesAutomationService {
   }
 
   isInternalArtifactPath(filePath) {
-    const normalized = normalizeRelativePath(filePath);
-    if (!normalized) return false;
-    if (isProtectedArtifactPath(normalized)) return true;
-    if (normalized === ".obsidian/workspace.json") return true;
-    if (normalized === ".logs" || normalized.startsWith(".logs/")) return true;
-    if (normalized === ".git" || normalized.startsWith(".git/")) return true;
-    return false;
+    return isInternalArtifactPathImpl(this, filePath);
   }
 
   collectInternalArtifactPaths() {
-    const entries = new Set();
-    const stack = [this.vaultPath];
-
-    while (stack.length) {
-      const absolutePath = stack.pop();
-      let dirEntries = [];
-      try {
-        dirEntries = fs.readdirSync(absolutePath, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-
-      for (const entry of dirEntries) {
-        const absolute = path.join(absolutePath, entry.name);
-        const relative = normalizeRelativePath(path.relative(this.vaultPath, absolute));
-        if (!relative || relative.startsWith("..")) continue;
-
-        if (entry.isDirectory()) {
-          if (relative === ".git") continue;
-          stack.push(absolute);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        if (!this.isInternalArtifactPath(relative)) continue;
-        entries.add(relative);
-      }
-    }
-
-    return entries;
+    return collectInternalArtifactPathsImpl(this);
   }
 
   captureGDriveImportBaseline() {
-    const trackedFilesBefore =
-      this.config.git.enabled && this.ensureVaultGitRepo() ? gitTrackedFiles(this.vaultPath).length : 0;
-    return {
-      trackedFilesBefore,
-      internalArtifactPathsBefore: this.collectInternalArtifactPaths()
-    };
+    return captureGDriveImportBaselineImpl(this);
   }
 
   createPreGDriveSnapshot() {
-    if (!this.config.git.enabled) {
-      this.updateSyncState({
-        lastPreGDriveSnapshotCommit: null,
-        preGDriveSnapshotSkipped: "git-disabled"
-      });
-      return { ok: true, skipped: true, reason: "git-disabled" };
-    }
-    if (!this.ensureVaultGitRepo()) {
-      return { ok: false, error: "git repo not ready" };
-    }
-
-    gitAddAll(this.vaultPath);
-    const staged = gitCachedNames(this.vaultPath).filter((filePath) => !isProtectedArtifactPath(filePath));
-    if (!staged.length) {
-      this.updateSyncState({
-        lastPreGDriveSnapshotCommit: null,
-        preGDriveSnapshotSkipped: "clean"
-      });
-      return { ok: true, skipped: true, reason: "clean" };
-    }
-
-    const snapshotCommit = this.commitStagedWithSubject("backup(sync): snapshot before gdrive import", {
-      extraBody: ["reason=pre-gdrive-import"]
-    });
-    this.updateSyncState({
-      lastPreGDriveSnapshotCommit: snapshotCommit.commitHash || null,
-      preGDriveSnapshotSkipped: null
-    });
-    return {
-      ok: true,
-      skipped: false,
-      commitHash: snapshotCommit.commitHash || null,
-      staged: snapshotCommit.staged || staged
-    };
+    return createPreGDriveSnapshotImpl(this);
   }
 
   classifyGDriveImport(baseline = {}) {
@@ -573,62 +328,11 @@ export class NotesAutomationService {
   }
 
   pollControl() {
-    const state = readState();
-    const action = state.requestedAction;
-    if (!action) return;
-
-    if (action === "resume") {
-      this.paused = false;
-      this.clearConflicts();
-      this.updateState({
-        paused: false,
-        alert: null,
-        requestedAction: null,
-        resumedAt: new Date().toISOString(),
-        lastError: null
-      });
-      return;
-    }
-
-    if (action === "flush-push" || action === "flush-sync" || action === "sync") {
-      this.updateState({ requestedAction: null });
-      void this.runSync({ reason: action });
-    }
+    return pollRequestedAction(this);
   }
 
   watchOne(watchPath) {
-    const absolute = path.resolve(this.vaultPath, watchPath);
-    let watcher;
-    try {
-      watcher = fs.watch(
-        absolute,
-        { persistent: true, recursive: true },
-        (_eventType, fileName) => {
-          if (!fileName) return;
-          const relPath = toPosix(path.relative(this.vaultPath, path.resolve(absolute, fileName)));
-          this.queue(relPath);
-        }
-      );
-    } catch (error) {
-      this.recordWatchFailure(watchPath, error);
-      return false;
-    }
-
-    watcher.on("error", (error) => {
-      this.recordWatchFailure(watchPath, error);
-      try {
-        watcher.close();
-      } catch {}
-      this.watchers = this.watchers.filter((entry) => entry !== watcher);
-      if (this.watchMode !== "polling") {
-        this.startPollingFallback(
-          "File watcher degraded to polling mode after watcher error. Auto-sync remains active."
-        );
-      }
-    });
-
-    this.watchers.push(watcher);
-    return true;
+    return watchOneImpl(this, watchPath);
   }
 
   start() {

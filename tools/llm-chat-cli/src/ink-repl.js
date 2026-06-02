@@ -3,21 +3,20 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import {
   buildGatewayOptions,
+  createChatSession,
   createStartupWarmup,
-  createReplState,
   executeCommand,
-  processPrompt,
   readLocalSyncStatusModel,
   saveAndSyncSession
 } from "./cli.js";
 import {
   getSlashCommandSuggestions as getSlashCommandSuggestionsImpl,
-  itemsFromConversationHistory as itemsFromConversationHistoryImpl,
   modelStatusFromRouting as modelStatusFromRoutingImpl,
   moveSlashSuggestionSelection,
   resolveSlashEnterAction as resolveSlashEnterActionImpl,
   tabCompleteSlashCommandInput as tabCompleteSlashCommandInputImpl
 } from "./ink-controller.js";
+import { handleInkSubmit } from "./ink-submit-controller.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
 
 export { moveSlashSuggestionSelection };
@@ -127,10 +126,6 @@ function splitSnippet(value) {
 
 function modelStatusFromRouting(routing) {
   return modelStatusFromRoutingImpl(routing);
-}
-
-function itemsFromConversationHistory(history, { startAt = 0 } = {}) {
-  return itemsFromConversationHistoryImpl(history, { startAt });
 }
 
 export function getSlashCommandSuggestions(inputValue) {
@@ -341,7 +336,7 @@ export function InkChatApp({
   startupWarmup
 }) {
   const { exit } = useApp();
-  const sessionRef = useRef(createReplState({ systemPrompt }));
+  const sessionRef = useRef(createChatSession({ systemPrompt }));
   const limitsByModelRef = useRef(readLiteLLMLimits());
   const gatewayRef = useRef(buildGatewayOptions());
   const nextIdRef = useRef(0);
@@ -527,170 +522,53 @@ export function InkChatApp({
 
   const handleSubmit = useCallback(
     async (value) => {
-      if (isBusy) return;
-      const slashEnterAction = resolveSlashEnterAction({
-        inputValue: value,
-        suggestions: showSlashSuggestions ? slashSuggestions : [],
-        selectedIndex: slashSelectionIndex
+      await handleInkSubmit({
+        value,
+        isBusy,
+        screen,
+        session: sessionRef.current,
+        commandExecutor,
+        limitsByModel: limitsByModelRef.current,
+        chatCompletion,
+        finalizeExit,
+        refreshLiveTokenCount,
+        refreshModelStatus,
+        refreshSyncStatus,
+        appendAssistantChunk,
+        appendMessage,
+        appendPanel,
+        clearAssistantPending: () => setAssistantPendingId(null),
+        createAssistantMessage,
+        replaceAssistantText,
+        promptHistory: {
+          entries: promptHistoryRef,
+          cursor: promptHistoryCursorRef,
+          draft: promptHistoryDraftRef
+        },
+        warmup: {
+          awaited: warmupAwaitedRef,
+          controller: warmupRef.current
+        },
+        slashState: {
+          resolveEnterAction: resolveSlashEnterAction,
+          selectedIndex: slashSelectionIndex,
+          showSuggestions: showSlashSuggestions,
+          suggestions: slashSuggestions
+        },
+        ui: {
+          assistantPendingToken: ASSISTANT_PENDING_TOKEN,
+          setBusyLabel,
+          setHistoryNotice,
+          setHistoryPanel,
+          setHistoryScrollOffset,
+          setInputValue,
+          setIsBusy,
+          setItems,
+          setScreen,
+          setSyncNotice
+        },
+        nextIdRef
       });
-      if (slashEnterAction?.mode === "fill") {
-        setInputValue(slashEnterAction.line);
-        return;
-      }
-      const line = String(slashEnterAction?.line ?? value ?? "").trim();
-      setInputValue("");
-      if (!line) return;
-
-      const state = sessionRef.current;
-      setBusyLabel(line.startsWith("/") ? `running ${line}` : "processing prompt");
-      setIsBusy(true);
-      try {
-        const command = await commandExecutor({
-          line,
-          state,
-          limitsByModel: limitsByModelRef.current,
-          mode: "tui",
-          handlers: {
-            message: (text) => appendMessage("system", text),
-            panel: (title, lines) => appendPanel(title, lines)
-          }
-        });
-        const action = command?.action && typeof command.action === "object" ? command.action : null;
-        if (action?.type === "switch-screen") {
-          if (action.screen === "sync") {
-            setScreen("sync");
-            setSyncNotice("");
-            setHistoryNotice("");
-            refreshSyncStatus(action.syncStatus);
-          } else if (action.screen === "history") {
-            setScreen("history");
-            setSyncNotice("");
-            setHistoryNotice("");
-            if (action.historyPanel && Array.isArray(action.historyPanel.lines)) {
-              setHistoryPanel({
-                title: String(action.historyPanel.title || "History"),
-                lines: action.historyPanel.lines,
-                renderMarkdown: action.historyPanel.renderMarkdown !== false,
-                scrollable: Boolean(action.historyPanel.scrollable),
-                previewMode: Boolean(action.historyPanel.previewMode)
-              });
-              setHistoryScrollOffset(0);
-            }
-          } else if (action.screen === "conversation") {
-            setScreen("conversation");
-            setSyncNotice("");
-            setHistoryNotice("");
-            if (Array.isArray(action.historyLoaded?.history)) {
-              const hydrated = itemsFromConversationHistory(action.historyLoaded.history, {
-                startAt: nextIdRef.current
-              });
-              nextIdRef.current = hydrated.nextId;
-              setItems(hydrated.items);
-            }
-          }
-        }
-        if (line === "/sync" || line.startsWith("/sync ")) {
-          if (!action?.syncStatus) {
-            refreshSyncStatus();
-          }
-        }
-        refreshLiveTokenCount();
-        refreshModelStatus(state.latestRouting);
-
-        if (command.handled) {
-          if (command.exit) {
-            setBusyLabel("running /exit");
-            await finalizeExit();
-          }
-          return;
-        }
-
-        if (screen === "sync") {
-          setSyncNotice("sync screen active; run /conv before sending prompts");
-          refreshSyncStatus();
-          return;
-        }
-        if (screen === "history") {
-          setHistoryNotice("History screen active. Run /back or /conv or use /history commands.");
-          return;
-        }
-
-        appendMessage("user", line);
-        if (promptHistoryRef.current.length >= 200) {
-          promptHistoryRef.current.shift();
-        }
-        promptHistoryRef.current.push(line);
-        promptHistoryCursorRef.current = null;
-        promptHistoryDraftRef.current = "";
-        if (!warmupAwaitedRef.current && warmupRef.current) {
-          warmupAwaitedRef.current = true;
-          await warmupRef.current.wait();
-        }
-        const assistantMessageId = createAssistantMessage();
-        let streamedAny = false;
-        state.transcriptSavedPath = null;
-        const extraContextMessages = state.addedContextEntries
-          .map((entry) => ({
-            role: "system",
-            content: String(entry?.content || "").trim()
-          }))
-          .filter((entry) => entry.content);
-        setBusyLabel("processing prompt");
-
-        const result = await processPrompt({
-          prompt: line,
-          history: state.history,
-          systemPrompt: state.activeSystemPrompt,
-          sessionUsage: state.sessionUsage,
-          estimatedTokensRef: state.estimatedTokensRef,
-          renderMode: "silent",
-          chatCompletion,
-          onThinkingChange: (thinking) => {
-            if (thinking) {
-              replaceAssistantText(assistantMessageId, ASSISTANT_PENDING_TOKEN);
-              setBusyLabel("waiting for model");
-              refreshLiveTokenCount();
-            }
-          },
-          onAssistantDelta: (chunk) => {
-            streamedAny = true;
-            setAssistantPendingId(null);
-            setBusyLabel("assistant responding");
-            appendAssistantChunk(assistantMessageId, chunk);
-            refreshLiveTokenCount();
-          },
-          onUsage: (usage) => {
-            const nextTotal =
-              Number(state.sessionUsage.total_tokens || 0) + Number(usage?.total_tokens || 0);
-            refreshLiveTokenCount(nextTotal);
-            setBusyLabel("finalizing response");
-          },
-          onRouting: (routing) => {
-            state.latestRouting = routing;
-            refreshModelStatus(routing);
-          },
-          onWarning: (message) => {
-            appendMessage("system", message);
-          },
-          extraContextMessages
-        });
-
-        state.latestRouting = result.routing;
-        refreshModelStatus(result.routing);
-        setAssistantPendingId(null);
-        if (!streamedAny) {
-          replaceAssistantText(assistantMessageId, result.assistantText || "[no content]");
-        }
-        state.addedContextEntries = [];
-        refreshLiveTokenCount(state.sessionUsage.total_tokens);
-        refreshSyncStatus();
-      } catch (error) {
-        setAssistantPendingId(null);
-        appendMessage("system", `[chat] ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
-        setBusyLabel("");
-        setIsBusy(false);
-      }
     },
     [
       appendAssistantChunk,

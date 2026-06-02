@@ -1,39 +1,57 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import * as readlinePromises from "node:readline/promises";
-import { stdin as input, stdout as output, stderr } from "node:process";
+import { stdin as input, stdout as output } from "node:process";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../../notes-automation/src/config.js";
 import {
   completeCommandInput as completeCommandInputImpl,
-  executeChatCommand,
+  createCommandRuntime,
   getCommandDefinitions as getCommandDefinitionsImpl,
   getCommandPanelLines as getCommandPanelLinesImpl,
   getCommandSuggestions as getCommandSuggestionsImpl,
   resolveCommandSubmission as resolveCommandSubmissionImpl
 } from "./commands.js";
+import {
+  DEFAULT_CONFIG_PATH,
+  DEFAULT_GATEWAY_MODEL,
+  DEFAULT_HISTORY_SUMMARY_MAX_CHARS,
+  DEFAULT_IDLE_SYNC_MS,
+  buildGatewayOptions,
+  formatSyncFeedback,
+  isVaultContextEnabled,
+  readLocalSyncStatusModel,
+  resolveVaultPath,
+  runNotesAutomationCommand
+} from "./chat-config.js";
+import {
+  createStatusLine,
+  createStatusRenderer,
+  createStatusState,
+  createUsageSummary,
+  formatUsagePanel,
+  printUsageSummary
+} from "./chat-status.js";
+import {
+  createChatSession,
+  loadTranscriptIntoSession,
+  resetChatSession
+} from "./chat-session.js";
+import { runPrompt } from "./chat-runtime.js";
 import { streamChatCompletion } from "./gateway.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "./search.js";
-import { buildSyncStatusModelFromResult } from "./sync-status.js";
-import { estimateTokensFromText } from "./token-estimator.js";
 import {
   listTranscriptDates,
   listTranscriptsForDate,
   readTranscript,
   writeTranscript
 } from "./transcripts.js";
-import { loadLocalEnv } from "../../shared/env.js";
 import { routingFromTranscriptMetadata } from "../../shared/routing-metadata.js";
 import {
   accumulateSessionUsage,
-  addUsageToLedger,
-  calculateRemainingFromLimits,
-  createSessionUsage,
-  getUsageLedger
+  addUsageToLedger
 } from "./usage.js";
 import {
   buildVaultAccessContract as buildVaultAccessContractImpl,
@@ -46,16 +64,6 @@ import {
   normalizeSourcePath as normalizeSourcePathImpl,
   VAULT_CONTEXT_MODES
 } from "./vault-context.js";
-
-loadLocalEnv();
-
-const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT || 4100}`;
-const DEFAULT_GATEWAY_MODEL = "smart-router";
-const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
-const NOTES_AUTOMATION_CLI_PATH = path.resolve("tools/notes-automation/src/cli.js");
-const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
-const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
-const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 const HISTORY_FLOW_DATES = "dates";
 const HISTORY_FLOW_CONVERSATIONS = "conversations";
 const HISTORY_FLOW_SUMMARY = "summary";
@@ -76,26 +84,11 @@ function parseArguments(argv) {
   };
 }
 
-function buildGatewayOptions() {
-  return {
-    gatewayUrl: process.env.MASSA_VAULT_CHAT_GATEWAY_URL || DEFAULT_GATEWAY_URL,
-    apiKey: process.env.LITELLM_MASTER_KEY || ""
-  };
-}
-
 function warnIfAuthMissing(apiKey) {
   if (apiKey) return;
   console.error(
     "[chat] warning: LITELLM_MASTER_KEY is empty. Requests may fail with 401 if gateway auth is enabled."
   );
-}
-
-function isVaultContextEnabled(env = process.env) {
-  const raw = String(env.MASSA_VAULT_CHAT_RAG || "")
-    .trim()
-    .toLowerCase();
-  if (!raw) return true;
-  return !RAG_DISABLED_VALUES.has(raw);
 }
 
 function asUsage(usage) {
@@ -104,118 +97,6 @@ function asUsage(usage) {
     completion_tokens: Number(usage?.completion_tokens || 0),
     total_tokens: Number(usage?.total_tokens || 0)
   };
-}
-
-function buildMessages(history, systemPrompt) {
-  if (!systemPrompt) return [...history];
-  return [{ role: "system", content: systemPrompt }, ...history];
-}
-
-function createStatusState({
-  sessionUsage,
-  estimatedTokens,
-  routing,
-  ledgerTotals,
-  authEnabled
-}) {
-  return {
-    sessionUsage,
-    estimatedTokens,
-    routing,
-    ledgerTotals,
-    authEnabled
-  };
-}
-
-function createStatusLine(state) {
-  const lane = state.routing?.lane || "unknown";
-  const model = state.routing?.targetModel || DEFAULT_GATEWAY_MODEL;
-  return (
-    `[tokens session=${state.sessionUsage.total_tokens}` +
-    ` all_time=${state.ledgerTotals.total_tokens}` +
-    ` est=${state.estimatedTokens}` +
-    ` lane=${lane}` +
-    ` model=${model}` +
-    ` auth=${state.authEnabled ? "on" : "off"}]`
-  );
-}
-
-function createStatusRenderer({ stream = stderr } = {}) {
-  const canRender = Boolean(stream?.isTTY);
-
-  return {
-    render(text) {
-      if (!canRender) return;
-      const line = String(text || "");
-      if (!line) return;
-      stream.write(`${line}\n`);
-    },
-    clear() {},
-    isEnabled() {
-      return canRender;
-    }
-  };
-}
-
-function createUsageSummary({
-  sessionUsage,
-  estimatedTokens,
-  routing,
-  limitsByModel
-}) {
-  const ledger = getUsageLedger();
-  const modelName = routing?.targetModel || DEFAULT_GATEWAY_MODEL;
-  const remaining = calculateRemainingFromLimits({
-    limitsByModel,
-    modelName,
-    usedPromptTokens: sessionUsage.prompt_tokens,
-    usedCompletionTokens: sessionUsage.completion_tokens
-  });
-
-  return {
-    allTimeTotalTokens: ledger.totals.total_tokens,
-    sessionTotalTokens: sessionUsage.total_tokens,
-    sessionEstimatedTokens: estimatedTokens,
-    model: remaining.model,
-    remainingTpm: remaining.tpmRemaining,
-    remainingRpm: remaining.rpmRemaining,
-    quotaRefresh: remaining.resetsIn
-  };
-}
-
-function formatUsagePanel(summary) {
-  return [
-    `all_time_total_tokens: ${summary.allTimeTotalTokens}`,
-    `session_total_tokens: ${summary.sessionTotalTokens}`,
-    `session_estimated_tokens: ${summary.sessionEstimatedTokens}`,
-    `model: ${summary.model}`,
-    `remaining_tpm: ${summary.remainingTpm}`,
-    `remaining_rpm: ${summary.remainingRpm}`,
-    `quota_refresh: ${summary.quotaRefresh}`
-  ];
-}
-
-function printUsageSummary({
-  sessionUsage,
-  estimatedTokens,
-  routing,
-  limitsByModel
-}) {
-  const summary = createUsageSummary({
-    sessionUsage,
-    estimatedTokens,
-    routing,
-    limitsByModel
-  });
-  console.log("Usage:");
-  for (const line of formatUsagePanel(summary)) {
-    console.log(`  ${line}`);
-  }
-}
-
-function resolveVaultPath() {
-  const config = loadConfig(DEFAULT_CONFIG_PATH);
-  return config.vaultPath;
 }
 
 function normalizeSourcePath(filePath) {
@@ -706,103 +587,6 @@ async function saveTranscript({
   });
 }
 
-function parseJsonOutput(value) {
-  const text = String(value || "").trim();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function runNotesAutomationCommand(args = []) {
-  try {
-    const output = execFileSync(process.execPath, [NOTES_AUTOMATION_CLI_PATH, ...args], {
-      cwd: process.cwd(),
-      env: process.env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
-    }).trim();
-    return { ok: true, output, payload: parseJsonOutput(output) };
-  } catch (error) {
-    const output = String(error?.stdout || error?.stderr || error?.message || "").trim();
-    return { ok: false, output, payload: parseJsonOutput(output) };
-  }
-}
-
-function readLocalSyncStatusModel() {
-  return buildSyncStatusModelFromResult(runNotesAutomationCommand(["status"]));
-}
-
-function formatSyncFeedback(result) {
-  const payload = result?.payload && typeof result.payload === "object" ? result.payload : null;
-  if (!payload) {
-    if (result?.ok) return "[chat] sync completed.";
-    return `[chat] sync failed: ${result?.output || "unknown error"}`;
-  }
-
-  const sync =
-    payload.sync && typeof payload.sync === "object"
-      ? payload.sync
-      : payload.state && typeof payload.state?.sync === "object"
-        ? payload.state.sync
-        : {};
-  const state = payload.state && typeof payload.state === "object" ? payload.state : {};
-  const status = sync.status || (payload.ok ? "idle" : "error");
-  const conflictCount = Number(sync.conflictCount || 0);
-  const errorText = sync.lastError || payload.message || payload.error || "";
-  const autoResyncAttempted = Boolean(
-    sync.lastGDriveAutoResyncAttempted ?? state.lastGDriveAutoResyncAttempted
-  );
-  const autoResyncApplied = Boolean(
-    sync.lastGDriveAutoResyncApplied ?? state.lastGDriveAutoResyncApplied
-  );
-  const resyncMode = String(sync.lastGDriveResyncMode || state.lastGDriveResyncMode || "").trim();
-  const nestedStateSync = state?.sync && typeof state.sync === "object" ? state.sync : {};
-  const gdriveImport = String(
-    sync.gdriveImport ||
-      sync.lastGDriveImportClassification ||
-      nestedStateSync.lastGDriveImportClassification ||
-      ""
-  ).trim();
-  const gdriveImportSummary =
-    (sync.gdriveImportSummary && typeof sync.gdriveImportSummary === "object"
-      ? sync.gdriveImportSummary
-      : null) ||
-    (sync.lastGDriveImportSummary && typeof sync.lastGDriveImportSummary === "object"
-      ? sync.lastGDriveImportSummary
-      : null) ||
-    (nestedStateSync.lastGDriveImportSummary &&
-    typeof nestedStateSync.lastGDriveImportSummary === "object"
-      ? nestedStateSync.lastGDriveImportSummary
-      : null);
-  const gdriveImportPart = gdriveImport ? ` gdrive_import=${gdriveImport}` : "";
-  const gdriveImportCounts =
-    gdriveImportSummary && typeof gdriveImportSummary.changedCount === "number"
-      ? ` changed=${Number(gdriveImportSummary.changedCount || 0)} added=${Number(gdriveImportSummary.addedCount || 0)} modified=${Number(gdriveImportSummary.modifiedCount || 0)} deleted=${Number(gdriveImportSummary.deletedCount || 0)}`
-      : "";
-  const nextAction =
-    sync.nextAction ||
-    (gdriveImport === "dangerous"
-      ? "review local dangerous import commit before resume"
-      : gdriveImport === "suspicious"
-        ? "review suspicious import diff"
-        : "");
-  const nextActionPart =
-    gdriveImport === "dangerous" || gdriveImport === "suspicious"
-      ? ` next_action=${String(nextAction || "").trim() || "review import"}`
-      : "";
-  const autoResyncSummary = autoResyncAttempted
-    ? ` auto_resync=${autoResyncApplied ? "applied" : "attempted"} mode=${resyncMode || "newer"}`
-    : "";
-  const base = `[chat] sync status=${status} conflicts=${conflictCount}${gdriveImportPart}${gdriveImportCounts}${autoResyncSummary}${nextActionPart}`;
-  if (!payload.ok || errorText) {
-    return `${base} error=${errorText || "unknown"}`;
-  }
-  return base;
-}
-
 async function persistTranscriptForSession(state) {
   if (state.transcriptSavedPath && state.lastSavedHistoryLength === state.history.length) {
     return { path: state.transcriptSavedPath, saved: false };
@@ -837,40 +621,11 @@ async function saveAndSyncSession(state, { reason = "chat-manual-sync", skipSave
 }
 
 function createReplState({ systemPrompt }) {
-  return {
-    history: [],
-    sessionUsage: createSessionUsage(),
-    estimatedTokensRef: { value: 0 },
-    latestRouting: null,
-    activeSystemPrompt: systemPrompt,
-    sessionId: randomUUID(),
-    sessionStartedAt: new Date().toISOString(),
-    transcriptSavedPath: null,
-    lastSavedHistoryLength: 0,
-    historySelectedDate: null,
-    historyVisibleRows: [],
-    historyDateRows: [],
-    historyFlowStack: [],
-    activeTranscript: null,
-    addedContextEntries: []
-  };
+  return createChatSession({ systemPrompt });
 }
 
 function resetConversation(state) {
-  state.history.length = 0;
-  state.estimatedTokensRef.value = 0;
-  state.sessionUsage.prompt_tokens = 0;
-  state.sessionUsage.completion_tokens = 0;
-  state.sessionUsage.total_tokens = 0;
-  state.latestRouting = null;
-  state.transcriptSavedPath = null;
-  state.lastSavedHistoryLength = 0;
-  state.historySelectedDate = null;
-  state.historyVisibleRows = [];
-  state.historyDateRows = [];
-  state.historyFlowStack = [];
-  state.activeTranscript = null;
-  state.addedContextEntries = [];
+  return resetChatSession(state);
 }
 
 function createTuiCommandHandlers(handlers) {
@@ -1060,28 +815,22 @@ async function executeCommand({
   transcriptMarkdownReader = readTranscriptMarkdownFile,
   historySummaryRunner = summarizeHistoryTranscript
 }) {
-  return executeChatCommand(
-    {
-      line,
-      state,
-      limitsByModel,
-      mode,
-      handlers,
-      onSaveAndSync,
-      historySearchRunner,
-      transcriptReader,
-      transcriptMarkdownReader,
-      historySummaryRunner
+  const runtime = createCommandRuntime({
+    config: {
+      defaultGatewayModel: DEFAULT_GATEWAY_MODEL,
+      defaultRagMaxChars: DEFAULT_RAG_MAX_CHARS,
+      historyFlowPreview: HISTORY_FLOW_PREVIEW,
+      historyFlowSummary: HISTORY_FLOW_SUMMARY,
+      vaultContextModes: VAULT_CONTEXT_MODES,
+      isVaultContextEnabled
     },
-    {
-      DEFAULT_GATEWAY_MODEL,
-      DEFAULT_RAG_MAX_CHARS,
-      HISTORY_FLOW_PREVIEW,
-      HISTORY_FLOW_SUMMARY,
-      VAULT_CONTEXT_MODES,
-      addUsageToLedger,
-      accumulateSessionUsage,
-      asUsage,
+    syncClient: {
+      saveAndSync: onSaveAndSync,
+      formatSyncFeedback,
+      readLocalSyncStatusModel,
+      runNotesAutomationCommand
+    },
+    historyClient: {
       buildGatewayOptions,
       buildHistoryContextText,
       captureRoutingFromTranscriptMetadata,
@@ -1090,39 +839,63 @@ async function executeCommand({
       createHistoryDateRows,
       createHistoryPanelState,
       createHistoryScreenAction,
-      createTuiCommandHandlers,
-      createUsageSummary,
+      createHistoryRowsFromDateEntries,
+      createHistoryRowsFromSearchResults,
       formatHistoryConversationLines,
       formatHistoryDateLines,
       formatHistoryPreviewLines,
       formatHistorySummaryLines,
       formatRelativeTranscriptLabel,
-      formatSearchPanel,
-      formatSyncFeedback,
-      formatUsagePanel,
       getHistoryRowFromSelection,
       historyBackStep,
       isHistoryConversationsScreen,
-      isVaultContextEnabled,
       listTranscriptsForDate,
       normalizeHistoryDateInput,
       normalizeHistoryInputShortcut,
       parseHistoryConversationAlias,
       parsePositiveIndex,
-      printSearchPlain,
-      printUsageSummary,
       pushHistoryFlowDetail,
-      readLocalSyncStatusModel,
-      resetConversation,
       resolveVaultPath,
-      runNotesAutomationCommand,
+      searchRunner: historySearchRunner,
       setHistoryFlowConversations,
       setHistoryFlowDatesRoot,
-      usageFromTranscriptMetadata,
-      createHistoryRowsFromDateEntries,
-      createHistoryRowsFromSearchResults
+      summaryRunner: historySummaryRunner,
+      transcriptMarkdownReader,
+      transcriptReader,
+      usageFromTranscriptMetadata
+    },
+    usageClient: {
+      addUsageToLedger,
+      accumulateSessionUsage,
+      asUsage,
+      createUsageSummary,
+      formatUsagePanel,
+      printUsageSummary
+    },
+    searchClient: {
+      formatSearchPanel,
+      printSearchPlain
+    },
+    sessionClient: {
+      loadTranscript: (session, payload) =>
+        loadTranscriptIntoSession(session, {
+          ...payload,
+          fallbackSessionId: session.sessionId,
+          fallbackSessionStartedAt: session.sessionStartedAt,
+          fallbackGatewayUrl: buildGatewayOptions().gatewayUrl,
+          fallbackModel: DEFAULT_GATEWAY_MODEL
+        }),
+      resetSession: resetConversation
     }
-  );
+  });
+
+  return runtime.execute({
+    line,
+    session: state,
+    limitsByModel,
+    mode,
+    io: handlers
+  });
 }
 
 async function processPrompt({
@@ -1143,159 +916,33 @@ async function processPrompt({
   onWarning,
   extraContextMessages = []
 }) {
-  const gateway = buildGatewayOptions();
-  const emitWarning = (message) => {
-    if (renderMode === "plain") {
-      console.error(message);
-    }
-    onWarning?.(message);
-  };
-
-  let vaultContext = null;
-  if (isVaultContextEnabled()) {
-    try {
-      vaultContext = await vaultContextBuilder({ prompt });
-    } catch (error) {
-      emitWarning(
-        `[chat] warning: vault context unavailable (${error instanceof Error ? error.message : String(error)}). continuing without context.`
-      );
-    }
-  }
-
-  const userMessage = { role: "user", content: prompt };
-  const estimatedStart = estimatedTokensRef.value;
-  const estimatedPromptTokens = estimateTokensFromText(prompt);
-  history.push(userMessage);
-  estimatedTokensRef.value += estimatedPromptTokens;
-
-  const requestMessages = buildMessages(history, systemPrompt);
-  const normalizedExtraContextMessages = (Array.isArray(extraContextMessages) ? extraContextMessages : [])
-    .map((message) => ({
-      role: message?.role || "system",
-      content: String(message?.content || "").trim()
-    }))
-    .filter((message) => message.content);
-  const vaultMessages = Array.isArray(vaultContext?.messages)
-    ? vaultContext.messages
-    : vaultContext?.message
-      ? [{ role: "system", content: vaultContext.message }]
-      : [];
-  const normalizedVaultMessages = vaultMessages
-    .map((message) => ({
-      role: message?.role || "system",
-      content: String(message?.content || "").trim()
-    }))
-    .filter((message) => message.content);
-  const contextMessages = [...normalizedExtraContextMessages, ...normalizedVaultMessages];
-  if (contextMessages.length && requestMessages.length) {
-    requestMessages.splice(requestMessages.length - 1, 0, ...contextMessages);
-  }
-
-  let routing = null;
-  let usage = null;
-  let assistantText = "";
-  let renderedAssistantChunk = false;
-  let emittedAssistantChunk = false;
-
-  onThinkingChange?.(true);
-
-  if (renderMode === "plain") {
-    if (!statusRenderer?.isEnabled()) {
-      console.log(`\nUser: ${prompt}`);
-      outputStream.write("Assistant: ");
-    } else {
-      outputStream.write("assistant> ");
-    }
-  }
-
-  const response = await chatCompletion({
-    baseUrl: gateway.gatewayUrl,
-    apiKey: gateway.apiKey,
-    body: {
-      model: DEFAULT_GATEWAY_MODEL,
-      stream: true,
-      stream_options: { include_usage: true },
-      messages: requestMessages,
-      ...(vaultContext?.metadata ? { context: vaultContext.metadata } : {})
-    },
-    onRouting: (metadata) => {
-      routing = metadata;
-      onRouting?.(metadata);
-    },
-    onDelta: (chunk) => {
-      if (!emittedAssistantChunk) {
-        onThinkingChange?.(false);
-      }
-      emittedAssistantChunk = true;
-      renderedAssistantChunk = true;
-      if (renderMode === "plain") {
-        outputStream.write(chunk);
-      }
-      estimatedTokensRef.value += estimateTokensFromText(chunk);
-      onAssistantDelta?.(chunk);
-    },
-    onUsage: (nextUsage) => {
-      usage = asUsage(nextUsage);
-      onUsage?.(usage);
-    }
-  });
-
-  onThinkingChange?.(false);
-
-  assistantText = response.assistantText;
-  if (!renderedAssistantChunk && assistantText) {
-    if (renderMode === "plain") {
-      outputStream.write(assistantText);
-    }
-    onAssistantDelta?.(assistantText);
-    emittedAssistantChunk = true;
-  }
-  if (!usage) {
-    const estimatedRequestTokens = Math.max(0, estimatedTokensRef.value - estimatedStart);
-    usage = {
-      prompt_tokens: estimatedPromptTokens,
-      completion_tokens: Math.max(0, estimatedRequestTokens - estimatedPromptTokens),
-      total_tokens: estimatedRequestTokens
-    };
-    onUsage?.(usage);
-  }
-
-  if (!assistantText.trim()) {
-    assistantText = "[no content]";
-    if (!emittedAssistantChunk) {
-      onAssistantDelta?.(assistantText);
-    }
-  }
-  history.push({ role: "assistant", content: assistantText });
-
-  if (renderMode === "plain") {
-    outputStream.write("\n");
-  }
-
-  accumulateSessionUsage(sessionUsage, usage);
-  const ledger = addUsageToLedger({
-    usage,
-    modelName: routing?.targetModel || DEFAULT_GATEWAY_MODEL
-  });
-
-  const statusState = createStatusState({
+  const session = {
+    history,
     sessionUsage,
-    estimatedTokens: estimatedTokensRef.value,
-    routing,
-    ledgerTotals: ledger.totals,
-    authEnabled: Boolean(gateway.apiKey)
-  });
-
-  if (renderMode === "plain") {
-    statusRenderer?.render(createStatusLine(statusState));
-  }
-
-  return {
-    usage,
-    routing,
-    assistantText,
-    statusState
+    estimatedTokensRef,
+    latestRouting: null,
+    activeSystemPrompt: systemPrompt,
+    addedContextEntries: (Array.isArray(extraContextMessages) ? extraContextMessages : [])
+      .map((message, index) => ({
+        source: `compat-${index + 1}`,
+        content: String(message?.content || "").trim()
+      }))
+      .filter((entry) => entry.content)
   };
+
+  return runPrompt(session, {
+    prompt,
+    statusRenderer,
+    chatCompletion,
+    vaultContextBuilder,
+    outputStream,
+    renderMode,
+    onThinkingChange,
+    onAssistantDelta,
+    onUsage,
+    onRouting,
+    onWarning
+  });
 }
 
 function createStartupWarmup({
@@ -1370,7 +1017,7 @@ function createStartupWarmup({
 
 async function runPlainRepl({ systemPrompt, startupWarmup } = {}) {
   const rl = readlinePromises.createInterface({ input, output });
-  const state = createReplState({ systemPrompt });
+  const state = createChatSession({ systemPrompt });
   const statusRenderer = createStatusRenderer();
   const limitsByModel = readLiteLLMLimits();
   const idleSyncMs = Number.isFinite(DEFAULT_IDLE_SYNC_MS) ? Math.max(DEFAULT_IDLE_SYNC_MS, 5000) : 30_000;
@@ -1482,23 +1129,11 @@ async function runPlainRepl({ systemPrompt, startupWarmup } = {}) {
           await warmup.wait();
         }
         state.transcriptSavedPath = null;
-        const extraContextMessages = state.addedContextEntries
-          .map((entry) => ({
-            role: "system",
-            content: String(entry?.content || "").trim()
-          }))
-          .filter((entry) => entry.content);
-        const result = await processPrompt({
+        const result = await runPrompt(state, {
           prompt: line,
-          history: state.history,
-          systemPrompt: state.activeSystemPrompt,
-          sessionUsage: state.sessionUsage,
-          estimatedTokensRef: state.estimatedTokensRef,
-          statusRenderer,
-          extraContextMessages
+          statusRenderer
         });
         state.latestRouting = result.routing;
-        state.addedContextEntries = [];
         nextIdleSyncAt = Date.now() + idleSyncMs;
       } catch (error) {
         output.write("\n");
@@ -1542,32 +1177,20 @@ async function runRepl({ systemPrompt }) {
 }
 
 async function runOneShot({ prompt, systemPrompt }) {
-  const history = [];
-  const sessionUsage = createSessionUsage();
-  const estimatedTokensRef = { value: 0 };
+  const session = createChatSession({ systemPrompt });
   const statusRenderer = createStatusRenderer();
-
-  let latestRouting = null;
   try {
-    const result = await processPrompt({
-      prompt,
-      history,
-      systemPrompt,
-      sessionUsage,
-      estimatedTokensRef,
-      statusRenderer
-    });
-    latestRouting = result.routing;
+    await runPrompt(session, { prompt, statusRenderer });
   } finally {
     statusRenderer.clear();
   }
 
   const filePath = await saveTranscript({
-    sessionId: randomUUID(),
-    sessionStartedAt: new Date().toISOString(),
-    history,
-    latestRouting,
-    sessionUsage
+    sessionId: session.sessionId,
+    sessionStartedAt: session.sessionStartedAt,
+    history: session.history,
+    latestRouting: session.latestRouting,
+    sessionUsage: session.sessionUsage
   });
   if (filePath) {
     console.log(`[chat] transcript saved: ${filePath}`);
@@ -1635,6 +1258,7 @@ export {
   buildGatewayOptions,
   classifyVaultContextIntent,
   completeCommandInput,
+  createChatSession,
   createStartupWarmup,
   resolveCommandSubmission,
   getCommandDefinitions,
@@ -1653,6 +1277,7 @@ export {
   processPrompt,
   readLocalSyncStatusModel,
   resetConversation,
+  runPrompt,
   runOneShot,
   runPlainRepl,
   runRepl,

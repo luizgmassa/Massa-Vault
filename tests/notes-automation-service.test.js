@@ -630,3 +630,75 @@ test("pullGitInbound conflict failure pauses and records conflicted files", () =
     assert.match(String(state.alert || ""), /Git conflict detected/i);
   });
 });
+
+test("pollControl handles requested resume action through daemon controller", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+    service.paused = true;
+    service.conflicts = ["note.md"];
+    service.updateState(
+      {
+        running: false,
+        pid: null,
+        paused: true,
+        alert: "paused waiting for review",
+        lastError: "sync failed",
+        requestedAction: "resume",
+        sync: {
+          status: "paused",
+          conflictCount: 1,
+          conflicts: ["note.md"]
+        }
+      },
+      { force: true }
+    );
+
+    service.pollControl();
+    const state = readState();
+
+    assert.equal(service.paused, false);
+    assert.equal(state.paused, false);
+    assert.equal(state.requestedAction, null);
+    assert.equal(state.lastError, null);
+    assert.equal(state.sync.conflictCount, 0);
+    assert.equal(Array.isArray(state.sync.conflicts), true);
+    assert.equal(state.sync.conflicts.length, 0);
+    assert.match(String(state.resumedAt || ""), /\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+test("enforceProtectedArtifacts removes tracked automation artifacts and .DS_Store files", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(path.join(vaultPath, ".automation"), { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, ".automation", "state.json"), "{}", "utf8");
+    fs.writeFileSync(path.join(vaultPath, ".DS_Store"), "junk", "utf8");
+
+    runGit(["init"], vaultPath);
+    configureGitUser(vaultPath);
+    runGit(["checkout", "-b", "master"], vaultPath);
+    runGit(["add", ".automation/state.json"], vaultPath);
+    runGit(["add", "-f", ".DS_Store"], vaultPath);
+    runGit(["commit", "-m", "seed"], vaultPath);
+
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+    service.enforceProtectedArtifacts();
+
+    const tracked = spawnSync("git", ["ls-files"], {
+      cwd: vaultPath,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).stdout;
+    const gitignore = fs.readFileSync(path.join(vaultPath, ".gitignore"), "utf8");
+
+    assert.equal(fs.existsSync(path.join(vaultPath, ".DS_Store")), false);
+    assert.doesNotMatch(tracked, /\.automation\/state\.json/);
+    assert.doesNotMatch(tracked, /\.DS_Store/);
+    assert.match(gitignore, /\.automation\//);
+    assert.match(gitignore, /\.DS_Store/);
+  });
+});
