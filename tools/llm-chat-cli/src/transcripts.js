@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { routingToTranscriptMetadata } from "../../shared/routing-metadata.js";
 
 function pad(value, size = 2) {
   return String(value).padStart(size, "0");
@@ -252,14 +253,15 @@ export function formatTranscript({
   messages
 }) {
   const lines = [];
+  const routingMetadata = routingToTranscriptMetadata(routing);
   lines.push("---");
   lines.push(`id: "${escapeFrontmatterString(id)}"`);
   lines.push(`created_at: "${escapeFrontmatterString(createdAt)}"`);
   lines.push(`gateway_url: "${escapeFrontmatterString(gatewayUrl)}"`);
   lines.push(`model: "${escapeFrontmatterString(model)}"`);
-  lines.push(`router_lane: "${escapeFrontmatterString(routing?.lane || "unknown")}"`);
-  lines.push(`router_target_model: "${escapeFrontmatterString(routing?.targetModel || "unknown")}"`);
-  lines.push(`router_confidence: "${escapeFrontmatterString(routing?.confidence || "unknown")}"`);
+  lines.push(`router_lane: "${escapeFrontmatterString(routingMetadata.router_lane)}"`);
+  lines.push(`router_target_model: "${escapeFrontmatterString(routingMetadata.router_target_model)}"`);
+  lines.push(`router_confidence: "${escapeFrontmatterString(routingMetadata.router_confidence)}"`);
   lines.push(`prompt_tokens: ${Number(usage?.prompt_tokens || 0)}`);
   lines.push(`completion_tokens: ${Number(usage?.completion_tokens || 0)}`);
   lines.push(`total_tokens: ${Number(usage?.total_tokens || 0)}`);

@@ -1,4 +1,8 @@
 import { createSSEParser } from "./stream.js";
+import {
+  decodeRoutingHeaders,
+  withResponseModel
+} from "../../shared/routing-metadata.js";
 
 function joinUrl(baseUrl, pathname) {
   const base = String(baseUrl || "").replace(/\/+$/, "");
@@ -14,32 +18,6 @@ function buildHeaders(apiKey) {
     headers.authorization = `Bearer ${apiKey}`;
   }
   return headers;
-}
-
-function buildRoutingMetadata(response) {
-  return {
-    lane: response.headers.get("x-router-lane") || null,
-    confidence: response.headers.get("x-router-confidence") || null,
-    targetModel: response.headers.get("x-router-target-model") || null,
-    routedModel: response.headers.get("x-router-routed-model") || null,
-    providerModel: response.headers.get("x-router-provider-model") || null,
-    displayModel: response.headers.get("x-router-display-model") || null,
-    modelLocation: response.headers.get("x-router-model-location") || null,
-    responseModel: null
-  };
-}
-
-function withResponseModel(routing, value) {
-  const responseModel = String(value || "").trim();
-  if (!responseModel || routing?.responseModel === responseModel) return routing;
-  const displayModel = responseModel.toLowerCase().startsWith("smart-router")
-    ? routing?.displayModel
-    : routing?.displayModel || responseModel;
-  return {
-    ...routing,
-    responseModel,
-    displayModel
-  };
 }
 
 function extractTextContent(value) {
@@ -111,7 +89,7 @@ export async function streamChatCompletion({
     body: JSON.stringify(body)
   });
 
-  let routing = buildRoutingMetadata(response);
+  let routing = decodeRoutingHeaders(response.headers);
   if (onRouting) onRouting(routing);
 
   if (!response.ok) {

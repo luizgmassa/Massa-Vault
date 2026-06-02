@@ -7,6 +7,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
 import { listRcloneRemotes, validateRcloneRemotePath } from "./notes-automation/src/gdrive.js";
+import { createConfigDocument } from "./notes-automation/src/config-definition.js";
 import { loadLocalEnv } from "./shared/env.js";
 
 loadLocalEnv();
@@ -73,65 +74,17 @@ function buildConfig({
   gdriveRemotePath,
   gdriveMode
 }) {
-  return {
-    enabled: true,
-    vault_path: vaultPath,
-    watch_paths: ["."],
-    include_globs: [
-      "**/*.md",
-      "templates/**/*.md",
-      ".obsidian/app.json",
-      ".obsidian/community-plugins.json",
-      ".obsidian/core-plugins.json"
-    ],
-    ignore_globs: [
-      ".git/**",
-      ".automation/**",
-      ".DS_Store",
-      "**/.DS_Store",
-      ".obsidian/workspace.json",
-      ".obsidian/plugins/**/data.json",
-      ".obsidian/plugins/**/cache/**",
-      ".obsidian/plugins/**/tmp/**",
-      "**/*.png",
-      "**/*.jpg",
-      "**/*.jpeg",
-      "**/*.gif",
-      "**/*.pdf",
-      "**/*.zip"
-    ],
-    push_interval_min: 10,
-    debounce_ms: 1500,
-    sync_strategy: syncStrategy,
-    git_mode: gitMode,
-    git_repo_url: gitRepoUrl,
-    git_auto_push: gitAutoPush,
-    remote: gitRemote,
-    branch: gitBranch,
-    gdrive_binary: "rclone",
-    gdrive_remote_path: gdriveRemotePath,
-    gdrive_mode: gdriveMode,
-    gdrive_resync_mode: "newer",
-    gdrive_import_suspicious_file_threshold: 20,
-    gdrive_import_suspicious_delete_threshold: 5,
-    gdrive_import_suspicious_percent_threshold: 10,
-    gdrive_import_dangerous_percent_threshold: 50,
-    gdrive_first_run_resync: true,
-    gdrive_args: [
-      "--exclude",
-      ".git/**",
-      "--exclude",
-      ".gitignore",
-      "--exclude",
-      ".obsidian/workspace.json",
-      "--exclude",
-      ".automation/**",
-      "--exclude",
-      ".DS_Store",
-      "--exclude",
-      "**/.DS_Store"
-    ]
-  };
+  return createConfigDocument({
+    vaultPath,
+    syncStrategy,
+    gitMode,
+    gitRepoUrl,
+    gitRemote,
+    gitBranch,
+    gitAutoPush,
+    gdriveRemotePath,
+    gdriveMode
+  });
 }
 
 async function configure() {

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../tools/notes-automation/src/config.js";
+import { createConfigDocument } from "../tools/notes-automation/src/config-definition.js";
 
 const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_ENABLED",
@@ -210,4 +211,29 @@ test("environment values override local config", () => {
       assert.equal(config.git.branch, "env-branch");
     }
   );
+});
+
+test("configure defaults and loadConfig defaults stay aligned", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    const document = createConfigDocument({
+      vaultPath: "/tmp/aligned-vault"
+    });
+    fs.writeFileSync(configPath, JSON.stringify(document, null, 2), "utf8");
+
+    const config = loadConfig(configPath);
+    assert.equal(config.syncStrategy, "both");
+    assert.equal(config.git.enabled, true);
+    assert.equal(config.gdrive.enabled, true);
+    assert.equal(config.git.mode, "remote");
+    assert.equal(config.git.autoPush, true);
+    assert.equal(config.gdrive.mode, "bisync");
+    assert.equal(config.gdrive.resyncMode, "newer");
+    assert.deepEqual(config.watchPaths, document.watch_paths);
+    assert.deepEqual(config.includeGlobs, document.include_globs);
+    assert.deepEqual(config.gdrive.args, document.gdrive_args);
+    assert.equal(config.pushIntervalMin, document.push_interval_min);
+    assert.equal(config.debounceMs, document.debounce_ms);
+  });
 });

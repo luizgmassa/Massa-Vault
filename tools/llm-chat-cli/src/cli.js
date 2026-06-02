@@ -7,6 +7,14 @@ import * as readlinePromises from "node:readline/promises";
 import { stdin as input, stdout as output, stderr } from "node:process";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../../notes-automation/src/config.js";
+import {
+  completeCommandInput as completeCommandInputImpl,
+  executeChatCommand,
+  getCommandDefinitions as getCommandDefinitionsImpl,
+  getCommandPanelLines as getCommandPanelLinesImpl,
+  getCommandSuggestions as getCommandSuggestionsImpl,
+  resolveCommandSubmission as resolveCommandSubmissionImpl
+} from "./commands.js";
 import { streamChatCompletion } from "./gateway.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "./search.js";
@@ -19,6 +27,7 @@ import {
   writeTranscript
 } from "./transcripts.js";
 import { loadLocalEnv } from "../../shared/env.js";
+import { routingFromTranscriptMetadata } from "../../shared/routing-metadata.js";
 import {
   accumulateSessionUsage,
   addUsageToLedger,
@@ -26,6 +35,17 @@ import {
   createSessionUsage,
   getUsageLedger
 } from "./usage.js";
+import {
+  buildVaultAccessContract as buildVaultAccessContractImpl,
+  buildVaultContext as buildVaultContextImpl,
+  buildVaultContextPayload as buildVaultContextPayloadImpl,
+  buildVaultManifestPayload as buildVaultManifestPayloadImpl,
+  classifyVaultContextIntent as classifyVaultContextIntentImpl,
+  DEFAULT_RAG_CHUNK_LIMIT,
+  DEFAULT_RAG_MAX_CHARS,
+  normalizeSourcePath as normalizeSourcePathImpl,
+  VAULT_CONTEXT_MODES
+} from "./vault-context.js";
 
 loadLocalEnv();
 
@@ -33,12 +53,9 @@ const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT 
 const DEFAULT_GATEWAY_MODEL = "smart-router";
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_AUTOMATION_CLI_PATH = path.resolve("tools/notes-automation/src/cli.js");
-const DEFAULT_RAG_CHUNK_LIMIT = 5;
-const DEFAULT_RAG_MAX_CHARS = 6000;
 const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
 const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
 const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
-const VAULT_CONTEXT_MODES = ["semantic", "manifest"];
 const HISTORY_FLOW_DATES = "dates";
 const HISTORY_FLOW_CONVERSATIONS = "conversations";
 const HISTORY_FLOW_SUMMARY = "summary";
@@ -202,233 +219,26 @@ function resolveVaultPath() {
 }
 
 function normalizeSourcePath(filePath) {
-  const raw = String(filePath || "").trim();
-  if (!raw) return "";
-  const normalized = raw.replace(/\\/g, "/");
-  if (path.isAbsolute(raw) || /^[A-Za-z]:\//.test(normalized)) {
-    return path.basename(normalized);
-  }
-  return normalized.replace(/^\.\//, "");
-}
-
-function emptyVaultMetadata(mode) {
-  return {
-    source: "obsidian",
-    mode,
-    retrieved_chunks: 0,
-    retrieved_files: 0,
-    context_length: 0,
-    truncated: false,
-    sources: []
-  };
-}
-
-function classifyVaultContextIntent(prompt) {
-  const text = String(prompt || "").toLowerCase();
-  const hasManifestIntent =
-    /\b(what|which|show|list|display)\b[^?!.]*(files|notes|folders|directories)\b/.test(text) ||
-    /\b(files|notes|folders|directories)\b[^?!.]*\b(in|inside|under)\b[^?!.]*\bvault\b/.test(text) ||
-    /\b(vault structure|folder structure|file list|note list)\b/.test(text);
-  if (!hasManifestIntent) return "semantic";
-
-  const hasSemanticIntent =
-    /\b(about|contain|contains|mention|mentions|summarize|summary|explain|related|topic|search|find)\b/.test(
-      text
-    ) || /\b(files|notes)\b[^?!.]*\babout\b/.test(text);
-  return hasSemanticIntent ? "hybrid" : "manifest";
+  return normalizeSourcePathImpl(filePath);
 }
 
 function buildVaultAccessContract() {
-  return [
-    "Vault access contract:",
-    "- The massa-vault CLI retrieved the Obsidian vault context below with the user's permission.",
-    "- Treat this context as user-provided data for this request.",
-    "- When vault context or a manifest is present, do not claim you cannot access the user's files.",
-    "- You can answer only from the injected vault context and manifest, not arbitrary filesystem state."
-  ].join("\n");
+  return buildVaultAccessContractImpl();
 }
 
-function getIndexFilePaths(indexData) {
-  const paths = new Set();
-  if (indexData?.snapshot && typeof indexData.snapshot === "object") {
-    for (const filePath of Object.keys(indexData.snapshot)) {
-      const normalized = normalizeSourcePath(filePath);
-      if (normalized) paths.add(normalized);
-    }
-  }
-  if (Array.isArray(indexData?.items)) {
-    for (const item of indexData.items) {
-      const normalized = normalizeSourcePath(item?.relativePath);
-      if (normalized) paths.add(normalized);
-    }
-  }
-  return [...paths].sort((a, b) => a.localeCompare(b));
+function classifyVaultContextIntent(prompt) {
+  return classifyVaultContextIntentImpl(prompt);
 }
 
-function asVaultMessages(message) {
-  const content = String(message || "").trim();
-  if (!content) return [{ role: "system", content: buildVaultAccessContract() }];
-  return [
-    { role: "system", content: buildVaultAccessContract() },
-    { role: "system", content }
-  ];
-}
-
-function buildVaultManifestPayload(filePaths, { maxChars = DEFAULT_RAG_MAX_CHARS } = {}) {
-  const paths = Array.isArray(filePaths) ? filePaths.map(normalizeSourcePath).filter(Boolean) : [];
-  const uniquePaths = [...new Set(paths)].sort((a, b) => a.localeCompare(b));
-  const intro = "Obsidian vault manifest (relative paths):";
-  let message = intro;
-  const sources = [];
-  let truncated = false;
-
-  if (!uniquePaths.length) {
-    message += "\n[no markdown files found]";
-    return {
-      message,
-      metadata: {
-        ...emptyVaultMetadata("manifest"),
-        context_length: message.length
-      }
-    };
-  }
-
-  for (const filePath of uniquePaths) {
-    const line = `\n- ${filePath}`;
-    if (message.length + line.length > maxChars) {
-      truncated = true;
-      break;
-    }
-    message += line;
-    sources.push({ type: "file", path: filePath });
-  }
-
-  if (truncated) {
-    const remaining = uniquePaths.length - sources.length;
-    const suffix = `\n[manifest truncated: ${remaining} more file(s) omitted]`;
-    if (message.length + suffix.length <= maxChars) {
-      message += suffix;
-    }
-  }
-
-  return {
-    message,
-    metadata: {
-      source: "obsidian",
-      mode: "manifest",
-      retrieved_chunks: 0,
-      retrieved_files: sources.length,
-      total_files: uniquePaths.length,
-      context_length: message.length,
-      truncated,
-      sources
-    }
-  };
+function buildVaultManifestPayload(filePaths, options) {
+  return buildVaultManifestPayloadImpl(filePaths, options);
 }
 
 function buildVaultContextPayload(
   results,
   { maxChars = DEFAULT_RAG_MAX_CHARS, mode = "semantic" } = {}
 ) {
-  const items = Array.isArray(results) ? results : [];
-  if (!items.length) {
-    return {
-      message: "No relevant Obsidian vault chunks were retrieved for this prompt.",
-      metadata: emptyVaultMetadata(mode)
-    };
-  }
-
-  const intro = "Relevant Obsidian vault context:";
-  let message = intro;
-  const sources = [];
-  let truncated = false;
-
-  for (const item of items) {
-    const sourcePath = normalizeSourcePath(item?.filePath);
-    const chunkText = String(item?.text || item?.snippet || "").trim();
-    if (!sourcePath || !chunkText) continue;
-
-    const chunkIndex = Number.isFinite(Number(item?.chunkIndex)) ? Number(item.chunkIndex) : 0;
-    const score = Number.isFinite(Number(item?.score)) ? Number(item.score.toFixed(4)) : 0;
-    const block = `[source ${sources.length + 1}] ${sourcePath}#${chunkIndex}\n${chunkText}`;
-    const separator = "\n\n";
-    const remainingChars = maxChars - message.length - separator.length;
-    if (remainingChars <= 0) {
-      truncated = true;
-      break;
-    }
-
-    if (block.length > remainingChars) {
-      if (remainingChars < 32) break;
-      message += `${separator}${block.slice(0, remainingChars).trimEnd()}`;
-      sources.push({
-        type: "chunk",
-        path: sourcePath,
-        chunk_index: chunkIndex,
-        score
-      });
-      truncated = true;
-      break;
-    }
-
-    message += `${separator}${block}`;
-    sources.push({
-      type: "chunk",
-      path: sourcePath,
-      chunk_index: chunkIndex,
-      score
-    });
-  }
-
-  if (!sources.length) {
-    return {
-      message: "No relevant Obsidian vault chunks were retrieved for this prompt.",
-      metadata: emptyVaultMetadata(mode)
-    };
-  }
-
-  return {
-    message,
-    metadata: {
-      source: "obsidian",
-      mode,
-      retrieved_chunks: sources.length,
-      retrieved_files: new Set(sources.map((source) => source.path)).size,
-      context_length: message.length,
-      truncated,
-      sources
-    }
-  };
-}
-
-function combineVaultPayloads(manifestPayload, semanticPayload, { maxChars = DEFAULT_RAG_MAX_CHARS } = {}) {
-  const parts = [manifestPayload.message, semanticPayload.message].filter(Boolean);
-  let message = parts.join("\n\n");
-  let truncated = Boolean(manifestPayload.metadata.truncated || semanticPayload.metadata.truncated);
-
-  if (message.length > maxChars) {
-    message = message.slice(0, maxChars).trimEnd();
-    truncated = true;
-  }
-
-  const sources = [
-    ...(manifestPayload.metadata.sources || []),
-    ...(semanticPayload.metadata.sources || [])
-  ];
-
-  return {
-    message,
-    metadata: {
-      source: "obsidian",
-      mode: "hybrid",
-      retrieved_chunks: semanticPayload.metadata.retrieved_chunks,
-      retrieved_files: manifestPayload.metadata.retrieved_files,
-      total_files: manifestPayload.metadata.total_files,
-      context_length: message.length,
-      truncated,
-      sources
-    }
-  };
+  return buildVaultContextPayloadImpl(results, { maxChars, mode });
 }
 
 async function buildVaultContext({
@@ -436,59 +246,7 @@ async function buildVaultContext({
   limit = DEFAULT_RAG_CHUNK_LIMIT,
   maxChars = DEFAULT_RAG_MAX_CHARS
 }) {
-  const query = String(prompt || "").trim();
-  if (!query) {
-    return {
-      message: "",
-      messages: asVaultMessages(""),
-      metadata: emptyVaultMetadata("semantic")
-    };
-  }
-
-  const config = loadConfig(DEFAULT_CONFIG_PATH);
-  const defaults = getSearchDefaults();
-  const { index } = await ensureSearchIndex({
-    vaultPath: config.vaultPath,
-    ignoreGlobs: config.ignoreGlobs || [],
-    baseUrl: defaults.baseUrl,
-    model: defaults.model
-  });
-  const mode = classifyVaultContextIntent(query);
-  const filePaths = getIndexFilePaths(index);
-
-  if (mode === "manifest") {
-    const payload = buildVaultManifestPayload(filePaths, { maxChars });
-    return {
-      ...payload,
-      messages: asVaultMessages(payload.message)
-    };
-  }
-
-  const results = await searchIndex({
-    indexData: index,
-    query,
-    baseUrl: defaults.baseUrl,
-    model: defaults.model,
-    limit,
-    includeText: true
-  });
-  const semanticPayload = buildVaultContextPayload(results, { maxChars, mode });
-
-  if (mode === "hybrid") {
-    const manifestPayload = buildVaultManifestPayload(filePaths, {
-      maxChars: Math.min(Math.floor(maxChars / 2), 2500)
-    });
-    const payload = combineVaultPayloads(manifestPayload, semanticPayload, { maxChars });
-    return {
-      ...payload,
-      messages: asVaultMessages(payload.message)
-    };
-  }
-
-  return {
-    ...semanticPayload,
-    messages: asVaultMessages(semanticPayload.message)
-  };
+  return buildVaultContextImpl({ prompt, limit, maxChars });
 }
 
 async function runSearch({ query, includeGlobs = [] }) {
@@ -835,16 +593,7 @@ function getHistoryRowFromSelection(state, value) {
 }
 
 function captureRoutingFromTranscriptMetadata(metadata) {
-  if (!metadata || typeof metadata !== "object") return null;
-  const lane = String(metadata.router_lane || "").trim();
-  const targetModel = String(metadata.router_target_model || "").trim();
-  const confidence = String(metadata.router_confidence || "").trim();
-  if (!lane && !targetModel && !confidence) return null;
-  return {
-    lane: lane || "unknown",
-    targetModel: targetModel || "unknown",
-    confidence: confidence || "unknown"
-  };
+  return routingFromTranscriptMetadata(metadata);
 }
 
 function usageFromTranscriptMetadata(metadata) {
@@ -890,133 +639,24 @@ function printSearchPlain(searchResult) {
   }
 }
 
-const CHAT_COMMAND_DEFINITIONS = Object.freeze([
-  {
-    command: "/sync",
-    description: "Save transcript (if needed) and trigger sync"
-  },
-  {
-    command: "/sync status",
-    description: "Open live sync status screen (TUI) / print JSON status (plain)"
-  },
-  {
-    command: "/sync conflicts",
-    description: "Show sync conflict details"
-  },
-  {
-    command: "/conv",
-    description: "Return from sync status screen to conversation (TUI)"
-  },
-  {
-    command: "/back",
-    description: "Back in history flow (preview/summary -> conversations -> dates -> conversation)"
-  },
-  {
-    command: "/history",
-    description: "Open history screen with transcript dates"
-  },
-  {
-    command: "/history date",
-    description: "Show conversation rows for date number or YYYY-MM-DD",
-    requiresInput: true
-  },
-  {
-    command: "/history search",
-    description: "Semantic search only in AI Chats transcripts",
-    requiresInput: true
-  },
-  {
-    command: "/history switch",
-    description: "Switch active conversation to selected history row",
-    requiresInput: true
-  },
-  {
-    command: "/history add_context",
-    description: "Inject selected history conversation into next prompt",
-    requiresInput: true
-  },
-  {
-    command: "/history summary",
-    description: "Generate short LLM summary for selected history row",
-    requiresInput: true
-  },
-  {
-    command: "/history preview",
-    description: "Open full transcript preview for selected history row",
-    requiresInput: true
-  },
-  {
-    command: "/exit",
-    description: "Save transcript and exit"
-  },
-  {
-    command: "/clear",
-    description: "Clear conversation memory"
-  },
-  {
-    command: "/usage",
-    description: "Show token counters and quota estimates"
-  },
-  {
-    command: "/config",
-    description: "Show active gateway/system settings"
-  },
-  {
-    command: "/system show",
-    description: "Show system prompt"
-  },
-  {
-    command: "/system set",
-    description: "Set system prompt",
-    requiresInput: true
-  },
-  {
-    command: "/system clear",
-    description: "Clear system prompt"
-  },
-  {
-    command: "/routing",
-    description: "Show latest router metadata"
-  },
-  {
-    command: "/search",
-    description: "Semantic search in chats + vault markdown",
-    requiresInput: true
-  }
-]);
-
 function getCommandDefinitions() {
-  return CHAT_COMMAND_DEFINITIONS;
+  return getCommandDefinitionsImpl();
 }
 
-function getCommandSuggestions(inputValue, definitions = CHAT_COMMAND_DEFINITIONS) {
-  const normalized = String(inputValue || "").trim().toLowerCase();
-  if (!normalized.startsWith("/")) return [];
-  return definitions.filter((definition) => definition.command.startsWith(normalized));
+function getCommandSuggestions(inputValue, definitions = getCommandDefinitionsImpl()) {
+  return getCommandSuggestionsImpl(inputValue, definitions);
 }
 
-function completeCommandInput(inputValue, definitions = CHAT_COMMAND_DEFINITIONS) {
-  const suggestions = getCommandSuggestions(inputValue, definitions);
-  if (suggestions.length !== 1) return String(inputValue || "");
-  const selected = suggestions[0];
-  return selected.requiresInput ? `${selected.command} ` : selected.command;
+function completeCommandInput(inputValue, definitions = getCommandDefinitionsImpl()) {
+  return completeCommandInputImpl(inputValue, definitions);
 }
 
 function resolveCommandSubmission(definition) {
-  const command = String(definition?.command || "").trim();
-  if (!command) return null;
-  if (definition?.requiresInput) {
-    return { mode: "fill", line: `${command} ` };
-  }
-  return { mode: "submit", line: command };
+  return resolveCommandSubmissionImpl(definition);
 }
 
-function getCommandPanelLines(definitions = CHAT_COMMAND_DEFINITIONS) {
-  const commandLabel = (definition) => (definition.requiresInput ? `${definition.command} ...` : definition.command);
-  const width = definitions.reduce((max, definition) => Math.max(max, commandLabel(definition).length), 0);
-  return definitions.map(
-    (definition) => `${commandLabel(definition).padEnd(width)}  ${definition.description}`
-  );
+function getCommandPanelLines(definitions = getCommandDefinitionsImpl()) {
+  return getCommandPanelLinesImpl(definitions);
 }
 
 function buildTranscriptPayload({
@@ -1420,668 +1060,69 @@ async function executeCommand({
   transcriptMarkdownReader = readTranscriptMarkdownFile,
   historySummaryRunner = summarizeHistoryTranscript
 }) {
-  const tuiHandlers = createTuiCommandHandlers(handlers);
-  const typedLine = String(line || "").trim();
-  const alias = parseHistoryConversationAlias(typedLine);
-  if (alias && !isHistoryConversationsScreen(state)) {
-    const message = createHistoryConversationsOnlyMessage(alias.alias);
-    if (mode === "plain") {
-      console.log(message);
-    } else {
-      tuiHandlers.message(message);
-    }
-    return { handled: true, exit: false };
-  }
-  line = normalizeHistoryInputShortcut(typedLine, state);
-
-  if (line === "/") {
-    const commandLines = getCommandPanelLines();
-    if (mode === "plain") {
-      console.log("Commands:");
-      for (const commandLine of commandLines) {
-        console.log(`  ${commandLine}`);
-      }
-    } else {
-      tuiHandlers.panel("commands", commandLines);
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/exit") {
-    return { handled: true, exit: true };
-  }
-
-  if (line === "/conv") {
-    clearHistoryFlowStack(state);
-    if (mode === "plain") {
-      console.log("[chat] conversation mode");
-      return { handled: true, exit: false };
-    }
-    return {
-      handled: true,
-      exit: false,
-      action: {
-        type: "switch-screen",
-        screen: "conversation"
-      }
-    };
-  }
-
-  if (line === "/back") {
-    const back = historyBackStep(state);
-    if (back.type === "none") {
-      const message = "[History] /back available only inside history flow.";
-      if (mode === "plain") {
-        console.log(message);
-      } else {
-        tuiHandlers.message(message);
-      }
-      return { handled: true, exit: false };
-    }
-
-    if (back.type === "exit-conversation") {
-      if (mode === "plain") {
-        console.log("[chat] conversation mode");
-        return { handled: true, exit: false };
-      }
-      return {
-        handled: true,
-        exit: false,
-        action: {
-          type: "switch-screen",
-          screen: "conversation"
-        }
-      };
-    }
-
-    const panel = createHistoryPanelState(back.panel);
-    if (mode === "plain") {
-      for (const historyLine of panel.lines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
-    }
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction(panel)
-    };
-  }
-
-  if (line === "/history") {
-    const vaultPath = resolveVaultPath();
-    const rows = createHistoryDateRows(vaultPath);
-    state.historyDateRows = rows;
-    state.historySelectedDate = null;
-    state.historyVisibleRows = [];
-    const historyLines = formatHistoryDateLines({ rows });
-    setHistoryFlowDatesRoot(
+  return executeChatCommand(
+    {
+      line,
       state,
-      createHistoryPanelState({
-        title: "History",
-        lines: historyLines
-      })
-    );
-    if (mode === "plain") {
-      for (const historyLine of historyLines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
+      limitsByModel,
+      mode,
+      handlers,
+      onSaveAndSync,
+      historySearchRunner,
+      transcriptReader,
+      transcriptMarkdownReader,
+      historySummaryRunner
+    },
+    {
+      DEFAULT_GATEWAY_MODEL,
+      DEFAULT_RAG_MAX_CHARS,
+      HISTORY_FLOW_PREVIEW,
+      HISTORY_FLOW_SUMMARY,
+      VAULT_CONTEXT_MODES,
+      addUsageToLedger,
+      accumulateSessionUsage,
+      asUsage,
+      buildGatewayOptions,
+      buildHistoryContextText,
+      captureRoutingFromTranscriptMetadata,
+      clearHistoryFlowStack,
+      createHistoryConversationsOnlyMessage,
+      createHistoryDateRows,
+      createHistoryPanelState,
+      createHistoryScreenAction,
+      createTuiCommandHandlers,
+      createUsageSummary,
+      formatHistoryConversationLines,
+      formatHistoryDateLines,
+      formatHistoryPreviewLines,
+      formatHistorySummaryLines,
+      formatRelativeTranscriptLabel,
+      formatSearchPanel,
+      formatSyncFeedback,
+      formatUsagePanel,
+      getHistoryRowFromSelection,
+      historyBackStep,
+      isHistoryConversationsScreen,
+      isVaultContextEnabled,
+      listTranscriptsForDate,
+      normalizeHistoryDateInput,
+      normalizeHistoryInputShortcut,
+      parseHistoryConversationAlias,
+      parsePositiveIndex,
+      printSearchPlain,
+      printUsageSummary,
+      pushHistoryFlowDetail,
+      readLocalSyncStatusModel,
+      resetConversation,
+      resolveVaultPath,
+      runNotesAutomationCommand,
+      setHistoryFlowConversations,
+      setHistoryFlowDatesRoot,
+      usageFromTranscriptMetadata,
+      createHistoryRowsFromDateEntries,
+      createHistoryRowsFromSearchResults
     }
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction({
-        title: "History",
-        lines: historyLines
-      })
-    };
-  }
-
-  if (line === "/history date" || line.startsWith("/history date ")) {
-    const rawInput = line.slice("/history date".length).trim();
-    if (!rawInput) {
-      const usage = "Usage : /history date <number|YYYY-MM-DD>";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const vaultPath = resolveVaultPath();
-    const dateRows = createHistoryDateRows(vaultPath);
-    const dates = dateRows.map((row) => row.date);
-    state.historyDateRows = dateRows;
-    const selectedByIndex = parsePositiveIndex(rawInput);
-    const selectedByValue = normalizeHistoryDateInput(rawInput);
-    let selectedDate = "";
-    if (selectedByIndex) {
-      selectedDate = dateRows[selectedByIndex - 1]?.date || "";
-    } else if (selectedByValue && dates.includes(selectedByValue)) {
-      selectedDate = selectedByValue;
-    }
-
-    if (!selectedDate) {
-      const notFound = `[History] Date not found : ${rawInput}`;
-      if (mode === "plain") {
-        console.log(notFound);
-      } else {
-        tuiHandlers.message(notFound);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const rows = createHistoryRowsFromDateEntries(listTranscriptsForDate(vaultPath, selectedDate));
-    state.historySelectedDate = selectedDate;
-    state.historyVisibleRows = rows;
-    const historyLines = formatHistoryConversationLines({
-      rows,
-      title: `History conversations for ${selectedDate}`
-    });
-    setHistoryFlowConversations(state, {
-      datePanel: createHistoryPanelState({
-        title: "History",
-        lines: formatHistoryDateLines({ rows: dateRows })
-      }),
-      conversationsPanel: createHistoryPanelState({
-        title: "History",
-        lines: historyLines
-      })
-    });
-
-    if (mode === "plain") {
-      for (const historyLine of historyLines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
-    }
-
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction({
-        title: "History",
-        lines: historyLines
-      })
-    };
-  }
-
-  if (line === "/history search" || line.startsWith("/history search ")) {
-    const query = line.slice("/history search".length).trim();
-    if (!query) {
-      const usage = "Usage : /history search <query>";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const vaultPath = resolveVaultPath();
-    const dateRows = createHistoryDateRows(vaultPath);
-    state.historyDateRows = dateRows;
-    const result = await historySearchRunner({
-      query,
-      includeGlobs: ["AI Chats/**/*.md"]
-    });
-    const rows = createHistoryRowsFromSearchResults(result.results, vaultPath);
-    state.historySelectedDate = null;
-    state.historyVisibleRows = rows;
-    const historyLines = formatHistoryConversationLines({
-      rows,
-      title: `History search : ${query}`,
-      includeScore: true
-    });
-    if (result.rebuilt) {
-      historyLines.splice(2, 0, "Index rebuilt.", "");
-    }
-    setHistoryFlowConversations(state, {
-      datePanel: createHistoryPanelState({
-        title: "History",
-        lines: formatHistoryDateLines({ rows: dateRows })
-      }),
-      conversationsPanel: createHistoryPanelState({
-        title: "History",
-        lines: historyLines
-      })
-    });
-
-    if (mode === "plain") {
-      for (const historyLine of historyLines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
-    }
-
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction({
-        title: "History",
-        lines: historyLines
-      })
-    };
-  }
-
-  if (line === "/history switch" || line.startsWith("/history switch ")) {
-    if (!isHistoryConversationsScreen(state)) {
-      const message = createHistoryConversationsOnlyMessage("/history switch");
-      if (mode === "plain") {
-        console.log(message);
-      } else {
-        tuiHandlers.message(message);
-      }
-      return { handled: true, exit: false };
-    }
-    const rawIndex = line.slice("/history switch".length).trim();
-    const row = getHistoryRowFromSelection(state, rawIndex);
-    if (!row) {
-      const usage = "Usage : /history switch <number> (pick from current history table)";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const result = await onSaveAndSync(state, {
-      reason: "chat-history-switch"
-    });
-    const transcript = transcriptReader(row.transcriptPath);
-    const metadata = transcript.metadata || {};
-    state.history = Array.isArray(transcript.messages) ? [...transcript.messages] : [];
-    state.activeTranscript = {
-      path: row.transcriptPath,
-      id: String(metadata.id || "").trim() || state.sessionId,
-      createdAt: String(metadata.created_at || "").trim() || state.sessionStartedAt,
-      gatewayUrl: String(metadata.gateway_url || "").trim() || buildGatewayOptions().gatewayUrl,
-      model: String(metadata.model || "").trim() || DEFAULT_GATEWAY_MODEL,
-      routing: captureRoutingFromTranscriptMetadata(metadata)
-    };
-    state.latestRouting = state.activeTranscript.routing;
-    state.transcriptSavedPath = row.transcriptPath;
-    state.lastSavedHistoryLength = state.history.length;
-    state.sessionUsage = usageFromTranscriptMetadata(metadata);
-    state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
-    state.addedContextEntries = [];
-    clearHistoryFlowStack(state);
-
-    const switchSummary = `[History] Switched to : ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName}`;
-    const transcriptMessage = result.saveResult.path
-      ? result.saveResult.saved
-        ? `[chat] transcript saved: ${result.saveResult.path}`
-        : "[chat] transcript already up to date"
-      : "[chat] nothing to save";
-    if (mode === "plain") {
-      console.log(transcriptMessage);
-      console.log(result.summary);
-      console.log(switchSummary);
-      return { handled: true, exit: false };
-    }
-
-    tuiHandlers.message(transcriptMessage);
-    tuiHandlers.message(result.summary);
-    tuiHandlers.message(switchSummary);
-    return {
-      handled: true,
-      exit: false,
-      action: {
-        type: "switch-screen",
-        screen: "conversation",
-        historyLoaded: {
-          history: [...state.history]
-        }
-      }
-    };
-  }
-
-  if (line === "/history add_context" || line.startsWith("/history add_context ")) {
-    if (!isHistoryConversationsScreen(state)) {
-      const message = createHistoryConversationsOnlyMessage("/history add_context");
-      if (mode === "plain") {
-        console.log(message);
-      } else {
-        tuiHandlers.message(message);
-      }
-      return { handled: true, exit: false };
-    }
-    const rawIndex = line.slice("/history add_context".length).trim();
-    const row = getHistoryRowFromSelection(state, rawIndex);
-    if (!row) {
-      const usage = "Usage : /history add_context <number> (pick from current history table)";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const transcript = transcriptReader(row.transcriptPath);
-    const content = buildHistoryContextText({ row, transcript, maxChars: DEFAULT_RAG_MAX_CHARS });
-    if (!content) {
-      const empty = `[History] No usable messages in ${row.fileName}`;
-      if (mode === "plain") {
-        console.log(empty);
-      } else {
-        tuiHandlers.message(empty);
-      }
-      return { handled: true, exit: false };
-    }
-
-    state.addedContextEntries = [
-      ...state.addedContextEntries,
-      {
-        source: row.relativePath,
-        content
-      }
-    ];
-    const addedMessage = `[History] Added context from ${formatRelativeTranscriptLabel(row.relativePath) || row.fileName} for next prompt.`;
-    if (mode === "plain") {
-      console.log(addedMessage);
-    } else {
-      tuiHandlers.message(addedMessage);
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/history summary" || line.startsWith("/history summary ")) {
-    if (!isHistoryConversationsScreen(state)) {
-      const message = createHistoryConversationsOnlyMessage("/history summary");
-      if (mode === "plain") {
-        console.log(message);
-      } else {
-        tuiHandlers.message(message);
-      }
-      return { handled: true, exit: false };
-    }
-    const rawIndex = line.slice("/history summary".length).trim();
-    const row = getHistoryRowFromSelection(state, rawIndex);
-    if (!row) {
-      const usage = "Usage : /history summary <number> (pick from current history table)";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const transcriptMarkdown = transcriptMarkdownReader(row.transcriptPath);
-    const summaryResult = await historySummaryRunner({
-      row,
-      transcriptPath: row.transcriptPath,
-      transcriptMarkdown
-    });
-    const summaryText = String(summaryResult?.summary || "").trim() || "No summary generated.";
-    const summaryUsage = asUsage(summaryResult?.usage || null);
-    if (summaryUsage.total_tokens > 0) {
-      accumulateSessionUsage(state.sessionUsage, summaryUsage);
-      addUsageToLedger({
-        usage: summaryUsage,
-        modelName: summaryResult?.routing?.targetModel || DEFAULT_GATEWAY_MODEL
-      });
-      state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
-    }
-
-    const historyLines = formatHistorySummaryLines({
-      row,
-      summary: summaryText
-    });
-    pushHistoryFlowDetail(state, {
-      screen: HISTORY_FLOW_SUMMARY,
-      panel: createHistoryPanelState({
-        title: "History summary",
-        lines: historyLines
-      })
-    });
-    if (mode === "plain") {
-      for (const historyLine of historyLines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
-    }
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction({
-        title: "History summary",
-        lines: historyLines
-      })
-    };
-  }
-
-  if (line === "/history preview" || line.startsWith("/history preview ")) {
-    if (!isHistoryConversationsScreen(state)) {
-      const message = createHistoryConversationsOnlyMessage("/history preview");
-      if (mode === "plain") {
-        console.log(message);
-      } else {
-        tuiHandlers.message(message);
-      }
-      return { handled: true, exit: false };
-    }
-    const rawIndex = line.slice("/history preview".length).trim();
-    const row = getHistoryRowFromSelection(state, rawIndex);
-    if (!row) {
-      const usage = "Usage : /history preview <number> (pick from current history table)";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    const transcriptMarkdown = transcriptMarkdownReader(row.transcriptPath);
-    const historyLines = formatHistoryPreviewLines({ row, transcriptMarkdown });
-    pushHistoryFlowDetail(state, {
-      screen: HISTORY_FLOW_PREVIEW,
-      panel: createHistoryPanelState({
-        title: "History preview",
-        lines: historyLines,
-        scrollable: true,
-        previewMode: true
-      })
-    });
-    if (mode === "plain") {
-      for (const historyLine of historyLines) {
-        console.log(historyLine);
-      }
-      return { handled: true, exit: false };
-    }
-    return {
-      handled: true,
-      exit: false,
-      action: createHistoryScreenAction({
-        title: "History preview",
-        lines: historyLines,
-        scrollable: true,
-        previewMode: true
-      })
-    };
-  }
-
-  if (line === "/sync") {
-    const result = await onSaveAndSync(state, { reason: "chat-manual-sync" });
-    const transcriptMessage = result.saveResult.path
-      ? `[chat] transcript saved: ${result.saveResult.path}`
-      : "[chat] transcript already up to date";
-    if (mode === "plain") {
-      console.log(transcriptMessage);
-      console.log(result.summary);
-    } else {
-      tuiHandlers.message(transcriptMessage);
-      tuiHandlers.message(result.summary);
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line.startsWith("/sync ")) {
-    const subcommand = line.slice(6).trim().toLowerCase();
-    if (subcommand !== "status" && subcommand !== "conflicts") {
-      const usage = "usage: /sync | /sync status | /sync conflicts";
-      if (mode === "plain") {
-        console.log(usage);
-      } else {
-        tuiHandlers.message(usage);
-      }
-      return { handled: true, exit: false };
-    }
-
-    if (subcommand === "status" && mode !== "plain") {
-      const syncStatus = readLocalSyncStatusModel();
-      return {
-        handled: true,
-        exit: false,
-        action: {
-          type: "switch-screen",
-          screen: "sync",
-          syncStatus
-        }
-      };
-    }
-
-    const notesArgs = subcommand === "status" ? ["status"] : ["sync-conflicts"];
-    const result = runNotesAutomationCommand(notesArgs);
-    const summary = formatSyncFeedback(result);
-    if (mode === "plain") {
-      console.log(summary);
-      if (result.output) {
-        console.log(result.output);
-      }
-    } else {
-      tuiHandlers.message(summary);
-      if (result.output) {
-        tuiHandlers.panel("sync", result.output.split("\n"));
-      }
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/clear") {
-    resetConversation(state);
-    if (mode === "plain") {
-      console.log("[chat] conversation cleared");
-    } else {
-      tuiHandlers.message("[chat] conversation cleared");
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/usage") {
-    if (mode === "plain") {
-      printUsageSummary({
-        sessionUsage: state.sessionUsage,
-        estimatedTokens: state.estimatedTokensRef.value,
-        routing: state.latestRouting,
-        limitsByModel
-      });
-    } else {
-      const summary = createUsageSummary({
-        sessionUsage: state.sessionUsage,
-        estimatedTokens: state.estimatedTokensRef.value,
-        routing: state.latestRouting,
-        limitsByModel
-      });
-      tuiHandlers.panel("usage", formatUsagePanel(summary));
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/config") {
-    const gateway = buildGatewayOptions();
-    const lines = [
-      `gateway_url: ${gateway.gatewayUrl}`,
-      `system_prompt: ${state.activeSystemPrompt ? "configured" : "empty"}`,
-      `auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`,
-      `vault_context: ${isVaultContextEnabled() ? "auto" : "disabled"}`,
-      `vault_context_modes: ${VAULT_CONTEXT_MODES.join(", ")}`
-    ];
-    if (mode === "plain") {
-      for (const nextLine of lines) {
-        console.log(nextLine);
-      }
-    } else {
-      tuiHandlers.panel("config", lines);
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line.startsWith("/system")) {
-    const [, action, ...rest] = line.split(" ");
-    if (action === "show") {
-      if (mode === "plain") {
-        console.log(state.activeSystemPrompt || "[empty]");
-      } else {
-        tuiHandlers.panel("system", [state.activeSystemPrompt || "[empty]"]);
-      }
-    } else if (action === "set") {
-      state.activeSystemPrompt = rest.join(" ").trim();
-      if (mode === "plain") {
-        console.log("[chat] system prompt updated");
-      } else {
-        tuiHandlers.message("[chat] system prompt updated");
-      }
-    } else if (action === "clear") {
-      state.activeSystemPrompt = "";
-      if (mode === "plain") {
-        console.log("[chat] system prompt cleared");
-      } else {
-        tuiHandlers.message("[chat] system prompt cleared");
-      }
-    } else if (mode === "plain") {
-      console.log("usage: /system show|set <prompt>|clear");
-    } else {
-      tuiHandlers.panel("system", ["usage: /system show|set <prompt>|clear"]);
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line === "/routing") {
-    if (!state.latestRouting) {
-      if (mode === "plain") {
-        console.log("[chat] no routing metadata yet");
-      } else {
-        tuiHandlers.message("[chat] no routing metadata yet");
-      }
-      return { handled: true, exit: false };
-    }
-
-    if (mode === "plain") {
-      console.log(JSON.stringify(state.latestRouting, null, 2));
-    } else {
-      tuiHandlers.panel("routing", JSON.stringify(state.latestRouting, null, 2).split("\n"));
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line.startsWith("/search ")) {
-    const query = line.slice(8).trim();
-    const searchResult = await runSearch({ query });
-    if (mode === "plain") {
-      printSearchPlain(searchResult);
-    } else {
-      tuiHandlers.panel("search", formatSearchPanel(searchResult));
-    }
-    return { handled: true, exit: false };
-  }
-
-  if (line.startsWith("/")) {
-    const hint = `[chat] unknown command: ${line}. Type / to discover commands.`;
-    if (mode === "plain") {
-      console.log(hint);
-    } else {
-      tuiHandlers.message(hint);
-    }
-    return { handled: true, exit: false };
-  }
-
-  return { handled: false, exit: false };
+  );
 }
 
 async function processPrompt({

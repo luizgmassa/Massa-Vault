@@ -3,18 +3,24 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import {
   buildGatewayOptions,
-  completeCommandInput,
   createStartupWarmup,
   createReplState,
   executeCommand,
-  getCommandDefinitions,
-  getCommandSuggestions,
   processPrompt,
   readLocalSyncStatusModel,
-  resolveCommandSubmission,
   saveAndSyncSession
 } from "./cli.js";
+import {
+  getSlashCommandSuggestions as getSlashCommandSuggestionsImpl,
+  itemsFromConversationHistory as itemsFromConversationHistoryImpl,
+  modelStatusFromRouting as modelStatusFromRoutingImpl,
+  moveSlashSuggestionSelection,
+  resolveSlashEnterAction as resolveSlashEnterActionImpl,
+  tabCompleteSlashCommandInput as tabCompleteSlashCommandInputImpl
+} from "./ink-controller.js";
 import { readLiteLLMLimits } from "./litellm-limits.js";
+
+export { moveSlashSuggestionSelection };
 
 export const CHAT_THEME = {
   assistant: "#ffb86b",
@@ -120,71 +126,23 @@ function splitSnippet(value) {
 }
 
 function modelStatusFromRouting(routing) {
-  const displayCandidates = [routing?.displayModel, routing?.responseModel, routing?.targetModel]
-    .map((value) => String(value || "").trim())
-    .filter((value) => value && !value.toLowerCase().startsWith("smart-router"));
-  const displayModel = displayCandidates[0] || "";
-  const modelLocation = String(routing?.modelLocation || "").trim();
-  return {
-    displayModel: displayModel || "pending",
-    modelLocation: modelLocation || "unknown"
-  };
+  return modelStatusFromRoutingImpl(routing);
 }
 
 function itemsFromConversationHistory(history, { startAt = 0 } = {}) {
-  const entries = Array.isArray(history) ? history : [];
-  const items = [];
-  let next = Math.max(0, Number(startAt) || 0);
-  for (const entry of entries) {
-    const role = String(entry?.role || "").trim().toLowerCase();
-    const content = String(entry?.content || "").trim();
-    if (!content) continue;
-    if (role !== "user" && role !== "assistant" && role !== "system") continue;
-    next += 1;
-    items.push({
-      id: `h-${next}`,
-      kind: "message",
-      role,
-      content
-    });
-  }
-  return { items, nextId: next };
+  return itemsFromConversationHistoryImpl(history, { startAt });
 }
 
 export function getSlashCommandSuggestions(inputValue) {
-  const definitions = getCommandDefinitions();
-  return getCommandSuggestions(inputValue, definitions);
+  return getSlashCommandSuggestionsImpl(inputValue);
 }
 
 export function tabCompleteSlashCommandInput(inputValue) {
-  const definitions = getCommandDefinitions();
-  return completeCommandInput(inputValue, definitions);
-}
-
-export function moveSlashSuggestionSelection({ currentIndex, suggestionCount, direction }) {
-  const count = Math.max(0, Number(suggestionCount) || 0);
-  if (!count) return null;
-  if (direction !== "up" && direction !== "down") {
-    return Number.isInteger(currentIndex) && currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
-  }
-  if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex >= count) {
-    return direction === "up" ? count - 1 : 0;
-  }
-  if (direction === "up") {
-    return (currentIndex - 1 + count) % count;
-  }
-  return (currentIndex + 1) % count;
+  return tabCompleteSlashCommandInputImpl(inputValue);
 }
 
 export function resolveSlashEnterAction({ inputValue, suggestions, selectedIndex }) {
-  if (!String(inputValue || "").trim().startsWith("/")) return null;
-  const visibleSuggestions = Array.isArray(suggestions) ? suggestions : [];
-  if (!visibleSuggestions.length) return null;
-  const nextIndex =
-    Number.isInteger(selectedIndex) && selectedIndex >= 0 && selectedIndex < visibleSuggestions.length
-      ? selectedIndex
-      : 0;
-  return resolveCommandSubmission(visibleSuggestions[nextIndex]);
+  return resolveSlashEnterActionImpl({ inputValue, suggestions, selectedIndex });
 }
 
 export function navigatePromptHistory({

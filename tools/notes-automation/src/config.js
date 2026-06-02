@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createDefaultConfigDocument } from "./config-definition.js";
 import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
 
 const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
@@ -28,10 +29,11 @@ function getLocalConfigPath(configPath, localConfigPath) {
 }
 
 export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath } = {}) {
+  const defaults = createDefaultConfigDocument();
   const baseConfig = readJsonFile(configPath);
   const localPath = getLocalConfigPath(configPath, localConfigPath);
   const localConfig = localPath && fs.existsSync(localPath) ? readJsonFile(localPath) : {};
-  const parsed = { ...baseConfig, ...localConfig };
+  const parsed = { ...defaults, ...baseConfig, ...localConfig };
   const syncStrategy = String(parsed.sync_strategy || "git").toLowerCase();
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";

@@ -4,6 +4,7 @@ import { classifyRequest, loadPolicy } from "./classifier.js";
 import { loadLiteLLMModelConfig, resolveModelRoute } from "./model-resolution.js";
 import { forwardRequest } from "./proxy.js";
 import { loadLocalEnv } from "../../shared/env.js";
+import { applyRoutingHeaders } from "../../shared/routing-metadata.js";
 
 loadLocalEnv();
 
@@ -128,13 +129,10 @@ export function createGatewayServer({
         });
       }
 
-      res.setHeader("x-router-lane", resolvedRouting.lane);
-      res.setHeader("x-router-confidence", String(resolvedRouting.confidence.toFixed(4)));
-      res.setHeader("x-router-target-model", resolvedRouting.targetModel);
-      res.setHeader("x-router-routed-model", resolvedRouting.routedModel);
-      res.setHeader("x-router-provider-model", resolvedRouting.providerModel);
-      res.setHeader("x-router-display-model", resolvedRouting.displayModel);
-      res.setHeader("x-router-model-location", resolvedRouting.modelLocation);
+      applyRoutingHeaders(res, {
+        ...resolvedRouting,
+        confidence: String(resolvedRouting.confidence.toFixed(4))
+      });
       return pipeUpstream(upstream, res);
     } catch (error) {
       return writeJson(res, 500, {

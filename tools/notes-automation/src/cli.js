@@ -6,6 +6,7 @@ import { checkGoogleDriveRemote, syncToGoogleDrive } from "./gdrive.js";
 import { runSyncOnce, startService, isProcessRunning } from "./service.js";
 import { readPid, removePid, writePid, readState, writeState } from "./state.js";
 import { loadLocalEnv } from "../../shared/env.js";
+import { deriveSyncStatusModel } from "../../shared/sync-status-model.js";
 
 loadLocalEnv();
 
@@ -47,18 +48,14 @@ function printStatus() {
   if (!running) {
     removePid();
   }
-  console.log(
-    JSON.stringify(
-      {
-        running,
-        pid: normalizedPid,
-        state,
-        sync: summarizeSyncStatus()
-      },
-      null,
-      2
-    )
-  );
+  const payload = {
+    running,
+    pid: normalizedPid,
+    state,
+    sync: summarizeSyncStatus()
+  };
+  payload.syncModel = deriveSyncStatusModel(payload, { commandOk: true });
+  console.log(JSON.stringify(payload, null, 2));
 }
 
 async function startDetached() {
@@ -185,7 +182,12 @@ function summarizeSyncStatus() {
 }
 
 function printSyncSummary(payload) {
-  console.log(JSON.stringify(payload, null, 2));
+  const summaryPayload = { ...payload };
+  summaryPayload.syncModel = deriveSyncStatusModel(summaryPayload, {
+    commandOk: Boolean(summaryPayload.ok ?? true),
+    output: String(summaryPayload.message || summaryPayload.error || "")
+  });
+  console.log(JSON.stringify(summaryPayload, null, 2));
 }
 
 async function waitForSyncCompletion({
