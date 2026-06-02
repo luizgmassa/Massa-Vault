@@ -12,8 +12,17 @@ import {
   gitWorkingTreeChanges
 } from "./git.js";
 import { syncToGoogleDrive } from "./gdrive.js";
-import { isProtectedArtifactPath, normalizeRelativePath } from "./protected-artifacts.js";
+import {
+  GDRIVE_IMPORT_CLASSIFICATION,
+  GDRIVE_IMPORT_DANGEROUS_ALERT,
+  GDRIVE_IMPORT_DANGEROUS_ERROR,
+  requiresGDriveImportReview,
+  resolveGDriveImportCommitSubject
+} from "./gdrive-import.js";
+import { normalizeRelativePath } from "./protected-artifacts.js";
 import { readState } from "./state.js";
+
+export { classifyGDriveImport } from "./gdrive-import.js";
 
 function nowIso(clock) {
   return clock?.nowIso ? clock.nowIso() : new Date().toISOString();
@@ -55,33 +64,6 @@ export function createNotesAutomationAdapters(overrides = {}) {
 
 function ensureParentDir(fileSystem, filePath) {
   fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-function topLevel(filePath) {
-  const normalized = normalizeRelativePath(filePath);
-  if (!normalized) return "";
-  const index = normalized.indexOf("/");
-  return index >= 0 ? normalized.slice(0, index) : normalized;
-}
-
-function increment(map, key) {
-  if (!key) return;
-  map.set(key, Number(map.get(key) || 0) + 1);
-}
-
-function dominant(map, total) {
-  let key = "";
-  let count = 0;
-  for (const [name, value] of map.entries()) {
-    if (value > count) {
-      key = name;
-      count = value;
-    }
-  }
-  return {
-    key,
-    share: total > 0 ? count / total : 0
-  };
 }
 
 export function quarantineGitConflicts(service, errorOutput = "") {
@@ -143,187 +125,6 @@ export function quarantineGitConflicts(service, errorOutput = "") {
 
   service.conflicts = captured;
   return captured;
-}
-
-export function classifyGDriveImport(service, baseline = {}) {
-  const fileSystem = service.adapters.fs;
-  const git = service.adapters.git;
-  const trackedFilesBefore = Number(baseline.trackedFilesBefore || 0);
-  const internalBefore =
-    baseline.internalArtifactPathsBefore instanceof Set
-      ? baseline.internalArtifactPathsBefore
-      : new Set();
-  const thresholds = service.config.gdriveImport || {
-    suspiciousFileThreshold: 20,
-    suspiciousDeleteThreshold: 5,
-    suspiciousPercentThreshold: 10,
-    dangerousPercentThreshold: 50
-  };
-
-  if (!service.config.git.enabled || !service.ensureVaultGitRepo()) {
-    return {
-      classification: "normal",
-      summary: {
-        changedCount: 0,
-        addedCount: 0,
-        modifiedCount: 0,
-        deletedCount: 0,
-        trackedFilesBefore,
-        trackedFilesExisting: 0,
-        changedPercent: 0,
-        deletedPercent: 0,
-        rootRenameOrDelete: false,
-        vaultNearlyEmpty: false,
-        importedInternalArtifactCount: 0,
-        importedInternalArtifactSample: [],
-        samplePaths: [],
-        reasons: ["git-disabled"]
-      }
-    };
-  }
-
-  const changes = git
-    .workingTreeChanges(service.vaultPath)
-    .map((entry) => ({
-      status: String(entry.status || "").toUpperCase().charAt(0) || "M",
-      path: normalizeRelativePath(entry.path),
-      previousPath: entry.previousPath ? normalizeRelativePath(entry.previousPath) : null
-    }))
-    .filter((entry) => entry.path);
-
-  let addedCount = 0;
-  let modifiedCount = 0;
-  let deletedCount = 0;
-  const samplePaths = [];
-  const deletedTopLevel = new Map();
-  const addedTopLevel = new Map();
-
-  for (const entry of changes) {
-    if (samplePaths.length < 10) {
-      samplePaths.push(
-        entry.status === "R" && entry.previousPath
-          ? `${entry.previousPath} -> ${entry.path}`
-          : entry.path
-      );
-    }
-
-    if (entry.status === "A") {
-      addedCount += 1;
-      increment(addedTopLevel, topLevel(entry.path));
-      continue;
-    }
-    if (entry.status === "D") {
-      deletedCount += 1;
-      increment(deletedTopLevel, topLevel(entry.path));
-      continue;
-    }
-    if (entry.status === "R") {
-      modifiedCount += 1;
-      increment(addedTopLevel, topLevel(entry.path));
-      increment(deletedTopLevel, topLevel(entry.previousPath || ""));
-      continue;
-    }
-    modifiedCount += 1;
-  }
-
-  const changedCount = changes.length;
-  const trackedFiles = git.trackedFiles(service.vaultPath);
-  const trackedFilesExisting = trackedFiles.filter((filePath) => {
-    if (isProtectedArtifactPath(filePath)) return false;
-    try {
-      return fileSystem.existsSync(path.join(service.vaultPath, filePath));
-    } catch {
-      return false;
-    }
-  }).length;
-
-  const trackedBaseline = trackedFilesBefore > 0 ? trackedFilesBefore : trackedFiles.length;
-  const changedPercent =
-    trackedBaseline > 0 ? Number(((changedCount / trackedBaseline) * 100).toFixed(2)) : 0;
-  const deletedPercent =
-    trackedBaseline > 0 ? Number(((deletedCount / trackedBaseline) * 100).toFixed(2)) : 0;
-
-  const internalAfter = service.collectInternalArtifactPaths();
-  const importedInternalPaths = [...internalAfter].filter((filePath) => !internalBefore.has(filePath));
-
-  const deletedDominant = dominant(deletedTopLevel, deletedCount);
-  const addedDominant = dominant(addedTopLevel, addedCount);
-  const renameAcrossTopLevel = changes.some((entry) => {
-    if (entry.status !== "R" || !entry.previousPath) return false;
-    const from = topLevel(entry.previousPath);
-    const to = topLevel(entry.path);
-    return Boolean(from && to && from !== to);
-  });
-  const rootRenameOrDelete =
-    renameAcrossTopLevel ||
-    (deletedCount >= thresholds.suspiciousDeleteThreshold &&
-      addedCount >= thresholds.suspiciousDeleteThreshold &&
-      deletedDominant.share >= 0.8 &&
-      addedDominant.share >= 0.8 &&
-      deletedDominant.key &&
-      addedDominant.key &&
-      deletedDominant.key !== addedDominant.key);
-
-  const vaultNearlyEmpty =
-    trackedBaseline > 0 &&
-    trackedFilesExisting <= Math.max(1, Math.floor(trackedBaseline * 0.1));
-  const protectedArtifactChanged =
-    importedInternalPaths.length > 0 ||
-    changes.some(
-      (entry) =>
-        service.isInternalArtifactPath(entry.path) ||
-        (entry.previousPath ? service.isInternalArtifactPath(entry.previousPath) : false)
-    );
-  const dangerous =
-    protectedArtifactChanged ||
-    changedPercent >= thresholds.dangerousPercentThreshold ||
-    deletedPercent >= thresholds.dangerousPercentThreshold ||
-    vaultNearlyEmpty;
-  const suspicious =
-    !dangerous &&
-    (changedCount >= thresholds.suspiciousFileThreshold ||
-      deletedCount >= thresholds.suspiciousDeleteThreshold ||
-      changedPercent >= thresholds.suspiciousPercentThreshold ||
-      rootRenameOrDelete);
-
-  let classification = "normal";
-  if (dangerous) classification = "dangerous";
-  else if (suspicious) classification = "suspicious";
-
-  const reasons = [];
-  if (protectedArtifactChanged) reasons.push("internal_artifact_imported");
-  if (changedPercent >= thresholds.dangerousPercentThreshold)
-    reasons.push("changed_percent_above_dangerous");
-  if (deletedPercent >= thresholds.dangerousPercentThreshold)
-    reasons.push("deleted_percent_above_dangerous");
-  if (vaultNearlyEmpty) reasons.push("vault_nearly_empty");
-  if (changedCount >= thresholds.suspiciousFileThreshold)
-    reasons.push("changed_count_above_suspicious");
-  if (deletedCount >= thresholds.suspiciousDeleteThreshold)
-    reasons.push("delete_count_above_suspicious");
-  if (changedPercent >= thresholds.suspiciousPercentThreshold)
-    reasons.push("changed_percent_above_suspicious");
-  if (rootRenameOrDelete) reasons.push("root_rename_or_delete_pattern");
-
-  return {
-    classification,
-    summary: {
-      changedCount,
-      addedCount,
-      modifiedCount,
-      deletedCount,
-      trackedFilesBefore: trackedBaseline,
-      trackedFilesExisting,
-      changedPercent,
-      deletedPercent,
-      rootRenameOrDelete,
-      vaultNearlyEmpty,
-      importedInternalArtifactCount: importedInternalPaths.length,
-      importedInternalArtifactSample: importedInternalPaths.slice(0, 10),
-      samplePaths,
-      reasons
-    }
-  };
 }
 
 export function pullGitInbound(service) {
@@ -496,7 +297,7 @@ export function handleSuccessfulGDriveImport(service, reason, baseline = {}) {
   const evaluation = service.classifyGDriveImport(baseline);
   const classification = evaluation.classification;
   const summary = evaluation.summary;
-  const reviewNeeded = classification === "suspicious" || classification === "dangerous";
+  const reviewNeeded = requiresGDriveImportReview(classification);
 
   service.updateSyncState({
     lastGDriveImportClassification: classification,
@@ -508,13 +309,7 @@ export function handleSuccessfulGDriveImport(service, reason, baseline = {}) {
     return { ok: true, classification, summary, skipped: true };
   }
 
-  const subjectByClass = {
-    normal: "sync(gdrive): import live-storage changes",
-    suspicious: "sync(gdrive): suspicious live-storage import",
-    dangerous: "sync(gdrive): dangerous import held for review"
-  };
-  const subject = subjectByClass[classification] || subjectByClass.normal;
-  const commit = service.commitAllChangesWithSubject(subject, [
+  const commit = service.commitAllChangesWithSubject(resolveGDriveImportCommitSubject(classification), [
     `reason=${reason}`,
     `classification=${classification}`,
     `changed=${summary.changedCount}`,
@@ -526,8 +321,8 @@ export function handleSuccessfulGDriveImport(service, reason, baseline = {}) {
     return { ok: false, classification, summary, error: commit.error };
   }
 
-  if (classification === "dangerous") {
-    const error = "dangerous gdrive import held for review (post-import push skipped)";
+  if (classification === GDRIVE_IMPORT_CLASSIFICATION.DANGEROUS) {
+    const error = GDRIVE_IMPORT_DANGEROUS_ERROR;
     service.paused = true;
     service.updateSyncState({
       status: "paused",
@@ -536,8 +331,7 @@ export function handleSuccessfulGDriveImport(service, reason, baseline = {}) {
     });
     service.updateState({
       paused: true,
-      alert:
-        "Sync paused: dangerous Google Drive import detected. Review latest local commit and restore from pre-GDrive snapshot if needed before resuming.",
+      alert: GDRIVE_IMPORT_DANGEROUS_ALERT,
       lastError: error
     });
     return { ok: false, classification, summary, error };

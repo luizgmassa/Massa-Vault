@@ -13,6 +13,8 @@ const ROUTING_TRANSCRIPT_MAP = Object.freeze({
   confidence: "router_confidence",
   targetModel: "router_target_model"
 });
+const ROUTING_DEFAULT_VALUE = "unknown";
+const SMART_ROUTER_PREFIX = "smart-router";
 
 function getHeaderValue(headers, key) {
   if (!headers) return null;
@@ -55,7 +57,7 @@ export function applyRoutingHeaders(target, routing) {
 export function withResponseModel(routing, value) {
   const responseModel = String(value || "").trim();
   if (!responseModel || routing?.responseModel === responseModel) return routing;
-  const displayModel = responseModel.toLowerCase().startsWith("smart-router")
+  const displayModel = responseModel.toLowerCase().startsWith(SMART_ROUTER_PREFIX)
     ? routing?.displayModel
     : routing?.displayModel || responseModel;
   return {
@@ -71,17 +73,17 @@ export function routingFromTranscriptMetadata(metadata) {
   const confidence = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.confidence]);
   if (!lane && !targetModel && !confidence) return null;
   return {
-    lane: lane || "unknown",
-    targetModel: targetModel || "unknown",
-    confidence: confidence || "unknown"
+    lane: lane || ROUTING_DEFAULT_VALUE,
+    targetModel: targetModel || ROUTING_DEFAULT_VALUE,
+    confidence: confidence || ROUTING_DEFAULT_VALUE
   };
 }
 
 export function routingToTranscriptMetadata(routing) {
   return {
-    [ROUTING_TRANSCRIPT_MAP.lane]: String(routing?.lane || "unknown"),
-    [ROUTING_TRANSCRIPT_MAP.targetModel]: String(routing?.targetModel || "unknown"),
-    [ROUTING_TRANSCRIPT_MAP.confidence]: String(routing?.confidence || "unknown")
+    [ROUTING_TRANSCRIPT_MAP.lane]: String(routing?.lane || ROUTING_DEFAULT_VALUE),
+    [ROUTING_TRANSCRIPT_MAP.targetModel]: String(routing?.targetModel || ROUTING_DEFAULT_VALUE),
+    [ROUTING_TRANSCRIPT_MAP.confidence]: String(routing?.confidence || ROUTING_DEFAULT_VALUE)
   };
 }
 

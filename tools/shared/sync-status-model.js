@@ -1,3 +1,11 @@
+import {
+  SYNC_BACKEND_LEVEL,
+  SYNC_BACKEND_REASON,
+  SYNC_STATUS,
+  SYNC_STATUS_FALLBACK_ERROR,
+  SYNC_SUMMARY_LIMITS
+} from "./sync-status-contract.js";
+
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -28,7 +36,13 @@ function includesGitHint(value) {
   return /\b(git|rebase|pull|push|merge|conflict|github)\b/i.test(String(value || ""));
 }
 
-function toSummary(value, { maxLines = 12, maxChars = 1800 } = {}) {
+function toSummary(
+  value,
+  {
+    maxLines = SYNC_SUMMARY_LIMITS.maxLines,
+    maxChars = SYNC_SUMMARY_LIMITS.maxChars
+  } = {}
+) {
   const text = String(value || "").trim();
   if (!text) return "";
   const lines = text.split(/\r?\n/).slice(-maxLines);
@@ -38,9 +52,9 @@ function toSummary(value, { maxLines = 12, maxChars = 1800 } = {}) {
 }
 
 function backendLevel({ enabled, hasError }) {
-  if (hasError) return "error";
-  if (enabled === false) return "disabled";
-  return "ok";
+  if (hasError) return SYNC_BACKEND_LEVEL.ERROR;
+  if (enabled === false) return SYNC_BACKEND_LEVEL.DISABLED;
+  return SYNC_BACKEND_LEVEL.OK;
 }
 
 function parseResultPayload(result) {
@@ -105,48 +119,48 @@ function deriveBackends({ state, sync, status, conflictCount, alert, rawSyncErro
   const resyncRecoveryFailed = autoResyncAttempted && !autoResyncApplied;
 
   if (conflictCount > 0 || status === "conflict") {
-    gitReasons.push("conflict");
+    gitReasons.push(SYNC_BACKEND_REASON.CONFLICT);
   }
   if (lastPullError) {
-    gitReasons.push("pull-error");
+    gitReasons.push(SYNC_BACKEND_REASON.PULL_ERROR);
   }
   if (lastPushError) {
-    gitReasons.push("push-error");
+    gitReasons.push(SYNC_BACKEND_REASON.PUSH_ERROR);
   }
   if (alert && includesGitHint(alert)) {
-    gitReasons.push("git-alert");
+    gitReasons.push(SYNC_BACKEND_REASON.GIT_ALERT);
   }
 
   if (lastGDriveError) {
-    driveReasons.push("gdrive-error");
+    driveReasons.push(SYNC_BACKEND_REASON.GDRIVE_ERROR);
   }
   if (requiresResync || resyncRecoveryFailed) {
-    driveReasons.push("gdrive-resync-required");
+    driveReasons.push(SYNC_BACKEND_REASON.GDRIVE_RESYNC_REQUIRED);
   }
   if (gdriveImport === "dangerous" || reviewNeeded) {
-    driveReasons.push("gdrive-review-needed");
+    driveReasons.push(SYNC_BACKEND_REASON.GDRIVE_REVIEW_NEEDED);
   }
   if (alert && includesDriveHint(alert)) {
-    driveReasons.push("gdrive-alert");
+    driveReasons.push(SYNC_BACKEND_REASON.GDRIVE_ALERT);
   }
   if (lastGDriveInitialError && resyncRecoveryFailed) {
-    driveReasons.push("gdrive-resync-failed");
+    driveReasons.push(SYNC_BACKEND_REASON.GDRIVE_RESYNC_FAILED);
   }
 
   let gitHasError = gitReasons.length > 0;
   let driveHasError = driveReasons.length > 0;
   const genericSyncError =
     asBoolean(rawSyncError) ||
-    status === "paused" ||
-    status === "error" ||
-    status === "conflict" ||
+    status === SYNC_STATUS.PAUSED ||
+    status === SYNC_STATUS.ERROR ||
+    status === SYNC_STATUS.CONFLICT ||
     conflictCount > 0;
   const unattributedSyncError = genericSyncError && !gitHasError && !driveHasError;
   if (unattributedSyncError) {
     gitHasError = true;
     driveHasError = true;
-    gitReasons.push("sync-error-unattributed");
-    driveReasons.push("sync-error-unattributed");
+    gitReasons.push(SYNC_BACKEND_REASON.SYNC_ERROR_UNATTRIBUTED);
+    driveReasons.push(SYNC_BACKEND_REASON.SYNC_ERROR_UNATTRIBUTED);
   }
 
   return {
@@ -186,7 +200,7 @@ export function deriveSyncStatusModel(payload, { commandOk = true, output = "" }
     ...syncFromRoot
   };
 
-  const status = String(sync.status || "idle").trim().toLowerCase() || "idle";
+  const status = String(sync.status || SYNC_STATUS.IDLE).trim().toLowerCase() || SYNC_STATUS.IDLE;
   const conflictCount = asNumber(sync.conflictCount, 0);
   const alert = firstText(sync.alert, state.alert);
   const lastError = firstText(sync.lastError, state.lastError);
@@ -243,7 +257,7 @@ export function buildSyncStatusModelFromResult(result) {
         state: {},
         sync: {
           status: result?.ok ? "idle" : "error",
-          lastError: firstText(result?.output, "unable to read notes-automation status")
+          lastError: firstText(result?.output, SYNC_STATUS_FALLBACK_ERROR)
         }
       },
       {

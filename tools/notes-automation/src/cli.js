@@ -1,18 +1,24 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { DEFAULT_CONFIG_PATH } from "./config-constants.js";
 import { loadConfig } from "./config.js";
+import { summarizeGDriveImportStatus } from "./gdrive-import.js";
 import { checkGoogleDriveRemote, syncToGoogleDrive } from "./gdrive.js";
 import { runSyncOnce, startService, isProcessRunning } from "./service.js";
 import { readPid, removePid, writePid, readState, writeState } from "./state.js";
 import { loadLocalEnv } from "../../shared/env.js";
 import { deriveSyncStatusModel } from "../../shared/sync-status-model.js";
+import { SYNC_STATUS } from "../../shared/sync-status-contract.js";
 
 loadLocalEnv();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
+const CONFIG_PATH = DEFAULT_CONFIG_PATH;
+const STARTUP_GRACE_MS = 500;
+const WAIT_FOR_SYNC_TIMEOUT_MS = 300_000;
+const WAIT_FOR_SYNC_POLL_MS = 500;
 
 function asPid(value) {
   const parsed = Number(value);
@@ -73,7 +79,7 @@ async function startDetached() {
   });
   child.unref();
   writePid(child.pid);
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await new Promise((resolve) => setTimeout(resolve, STARTUP_GRACE_MS));
   if (!isProcessRunning(child.pid)) {
     removePid();
     const state = readState();
@@ -141,22 +147,12 @@ function requestAction(action, { quiet = false } = {}) {
 function summarizeSyncStatus() {
   const state = readState();
   const sync = state?.sync && typeof state.sync === "object" ? state.sync : {};
-  const gdriveImport = sync.lastGDriveImportClassification || null;
-  const gdriveImportSummary =
-    sync.lastGDriveImportSummary && typeof sync.lastGDriveImportSummary === "object"
-      ? sync.lastGDriveImportSummary
-      : null;
-  const reviewNeeded = Boolean(sync.reviewNeeded);
-  const nextAction =
-    gdriveImport === "dangerous"
-      ? "review latest local sync(gdrive) dangerous commit; restore from pre-GDrive snapshot if needed; run sync-resolve/resume after manual verification"
-      : gdriveImport === "suspicious"
-        ? "review imported diff summary and confirm before continuing normal automation"
-        : null;
+  const { gdriveImport, gdriveImportSummary, reviewNeeded, nextAction } =
+    summarizeGDriveImportStatus(sync);
   return {
     running: Boolean(state?.running),
     paused: Boolean(state?.paused),
-    status: sync.status || "idle",
+    status: sync.status || SYNC_STATUS.IDLE,
     reason: sync.reason || null,
     queuedReason: sync.queuedReason || null,
     conflictCount: Number(sync.conflictCount || 0),
@@ -191,8 +187,8 @@ function printSyncSummary(payload) {
 }
 
 async function waitForSyncCompletion({
-  timeoutMs = 300_000,
-  pollMs = 500
+  timeoutMs = WAIT_FOR_SYNC_TIMEOUT_MS,
+  pollMs = WAIT_FOR_SYNC_POLL_MS
 } = {}) {
   const start = Date.now();
   let sawRequested = false;
@@ -203,11 +199,11 @@ async function waitForSyncCompletion({
     if (state?.requestedAction) {
       sawRequested = true;
     }
-    if (sync.status === "syncing") {
+    if (sync.status === SYNC_STATUS.SYNCING) {
       sawSyncing = true;
     }
     const requestSettled = !state?.requestedAction && sawRequested;
-    const syncSettled = sync.status !== "syncing" && sawSyncing;
+    const syncSettled = sync.status !== SYNC_STATUS.SYNCING && sawSyncing;
     if (requestSettled || syncSettled) {
       return sync;
     }

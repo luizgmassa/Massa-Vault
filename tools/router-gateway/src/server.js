@@ -3,16 +3,31 @@ import { URL } from "node:url";
 import { classifyRequest, loadPolicy } from "./classifier.js";
 import { loadLiteLLMModelConfig, resolveModelRoute } from "./model-resolution.js";
 import { forwardRequest } from "./proxy.js";
+import {
+  HTTP_STATUS,
+  ROUTER_GATEWAY_CHAT_PATHS,
+  ROUTER_GATEWAY_DEFAULT_HOST,
+  ROUTER_GATEWAY_DEFAULT_LITELLM_BASE_URL,
+  ROUTER_GATEWAY_DEFAULT_LITELLM_CONFIG_PATH,
+  ROUTER_GATEWAY_DEFAULT_POLICY_PATH,
+  ROUTER_GATEWAY_DEFAULT_PORT,
+  ROUTER_GATEWAY_HEALTH_PATH,
+  ROUTER_GATEWAY_JSON_CONTENT_TYPE,
+  ROUTER_GATEWAY_MAX_BODY_BYTES,
+  ROUTER_GATEWAY_REQUIRED_MODEL
+} from "./server-constants.js";
 import { loadLocalEnv } from "../../shared/env.js";
 import { applyRoutingHeaders } from "../../shared/routing-metadata.js";
 
 loadLocalEnv();
 
-const DEFAULT_PORT = Number(process.env.ROUTER_GATEWAY_PORT || 4100);
-const DEFAULT_HOST = process.env.ROUTER_GATEWAY_HOST || "127.0.0.1";
-const DEFAULT_POLICY_PATH = process.env.ROUTER_POLICY_PATH || ".litellm/router.json";
-const DEFAULT_LITELLM_CONFIG_PATH = process.env.LITELLM_CONFIG_PATH || ".litellm/litellm-config.yaml";
-const DEFAULT_LITELLM_BASE = process.env.ROUTER_LITELLM_BASE_URL || "http://127.0.0.1:4000";
+const DEFAULT_PORT = Number(process.env.ROUTER_GATEWAY_PORT || ROUTER_GATEWAY_DEFAULT_PORT);
+const DEFAULT_HOST = process.env.ROUTER_GATEWAY_HOST || ROUTER_GATEWAY_DEFAULT_HOST;
+const DEFAULT_POLICY_PATH = process.env.ROUTER_POLICY_PATH || ROUTER_GATEWAY_DEFAULT_POLICY_PATH;
+const DEFAULT_LITELLM_CONFIG_PATH =
+  process.env.LITELLM_CONFIG_PATH || ROUTER_GATEWAY_DEFAULT_LITELLM_CONFIG_PATH;
+const DEFAULT_LITELLM_BASE =
+  process.env.ROUTER_LITELLM_BASE_URL || ROUTER_GATEWAY_DEFAULT_LITELLM_BASE_URL;
 const REQUIRE_SMART_ROUTER_MODEL =
   String(process.env.ROUTER_GATEWAY_REQUIRE_SMART_ROUTER_MODEL || "true").toLowerCase() ===
   "true";
@@ -22,7 +37,7 @@ function readBody(req) {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 5_000_000) {
+      if (data.length > ROUTER_GATEWAY_MAX_BODY_BYTES) {
         reject(new Error("Payload too large"));
       }
     });
@@ -33,13 +48,13 @@ function readBody(req) {
 
 function writeJson(res, statusCode, payload) {
   res.statusCode = statusCode;
-  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Type", ROUTER_GATEWAY_JSON_CONTENT_TYPE);
   res.end(JSON.stringify(payload));
 }
 
 function getForwardHeaders(req) {
   const headers = {
-    "content-type": "application/json"
+    "content-type": ROUTER_GATEWAY_JSON_CONTENT_TYPE
   };
   if (req.headers.authorization) {
     headers.authorization = req.headers.authorization;
@@ -76,14 +91,13 @@ export function createGatewayServer({
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, "http://localhost");
-      if (req.method === "GET" && url.pathname === "/health") {
-        return writeJson(res, 200, { ok: true });
+      if (req.method === "GET" && url.pathname === ROUTER_GATEWAY_HEALTH_PATH) {
+        return writeJson(res, HTTP_STATUS.OK, { ok: true });
       }
 
-      const isCompletionsPath =
-        url.pathname === "/chat/completions" || url.pathname === "/v1/chat/completions";
+      const isCompletionsPath = ROUTER_GATEWAY_CHAT_PATHS.includes(url.pathname);
       if (req.method !== "POST" || !isCompletionsPath) {
-        return writeJson(res, 404, { error: { message: "Not found" } });
+        return writeJson(res, HTTP_STATUS.NOT_FOUND, { error: { message: "Not found" } });
       }
 
       const rawBody = await readBody(req);
@@ -91,13 +105,15 @@ export function createGatewayServer({
       try {
         body = JSON.parse(rawBody || "{}");
       } catch {
-        return writeJson(res, 400, { error: { message: "Invalid JSON body" } });
+        return writeJson(res, HTTP_STATUS.BAD_REQUEST, {
+          error: { message: "Invalid JSON body" }
+        });
       }
 
-      if (REQUIRE_SMART_ROUTER_MODEL && body.model !== "smart-router") {
-        return writeJson(res, 400, {
+      if (REQUIRE_SMART_ROUTER_MODEL && body.model !== ROUTER_GATEWAY_REQUIRED_MODEL) {
+        return writeJson(res, HTTP_STATUS.BAD_REQUEST, {
           error: {
-            message: "This gateway requires model='smart-router'."
+            message: `This gateway requires model='${ROUTER_GATEWAY_REQUIRED_MODEL}'.`
           }
         });
       }
@@ -135,7 +151,7 @@ export function createGatewayServer({
       });
       return pipeUpstream(upstream, res);
     } catch (error) {
-      return writeJson(res, 500, {
+      return writeJson(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
         error: {
           message: error instanceof Error ? error.message : "Unexpected server error"
         }

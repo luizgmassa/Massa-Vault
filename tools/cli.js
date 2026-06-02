@@ -5,8 +5,17 @@ import path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import {
+  DEFAULT_GDRIVE_MODE,
+  DEFAULT_GIT_AUTO_PUSH,
+  DEFAULT_GIT_BRANCH,
+  DEFAULT_GIT_MODE,
+  DEFAULT_GIT_REMOTE,
+  DEFAULT_SYNC_STRATEGY
+} from "./notes-automation/src/config-constants.js";
 import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
 import { listRcloneRemotes, validateRcloneRemotePath } from "./notes-automation/src/gdrive.js";
+import { GDRIVE_REMOTE_PATH_EXAMPLE } from "./notes-automation/src/gdrive-constants.js";
 import { createConfigDocument } from "./notes-automation/src/config-definition.js";
 import { loadLocalEnv } from "./shared/env.js";
 
@@ -15,6 +24,29 @@ loadLocalEnv();
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");
 const CHAT_CLI = path.resolve("tools/llm-chat-cli/src/cli.js");
+const TRUE_LIKE = new Set(["y", "yes", "true", "1"]);
+const FALSE_LIKE = new Set(["n", "no", "false", "0"]);
+const GDRIVE_COMMANDS = new Map([
+  ["check", "gdrive-check"],
+  ["dry-run", "gdrive-dry-run"]
+]);
+const SYNC_COMMANDS = new Map([
+  ["conflicts", ["sync-conflicts"]],
+  ["resolve", ["sync-resolve"]],
+  ["status", ["status"]]
+]);
+const NOTES_PROXY_COMMANDS = new Set(["start", "stop", "status", "resume", "flush-sync", "flush-push"]);
+const USAGE_LINES = Object.freeze([
+  "Usage:",
+  "  npm run vault:install",
+  "  npm run vault:configure",
+  "  npm run vault:chat",
+  "  npm run vault:sync",
+  "  npm run vault -- gdrive check|dry-run",
+  "  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync",
+  "  # or",
+  "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|resume|flush-sync"
+]);
 
 function runTool(command, args = []) {
   return spawnSync(command, args, {
@@ -50,8 +82,8 @@ function checkBinary(bin, versionArg = "--version") {
 function parseYN(value, defaultValue = true) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return defaultValue;
-  if (["y", "yes", "true", "1"].includes(normalized)) return true;
-  if (["n", "no", "false", "0"].includes(normalized)) return false;
+  if (TRUE_LIKE.has(normalized)) return true;
+  if (FALSE_LIKE.has(normalized)) return false;
   return defaultValue;
 }
 
@@ -94,34 +126,36 @@ async function configure() {
   const vaultAnswer = await rl.question(`Vault path [${defaultVaultPath}]: `);
   const vaultPath = path.resolve(vaultAnswer.trim() || defaultVaultPath);
 
-  const syncAnswer = await rl.question("Sync strategy (git|gdrive|both) [both]: ");
-  const syncStrategy = (syncAnswer.trim() || "both").toLowerCase();
+  const syncAnswer = await rl.question(
+    `Sync strategy (git|gdrive|both) [${DEFAULT_SYNC_STRATEGY}]: `
+  );
+  const syncStrategy = (syncAnswer.trim() || DEFAULT_SYNC_STRATEGY).toLowerCase();
 
-  let gitMode = "remote";
+  let gitMode = DEFAULT_GIT_MODE;
   let gitRepoUrl = "";
-  let gitRemote = "origin";
-  let gitBranch = "master";
-  let gitAutoPush = true;
+  let gitRemote = DEFAULT_GIT_REMOTE;
+  let gitBranch = DEFAULT_GIT_BRANCH;
+  let gitAutoPush = DEFAULT_GIT_AUTO_PUSH;
 
   if (syncStrategy === "git" || syncStrategy === "both") {
-    const modeAnswer = await rl.question("Git mode (remote|local) [remote]: ");
-    gitMode = (modeAnswer.trim() || "remote").toLowerCase();
+    const modeAnswer = await rl.question(`Git mode (remote|local) [${DEFAULT_GIT_MODE}]: `);
+    gitMode = (modeAnswer.trim() || DEFAULT_GIT_MODE).toLowerCase();
 
-    if (gitMode === "remote") {
+    if (gitMode === DEFAULT_GIT_MODE) {
       gitRepoUrl = (await rl.question("Git repo URL (ssh/https/file path): ")).trim();
-      const remoteAnswer = await rl.question("Git remote name [origin]: ");
-      gitRemote = remoteAnswer.trim() || "origin";
-      const branchAnswer = await rl.question("Git branch [master]: ");
-      gitBranch = branchAnswer.trim() || "master";
+      const remoteAnswer = await rl.question(`Git remote name [${DEFAULT_GIT_REMOTE}]: `);
+      gitRemote = remoteAnswer.trim() || DEFAULT_GIT_REMOTE;
+      const branchAnswer = await rl.question(`Git branch [${DEFAULT_GIT_BRANCH}]: `);
+      gitBranch = branchAnswer.trim() || DEFAULT_GIT_BRANCH;
       const autoPushAnswer = await rl.question("Auto-push enabled? (y/n) [y]: ");
-      gitAutoPush = parseYN(autoPushAnswer, true);
+      gitAutoPush = parseYN(autoPushAnswer, DEFAULT_GIT_AUTO_PUSH);
     } else {
       gitAutoPush = false;
     }
   }
 
   let gdriveRemotePath = "";
-  let gdriveMode = "bisync";
+  let gdriveMode = DEFAULT_GDRIVE_MODE;
   if (syncStrategy === "gdrive" || syncStrategy === "both") {
     const remotes = listRcloneRemotesSafe();
     if (remotes.length) {
@@ -130,11 +164,13 @@ async function configure() {
       console.log("[vault-cli] no rclone remotes detected. Run `rclone config` first.");
     }
     console.log(
-      "[vault-cli] Google Drive path must use remote:path syntax, e.g. Personal:Obsidian (not /Obsidian)."
+      `[vault-cli] Google Drive path must use remote:path syntax, e.g. ${GDRIVE_REMOTE_PATH_EXAMPLE} (not /Obsidian).`
     );
 
     while (true) {
-      const remotePathAnswer = await rl.question("Google Drive remote path (e.g. Personal:Obsidian): ");
+      const remotePathAnswer = await rl.question(
+        `Google Drive remote path (e.g. ${GDRIVE_REMOTE_PATH_EXAMPLE}): `
+      );
       const candidate = remotePathAnswer.trim();
       const validation = validateRcloneRemotePath(candidate, remotes);
       if (validation.ok) {
@@ -144,8 +180,10 @@ async function configure() {
       console.log(`[vault-cli] ${validation.error}`);
     }
 
-    console.log("[vault-cli] Google Drive mode is fixed to bisync for safe two-way sync.");
-    gdriveMode = "bisync";
+    console.log(
+      `[vault-cli] Google Drive mode is fixed to ${DEFAULT_GDRIVE_MODE} for safe two-way sync.`
+    );
+    gdriveMode = DEFAULT_GDRIVE_MODE;
   }
 
   rl.close();
@@ -223,14 +261,18 @@ async function proxyChat(args) {
 }
 
 function proxyGDrive(command) {
-  if (command === "check") {
-    return proxyNotes("gdrive-check");
-  }
-  if (command === "dry-run") {
-    return proxyNotes("gdrive-dry-run");
+  const resolved = GDRIVE_COMMANDS.get(command);
+  if (resolved) {
+    return proxyNotes(resolved);
   }
   console.error("Usage: npm run vault -- gdrive <check|dry-run>");
   process.exit(1);
+}
+
+function printUsage() {
+  for (const line of USAGE_LINES) {
+    console.log(line);
+  }
 }
 
 async function main() {
@@ -252,27 +294,18 @@ async function main() {
   if (cmd === "sync") {
     const sub = (process.argv[3] || "").toLowerCase();
     if (!sub) return proxyNotes("sync");
-    if (sub === "conflicts") return proxyNotes("sync-conflicts");
-    if (sub === "resolve") return proxyNotes("sync-resolve", ...(process.argv.slice(4)));
-    if (sub === "status") return proxyNotes("status");
+    const syncCommand = SYNC_COMMANDS.get(sub);
+    if (syncCommand) {
+      return proxyNotes(...syncCommand, ...(sub === "resolve" ? process.argv.slice(4) : []));
+    }
     console.error("Usage: npm run vault -- sync [conflicts|resolve|status]");
     process.exit(1);
   }
-  if (["start", "stop", "status", "resume", "flush-sync", "flush-push"].includes(cmd)) {
+  if (NOTES_PROXY_COMMANDS.has(cmd)) {
     return proxyNotes(cmd);
   }
 
-  console.log("Usage:");
-  console.log("  npm run vault:install");
-  console.log("  npm run vault:configure");
-  console.log("  npm run vault:chat");
-  console.log("  npm run vault:sync");
-  console.log("  npm run vault -- gdrive check|dry-run");
-  console.log("  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync");
-  console.log("  # or");
-  console.log(
-    "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|resume|flush-sync"
-  );
+  printUsage();
 }
 
 main().catch((error) => {

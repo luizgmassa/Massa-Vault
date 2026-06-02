@@ -1,21 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
+import {
+  ALLOWED_GDRIVE_RESYNC_MODE_SET,
+  DEFAULT_GDRIVE_MODE,
+  DEFAULT_GDRIVE_RESYNC_MODE
+} from "./config-constants.js";
+import {
+  GDRIVE_REMOTE_PATH_EXAMPLE,
+  GDRIVE_RESYNC_MARKER_SEGMENTS,
+  GDRIVE_RESYNC_RECOVERY_EXIT_CODE,
+  REMOTE_CLEANUP_GLOBS,
+  REQUIRED_GDRIVE_EXCLUDES
+} from "./gdrive-constants.js";
 
-const REQUIRED_GDRIVE_EXCLUDES = [
-  ".git/**",
-  ".gitignore",
-  ".obsidian/workspace.json",
-  ".logs/**",
-  ...PROTECTED_ARTIFACT_GLOBS
-];
-const REMOTE_CLEANUP_GLOBS = [...PROTECTED_ARTIFACT_GLOBS, ".gitignore"];
-const ALLOWED_RESYNC_MODES = new Set(["path1", "path2", "newer", "older"]);
-
-function resolveResyncMode(value, { fallback = "newer" } = {}) {
+function resolveResyncMode(value, { fallback = DEFAULT_GDRIVE_RESYNC_MODE } = {}) {
   const normalized = String(value || fallback).trim().toLowerCase();
-  if (!ALLOWED_RESYNC_MODES.has(normalized)) {
+  if (!ALLOWED_GDRIVE_RESYNC_MODE_SET.has(normalized)) {
     return {
       ok: false,
       error:
@@ -67,7 +68,7 @@ export function validateRcloneRemotePath(remotePath, availableRemotes = []) {
   if (!value) {
     return {
       ok: false,
-      error: "Missing gdrive_remote_path in config (expected remote:path, e.g. Personal:Obsidian)."
+      error: `Missing gdrive_remote_path in config (expected remote:path, e.g. ${GDRIVE_REMOTE_PATH_EXAMPLE}).`
     };
   }
 
@@ -88,7 +89,7 @@ export function validateRcloneRemotePath(remotePath, availableRemotes = []) {
     return {
       ok: false,
       error:
-        `Invalid gdrive_remote_path "${value}". Expected remote:path format (for example Personal:Obsidian). ` +
+        `Invalid gdrive_remote_path "${value}". Expected remote:path format (for example ${GDRIVE_REMOTE_PATH_EXAMPLE}). ` +
         listRemotesHint(availableRemotes)
     };
   }
@@ -116,7 +117,7 @@ export function validateRcloneRemotePath(remotePath, availableRemotes = []) {
 }
 
 function firstRunMarker(vaultPath) {
-  return path.join(vaultPath, ".automation", "gdrive-resync.done");
+  return path.join(vaultPath, ...GDRIVE_RESYNC_MARKER_SEGMENTS);
 }
 
 function normalizeGdriveArgs(args = []) {
@@ -182,20 +183,20 @@ function requiresBisyncResyncRecovery(details, status) {
     /\bprior\s+path[12]\s+listing\b[\s\S]{0,120}\b(missing|not\s+found|cannot\s+find|can't\s+find)\b/.test(
       text
     );
-  const hasCriticalExitCode = status === 7;
+  const hasCriticalExitCode = status === GDRIVE_RESYNC_RECOVERY_EXIT_CODE;
   return hasExplicitRecoveryHint || hasMissingPriorListing || hasCriticalExitCode;
 }
 
 function resolveSyncCommand(mode) {
-  const normalized = String(mode || "bisync").toLowerCase();
-  if (normalized !== "bisync") {
+  const normalized = String(mode || DEFAULT_GDRIVE_MODE).toLowerCase();
+  if (normalized !== DEFAULT_GDRIVE_MODE) {
     return {
       ok: false,
       error:
-        `Unsupported gdrive_mode "${normalized}". Google Drive sync requires "bisync" for safe two-way convergence.`
+        `Unsupported gdrive_mode "${normalized}". Google Drive sync requires "${DEFAULT_GDRIVE_MODE}" for safe two-way convergence.`
     };
   }
-  return { ok: true, command: "bisync" };
+  return { ok: true, command: DEFAULT_GDRIVE_MODE };
 }
 
 export function cleanupGoogleDriveProtectedArtifacts(
@@ -230,7 +231,9 @@ export function prepareGoogleDriveSync(
   gdriveConfig,
   { run = execFileSync, availableRemotes, dryRun = false, forceResync = false } = {}
 ) {
-  const resyncModeResult = resolveResyncMode(gdriveConfig.resyncMode, { fallback: "newer" });
+  const resyncModeResult = resolveResyncMode(gdriveConfig.resyncMode, {
+    fallback: DEFAULT_GDRIVE_RESYNC_MODE
+  });
   if (!resyncModeResult.ok) {
     return { ok: false, error: resyncModeResult.error };
   }
