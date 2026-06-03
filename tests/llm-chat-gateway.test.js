@@ -48,6 +48,31 @@ test("streamChatCompletion omits Authorization header when apiKey is empty", asy
   }
 });
 
+test("streamChatCompletion forwards AbortSignal to fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const abortController = new AbortController();
+  let capturedSignal;
+  globalThis.fetch = async (_url, init) => {
+    capturedSignal = init.signal;
+    return new Response("data: [DONE]\n\n", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" }
+    });
+  };
+
+  try {
+    await streamChatCompletion({
+      baseUrl: "http://127.0.0.1:4100",
+      apiKey: "",
+      body: { model: "smart-router", stream: true, messages: [{ role: "user", content: "ping" }] },
+      signal: abortController.signal
+    });
+    assert.equal(capturedSignal, abortController.signal);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamChatCompletion parses array-based delta content", async () => {
   const originalFetch = globalThis.fetch;
   const chunks = [];

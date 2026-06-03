@@ -151,7 +151,15 @@ export async function handleInkSubmit({
     refreshSyncStatus();
   } catch (error) {
     clearAssistantPending();
-    appendMessage("system", `[chat] ${error instanceof Error ? error.message : String(error)}`);
+    const errorText = `[chat] ${error instanceof Error ? error.message : String(error)}`;
+    if (screen === "sync") {
+      ui.setSyncNotice(errorText);
+      refreshSyncStatus();
+    } else if (screen === "history") {
+      ui.setHistoryNotice(errorText);
+    } else {
+      appendMessage("system", errorText);
+    }
   } finally {
     ui.setBusyLabel("");
     ui.setIsBusy(false);

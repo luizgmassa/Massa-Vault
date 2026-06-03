@@ -81,12 +81,14 @@ export async function streamChatCompletion({
   body,
   onDelta,
   onUsage,
-  onRouting
+  onRouting,
+  signal
 }) {
   const response = await fetch(joinUrl(baseUrl, "/chat/completions"), {
     method: "POST",
     headers: buildHeaders(apiKey),
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
 
   let routing = decodeRoutingHeaders(response.headers);

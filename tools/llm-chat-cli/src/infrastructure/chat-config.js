@@ -14,6 +14,7 @@ export const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWA
 export const DEFAULT_GATEWAY_MODEL = "smart-router";
 export const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 export const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
+export const DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS = 60_000;
 export const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
 export const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 

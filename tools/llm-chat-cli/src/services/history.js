@@ -1,6 +1,7 @@
 import {
   DEFAULT_GATEWAY_MODEL,
   DEFAULT_HISTORY_SUMMARY_MAX_CHARS,
+  DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS,
   buildGatewayOptions,
   resolveVaultPath
 } from "../infrastructure/chat-config.js";
@@ -54,10 +55,22 @@ export function createHistoryDateRows(
   }));
 }
 
+function createHistorySummaryTimeoutError(timeoutMs) {
+  const safeTimeoutMs =
+    Number.isFinite(timeoutMs) && Number(timeoutMs) > 0
+      ? Number(timeoutMs)
+      : DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS;
+  const seconds = Math.max(1, Math.ceil(safeTimeoutMs / 1000));
+  const error = new Error(`history summary timed out after ${seconds}s`);
+  error.name = "HistorySummaryTimeoutError";
+  return error;
+}
+
 export async function summarizeHistoryTranscript({
   row,
   transcriptMarkdown,
-  chatCompletion = streamChatCompletion
+  chatCompletion = streamChatCompletion,
+  timeoutMs = DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS
 }) {
   const gateway = buildGatewayOptions();
   const source = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
@@ -66,37 +79,55 @@ export async function summarizeHistoryTranscript({
     transcriptText.length > DEFAULT_HISTORY_SUMMARY_MAX_CHARS
       ? `${transcriptText.slice(0, DEFAULT_HISTORY_SUMMARY_MAX_CHARS)}\n\n[truncated for summary]`
       : transcriptText;
-  const response = await chatCompletion({
-    baseUrl: gateway.gatewayUrl,
-    apiKey: gateway.apiKey,
-    body: {
-      model: DEFAULT_GATEWAY_MODEL,
-      stream: false,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You summarize saved AI chat transcripts. Be concise. Return plain Markdown text with short sentences."
-        },
-        {
-          role: "user",
-          content: [
-            "Summarize this transcript in 3 to 5 short sentences.",
-            "Include: user goal, key answer/result, and any follow-up action.",
-            "Do not include code fences.",
-            `Transcript source: ${source}`,
-            "",
-            cappedTranscript || "[empty transcript]"
-          ].join("\n")
-        }
-      ]
+  const safeTimeoutMs =
+    Number.isFinite(timeoutMs) && Number(timeoutMs) > 0
+      ? Number(timeoutMs)
+      : DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS;
+  const abortController = new AbortController();
+  const timeoutError = createHistorySummaryTimeoutError(safeTimeoutMs);
+  const timer = setTimeout(() => abortController.abort(timeoutError), safeTimeoutMs);
+
+  try {
+    const response = await chatCompletion({
+      baseUrl: gateway.gatewayUrl,
+      apiKey: gateway.apiKey,
+      body: {
+        model: DEFAULT_GATEWAY_MODEL,
+        stream: false,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You summarize saved AI chat transcripts. Be concise. Return plain Markdown text with short sentences."
+          },
+          {
+            role: "user",
+            content: [
+              "Summarize this transcript in 3 to 5 short sentences.",
+              "Include: user goal, key answer/result, and any follow-up action.",
+              "Do not include code fences.",
+              `Transcript source: ${source}`,
+              "",
+              cappedTranscript || "[empty transcript]"
+            ].join("\n")
+          }
+        ]
+      },
+      signal: abortController.signal
+    });
+    return {
+      summary: String(response?.assistantText || "").trim(),
+      usage: response?.usage || null,
+      routing: response?.routing || null
+    };
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      throw timeoutError;
     }
-  });
-  return {
-    summary: String(response?.assistantText || "").trim(),
-    usage: response?.usage || null,
-    routing: response?.routing || null
-  };
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function createHistoryClient({

@@ -1004,6 +1004,157 @@ test("Ink history conversations support alias dispatch for /summary and /switch"
   });
 });
 
+test("Ink /history summary shows busy state while summary is running", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    const day = "2026-05-30";
+    const chatDir = path.join(vaultPath, "AI Chats", day);
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatDir, "10-00-00--busy.md"),
+      "---\nid: \"busy\"\n---\n\n## USER\nNeed summary\n\n## ASSISTANT\nStill loading.\n",
+      "utf8"
+    );
+
+    const previousVaultPath = process.env.VAULT_PATH;
+    process.env.VAULT_PATH = vaultPath;
+    try {
+      const { React, render, InkChatApp } = stack;
+      const driver = {};
+      let releaseSummary = () => {};
+      const summaryGate = new Promise((resolve) => {
+        releaseSummary = resolve;
+      });
+      const app = render(
+        React.createElement(InkChatApp, {
+          systemPrompt: "",
+          driver,
+          chatCompletion: async () => ({
+            assistantText: "",
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            routing: null
+          }),
+          commandExecutor: (params) =>
+            executeCommand({
+              ...params,
+              onSaveAndSync: async () => ({
+                saveResult: { path: null, saved: false },
+                summary: "[chat] sync status=idle conflicts=0"
+              }),
+              historySummaryRunner: async () => {
+                await summaryGate;
+                return {
+                  summary: "Busy summary line.",
+                  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                  routing: null
+                };
+              }
+            })
+        })
+      );
+
+      await delay(20);
+      await driver.submit("/history");
+      await delay(20);
+      await driver.submit("1");
+      await delay(20);
+
+      const pendingSummary = driver.submit("/history summary 1");
+      await delay(40);
+      const frameA = app.lastFrame();
+      await delay(280);
+      const frameB = app.lastFrame();
+      assert.match(frameA, /History conversations for 2026-05-30/i);
+      assert.match(frameA, /running \/history summary 1\.{1,3}/);
+      assert.match(frameB, /running \/history summary 1\.{1,3}/);
+      assert.notEqual(frameA, frameB);
+
+      releaseSummary();
+      await pendingSummary;
+      await delay(20);
+      const finalFrame = app.lastFrame();
+      assert.match(finalFrame, /History summary/i);
+      assert.match(finalFrame, /Busy summary line\./);
+      app.unmount();
+    } finally {
+      if (previousVaultPath === undefined) {
+        delete process.env.VAULT_PATH;
+      } else {
+        process.env.VAULT_PATH = previousVaultPath;
+      }
+    }
+  });
+});
+
+test("Ink /history summary keeps history screen and shows command errors inline", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    const day = "2026-05-30";
+    const chatDir = path.join(vaultPath, "AI Chats", day);
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(chatDir, "10-00-00--error.md"),
+      "---\nid: \"error\"\n---\n\n## USER\nNeed summary\n\n## ASSISTANT\nFail please.\n",
+      "utf8"
+    );
+
+    const previousVaultPath = process.env.VAULT_PATH;
+    process.env.VAULT_PATH = vaultPath;
+    try {
+      const { React, render, InkChatApp } = stack;
+      const driver = {};
+      const app = render(
+        React.createElement(InkChatApp, {
+          systemPrompt: "",
+          driver,
+          chatCompletion: async () => ({
+            assistantText: "",
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            routing: null
+          }),
+          commandExecutor: (params) =>
+            executeCommand({
+              ...params,
+              onSaveAndSync: async () => ({
+                saveResult: { path: null, saved: false },
+                summary: "[chat] sync status=idle conflicts=0"
+              }),
+              historySummaryRunner: async () => {
+                throw new Error("history summary exploded");
+              }
+            })
+        })
+      );
+
+      await delay(20);
+      await driver.submit("/history");
+      await delay(20);
+      await driver.submit("1");
+      await delay(20);
+
+      await driver.submit("/history summary 1");
+      await delay(20);
+      const frame = app.lastFrame();
+      assert.match(frame, /\n History\n \[chat\] history summary exploded/i);
+      assert.match(frame, /History conversations for 2026-05-30/i);
+      assert.match(frame, /\[chat\] history summary exploded/i);
+      app.unmount();
+    } finally {
+      if (previousVaultPath === undefined) {
+        delete process.env.VAULT_PATH;
+      } else {
+        process.env.VAULT_PATH = previousVaultPath;
+      }
+    }
+  });
+});
+
 test("Ink History markdown table keeps header/separator/data pipe alignment", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;

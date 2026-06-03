@@ -893,13 +893,16 @@ export function InkChatApp({
   const historyScrollEnd = historyRenderedLines.length
     ? Math.min(safeHistoryScrollOffset + historyViewportSize, historyRenderedLines.length)
     : 0;
-  const inputPlaceholder = syncScreenActive
-    ? "Sync screen active. Type /conv to return"
-    : historyScreenActive
-      ? "History screen active. Type /back or /conv to return"
-    : isBusy
-      ? `${busyLabel || "working"}${inputBusyEllipsis || "."}`
-      : "Type message or /";
+  const screenBusyNotice = isBusy ? `${busyLabel || "working"}${inputBusyEllipsis || "."}` : "";
+  const syncPanelNotice = screenBusyNotice || syncNotice;
+  const historyPanelNotice = screenBusyNotice || historyNotice;
+  const inputPlaceholder = isBusy
+    ? screenBusyNotice
+    : syncScreenActive
+      ? "Sync screen active. Type /conv to return"
+      : historyScreenActive
+        ? "History screen active. Type /back or /conv to return"
+        : "Type message or /";
 
   return createElement(
     Box,
@@ -928,7 +931,7 @@ export function InkChatApp({
             Box,
             { flexDirection: "column" },
             createElement(Text, { color: "yellowBright", bold: true }, "sync status (refresh every 2s)"),
-            syncNotice ? createElement(Text, { color: "yellow" }, syncNotice) : null,
+            syncPanelNotice ? createElement(Text, { color: "yellow" }, syncPanelNotice) : null,
             ...syncSections.map((section) =>
               createElement(
                 Box,
@@ -969,7 +972,9 @@ export function InkChatApp({
               Box,
               { flexDirection: "column" },
               createElement(Text, { color: CHAT_THEME.assistant, bold: true }, `${historyPanel.title || "History"}`),
-              historyNotice ? createElement(Text, { color: CHAT_THEME.assistant }, historyNotice) : null,
+              historyPanelNotice
+                ? createElement(Text, { color: CHAT_THEME.assistant }, historyPanelNotice)
+                : null,
               historyPanel.scrollable
                 ? createElement(
                     Text,
