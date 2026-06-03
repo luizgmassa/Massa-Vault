@@ -67,7 +67,8 @@ test("loadTranscriptIntoSession hydrates transcript metadata and clears staged c
   assert.equal(session.history.length, 2);
   assert.equal(session.activeTranscript?.path, "/tmp/history.md");
   assert.equal(session.activeTranscript?.id, "history-1");
-  assert.equal(session.latestRouting?.targetModel, "smart-router-general");
+  assert.equal(session.activeTranscript?.routing?.targetModel, "smart-router-general");
+  assert.equal(session.latestRouting, null);
   assert.equal(session.transcriptSavedPath, "/tmp/history.md");
   assert.equal(session.lastSavedHistoryLength, 2);
   assert.equal(session.sessionUsage.total_tokens, 15);

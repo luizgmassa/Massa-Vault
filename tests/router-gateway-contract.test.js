@@ -6,6 +6,7 @@ import path from "node:path";
 import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/domain/classifier.js";
 import {
   parseLiteLLMModelConfig,
+  resolveExecutedModelRoute,
   resolveModelRoute
 } from "../tools/router-gateway/src/domain/model-resolution.js";
 import { forwardRequest } from "../tools/router-gateway/src/infrastructure/proxy.js";
@@ -34,6 +35,11 @@ model_list:
           simple: 24
           complex: 300
       complexity_router_default_model: code_local
+
+router_settings:
+  fallbacks:
+    - code_cloud:
+        - code_local
 `;
 
 test("parses LiteLLM config and resolves local/cloud concrete models", () => {
@@ -58,6 +64,46 @@ test("parses LiteLLM config and resolves local/cloud concrete models", () => {
   assert.equal(cloud.providerModel, "ollama_chat/qwen3-coder-next:cloud");
   assert.equal(cloud.displayModel, "qwen3-coder-next:cloud");
   assert.equal(cloud.modelLocation, "cloud");
+  assert.deepEqual(cloud.fallbackRoutes, ["code_local"]);
+  assert.equal(cloud.localFallbackAvailable, true);
+});
+
+test("resolveExecutedModelRoute corrects executed fallback route from upstream model group", () => {
+  const models = parseLiteLLMModelConfig(`
+model_list:
+  - model_name: general_local
+    litellm_params:
+      model: ollama_chat/qwen3.5:9b
+      api_base: http://localhost:11434
+
+  - model_name: general_cloud
+    litellm_params:
+      model: ollama_chat/deepseek-v3.2:cloud
+      api_base: http://localhost:11434
+`);
+
+  const corrected = resolveExecutedModelRoute({
+    routing: {
+      lane: "general",
+      confidence: 1,
+      targetModel: "smart-router-general",
+      routedModel: "general_cloud",
+      providerModel: "ollama_chat/deepseek-v3.2:cloud",
+      displayModel: "deepseek-v3.2:cloud",
+      modelLocation: "cloud",
+      fallbackRoutes: ["general_local"],
+      localFallbackAvailable: true
+    },
+    executedModelGroup: "general_local",
+    models
+  });
+
+  assert.equal(corrected.routedModel, "general_local");
+  assert.equal(corrected.providerModel, "ollama_chat/qwen3.5:9b");
+  assert.equal(corrected.displayModel, "qwen3.5:9b");
+  assert.equal(corrected.modelLocation, "local");
+  assert.equal(corrected.fallbackUsed, true);
+  assert.equal(corrected.fallbackWarning, "cloud route fell back to local model qwen3.5:9b");
 });
 
 test("keeps OpenAI payload shape and forwards chosen model", async () => {

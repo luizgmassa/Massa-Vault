@@ -1105,6 +1105,61 @@ test("Ink History summary preserves blank sentence spacing", async (t) => {
   app.unmount();
 });
 
+test("Ink /history summary refreshes footer model from updated session routing", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      }),
+      commandExecutor: async ({ line, state }) => {
+        if (line === "/history summary 1") {
+          state.latestRouting = {
+            lane: "general",
+            confidence: "1.0000",
+            targetModel: "smart-router-general",
+            routedModel: "general_local",
+            providerModel: "ollama_chat/qwen3.5:9b",
+            displayModel: "qwen3.5:9b",
+            modelLocation: "local",
+            responseModel: "ollama_chat/qwen3.5:9b"
+          };
+          return {
+            handled: true,
+            exit: false,
+            action: {
+              type: "switch-screen",
+              screen: "history",
+              historyPanel: {
+                title: "History summary",
+                renderMarkdown: true,
+                lines: ["## History summary", "", "Updated summary."]
+              }
+            }
+          };
+        }
+        return { handled: false, exit: false };
+      }
+    })
+  );
+
+  await delay(20);
+  await driver.submit("/history summary 1");
+  await delay(30);
+  const frame = app.lastFrame();
+  assert.match(frame, /Model: qwen3\.5:9b @ local/);
+  assert.match(frame, /\[ 0 tokens \] \[ model: qwen3\.5:9b @ local \]/);
+  app.unmount();
+});
+
 test("Ink /history preview screen scrolls with Up/Down arrows", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;

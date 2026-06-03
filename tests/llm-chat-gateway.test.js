@@ -136,6 +136,99 @@ test("streamChatCompletion confirms response model from JSON payload", async () 
   }
 });
 
+test("streamChatCompletion marks local fallback when response model contradicts cloud routing", async () => {
+  const originalFetch = globalThis.fetch;
+  const routingSnapshots = [];
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        model: "ollama_chat/qwen3.5:9b",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-router-lane": "general",
+          "x-router-confidence": "1.0000",
+          "x-router-target-model": "smart-router-general",
+          "x-router-routed-model": "general_cloud",
+          "x-router-provider-model": "ollama_chat/deepseek-v3.2:cloud",
+          "x-router-display-model": "deepseek-v3.2:cloud",
+          "x-router-model-location": "cloud",
+          "x-router-fallback-routes": "general_local",
+          "x-router-local-fallback-available": "true"
+        }
+      }
+    );
+
+  try {
+    const result = await streamChatCompletion({
+      baseUrl: "http://127.0.0.1:4100",
+      apiKey: "",
+      body: { model: "smart-router", stream: true, messages: [{ role: "user", content: "hello" }] },
+      onRouting: (routing) => routingSnapshots.push(routing)
+    });
+    assert.equal(result.routing.routedModel, "general_local");
+    assert.equal(result.routing.providerModel, "ollama_chat/qwen3.5:9b");
+    assert.equal(result.routing.displayModel, "qwen3.5:9b");
+    assert.equal(result.routing.modelLocation, "local");
+    assert.equal(result.routing.fallbackUsed, true);
+    assert.equal(result.routing.fallbackWarning, "cloud route fell back to local model qwen3.5:9b");
+    assert.deepEqual(result.routing.fallbackRoutes, ["general_local"]);
+    assert.equal(result.routing.localFallbackAvailable, true);
+    assert.equal(routingSnapshots.at(-1).fallbackUsed, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamChatCompletion ignores internal route alias payload when headers already expose executed local fallback", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        model: "general_cloud",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-router-lane": "general",
+          "x-router-confidence": "1.0000",
+          "x-router-target-model": "smart-router-general",
+          "x-router-routed-model": "general_local",
+          "x-router-provider-model": "ollama_chat/qwen3.5:9b",
+          "x-router-display-model": "qwen3.5:9b",
+          "x-router-model-location": "local",
+          "x-router-fallback-routes": "general_local",
+          "x-router-local-fallback-available": "true",
+          "x-router-fallback-used": "true",
+          "x-router-fallback-warning": "cloud route fell back to local model qwen3.5:9b"
+        }
+      }
+    );
+
+  try {
+    const result = await streamChatCompletion({
+      baseUrl: "http://127.0.0.1:4100",
+      apiKey: "",
+      body: { model: "smart-router", stream: true, messages: [{ role: "user", content: "hello" }] }
+    });
+    assert.equal(result.routing.responseModel, "general_cloud");
+    assert.equal(result.routing.routedModel, "general_local");
+    assert.equal(result.routing.providerModel, "ollama_chat/qwen3.5:9b");
+    assert.equal(result.routing.displayModel, "qwen3.5:9b");
+    assert.equal(result.routing.modelLocation, "local");
+    assert.equal(result.routing.fallbackWarning, "cloud route fell back to local model qwen3.5:9b");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamChatCompletion does not promote smart-router response model to display model", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

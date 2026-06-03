@@ -4,6 +4,7 @@ import {
   renderCommands,
   writeMessage
 } from "../shared.js";
+import { isConcreteRouting } from "../../../../shared/routing-metadata.js";
 
 export function createHistoryCommandSpecs(deps) {
   const {
@@ -254,7 +255,7 @@ export function createHistoryCommandSpecs(deps) {
             model: String(metadata.model || "").trim() || DEFAULT_GATEWAY_MODEL,
             routing: loadedRouting
           };
-          state.latestRouting = state.activeTranscript.routing;
+          state.latestRouting = isConcreteRouting(loadedRouting) ? loadedRouting : state.latestRouting;
           state.transcriptSavedPath = row.transcriptPath;
           state.lastSavedHistoryLength = state.history.length;
           state.sessionUsage = deps.usageFromTranscriptMetadata(metadata);
@@ -358,6 +359,9 @@ export function createHistoryCommandSpecs(deps) {
         });
         const summaryText = String(summaryResult?.summary || "").trim() || "No summary generated.";
         const summaryUsage = deps.asUsage(summaryResult?.usage || null);
+        if (summaryResult?.routing) {
+          state.latestRouting = summaryResult.routing;
+        }
         if (summaryUsage.total_tokens > 0) {
           deps.accumulateSessionUsage(state.sessionUsage, summaryUsage);
           deps.addUsageToLedger({

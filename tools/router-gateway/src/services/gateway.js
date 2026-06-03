@@ -1,7 +1,11 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { classifyRequest, loadPolicy } from "../domain/classifier.js";
-import { loadLiteLLMModelConfig, resolveModelRoute } from "../domain/model-resolution.js";
+import {
+  loadLiteLLMModelConfig,
+  resolveExecutedModelRoute,
+  resolveModelRoute
+} from "../domain/model-resolution.js";
 import {
   HTTP_STATUS,
   ROUTER_GATEWAY_CHAT_PATHS,
@@ -90,9 +94,15 @@ export function createGatewayServer({
         });
       }
 
+      const executedRouting = resolveExecutedModelRoute({
+        routing: resolvedRouting,
+        executedModelGroup: upstream.headers.get("x-litellm-model-group"),
+        models: modelConfig
+      });
+
       applyRoutingHeaders(res, {
-        ...resolvedRouting,
-        confidence: String(resolvedRouting.confidence.toFixed(4))
+        ...executedRouting,
+        confidence: String(executedRouting.confidence.toFixed(4))
       });
       return pipeUpstreamResponse(upstream, res);
     } catch (error) {

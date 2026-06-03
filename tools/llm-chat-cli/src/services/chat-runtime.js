@@ -108,6 +108,7 @@ export async function runPrompt(
   let assistantText = "";
   let renderedAssistantChunk = false;
   let emittedAssistantChunk = false;
+  let lastRoutingWarning = null;
 
   thinkingHook?.(true);
 
@@ -132,6 +133,11 @@ export async function runPrompt(
     },
     onRouting: (metadata) => {
       routing = metadata;
+      const fallbackWarning = String(metadata?.fallbackWarning || "").trim();
+      if (fallbackWarning && fallbackWarning !== lastRoutingWarning) {
+        lastRoutingWarning = fallbackWarning;
+        emitWarning(`[chat] warning: ${fallbackWarning}`);
+      }
       routingHook?.(metadata);
     },
     onDelta: (chunk) => {

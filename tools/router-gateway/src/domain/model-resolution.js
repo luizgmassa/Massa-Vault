@@ -24,7 +24,8 @@ function ensureCurrent(models, currentName) {
       modelName: currentName,
       providerModel: null,
       apiBase: null,
-      complexity: null
+      complexity: null,
+      fallbackRoutes: []
     };
   }
   return models[currentName];
@@ -35,6 +36,9 @@ export function parseLiteLLMModelConfig(yamlText) {
   let currentName = null;
   let inParams = false;
   let subsection = null;
+  let inRouterSettings = false;
+  let inFallbacks = false;
+  let currentFallbackModel = null;
 
   for (const rawLine of String(yamlText || "").split(/\r?\n/)) {
     const indent = rawLine.match(/^\s*/)?.[0].length || 0;
@@ -46,6 +50,9 @@ export function parseLiteLLMModelConfig(yamlText) {
       currentName = cleanScalar(modelMatch[1]);
       inParams = false;
       subsection = null;
+      inRouterSettings = false;
+      inFallbacks = false;
+      currentFallbackModel = null;
       ensureCurrent(models, currentName);
       continue;
     }
@@ -54,6 +61,39 @@ export function parseLiteLLMModelConfig(yamlText) {
       currentName = null;
       inParams = false;
       subsection = null;
+      inRouterSettings = trimmed === "router_settings:";
+      inFallbacks = false;
+      currentFallbackModel = null;
+      if (inRouterSettings) continue;
+      continue;
+    }
+
+    if (inRouterSettings) {
+      if (trimmed === "fallbacks:") {
+        inFallbacks = true;
+        currentFallbackModel = null;
+        continue;
+      }
+      if (!inFallbacks) continue;
+
+      const fallbackOwnerMatch = trimmed.match(/^- ([A-Za-z0-9_-]+):\s*$/);
+      if (fallbackOwnerMatch) {
+        currentFallbackModel = cleanScalar(fallbackOwnerMatch[1]);
+        ensureCurrent(models, currentFallbackModel);
+        continue;
+      }
+
+      const fallbackEntryMatch = trimmed.match(/^- (.+?)\s*$/);
+      if (!fallbackEntryMatch || !currentFallbackModel) continue;
+      const currentFallback = ensureCurrent(models, currentFallbackModel);
+      const fallbackRoute = cleanScalar(fallbackEntryMatch[1]);
+      if (
+        fallbackRoute &&
+        currentFallback &&
+        !currentFallback.fallbackRoutes.includes(fallbackRoute)
+      ) {
+        currentFallback.fallbackRoutes.push(fallbackRoute);
+      }
       continue;
     }
 
@@ -166,6 +206,20 @@ function inferModelLocation({ routedModel, providerModel, apiBase }) {
   return "unknown";
 }
 
+function buildLocalFallbackWarning(displayModel) {
+  const value = String(displayModel || "").trim() || "unknown";
+  return `cloud route fell back to local model ${value}`;
+}
+
+function hasLocalFallbackRoute(fallbackRoutes, models) {
+  return fallbackRoutes.some((fallbackRoute) => {
+    const fallbackModel = models?.[fallbackRoute] || null;
+    const providerModel = fallbackModel?.providerModel || fallbackRoute;
+    const apiBase = fallbackModel?.apiBase || null;
+    return inferModelLocation({ routedModel: fallbackRoute, providerModel, apiBase }) === "local";
+  });
+}
+
 export function resolveModelRoute({ targetModel, body, models }) {
   const target = models?.[targetModel] || null;
   const estimatedTokens = estimateRequestTokens(body);
@@ -183,8 +237,10 @@ export function resolveModelRoute({ targetModel, body, models }) {
   const routed = models?.[routedModel] || null;
   const providerModel = routed?.providerModel || target?.providerModel || routedModel;
   const apiBase = routed?.apiBase || target?.apiBase || null;
+  const fallbackRoutes = [...(routed?.fallbackRoutes || target?.fallbackRoutes || [])];
+  const localFallbackAvailable = hasLocalFallbackRoute(fallbackRoutes, models);
 
-  return {
+  const result = {
     targetModel,
     routedModel,
     providerModel,
@@ -192,5 +248,47 @@ export function resolveModelRoute({ targetModel, body, models }) {
     modelLocation: inferModelLocation({ routedModel, providerModel, apiBase }),
     complexityTier,
     estimatedTokens
+  };
+  if (fallbackRoutes.length) {
+    result.fallbackRoutes = fallbackRoutes;
+    result.localFallbackAvailable = localFallbackAvailable;
+  }
+  return result;
+}
+
+export function resolveExecutedModelRoute({
+  routing,
+  executedModelGroup,
+  models
+}) {
+  const executedRoute = cleanScalar(executedModelGroup);
+  if (!executedRoute || executedRoute === routing?.routedModel) {
+    return routing;
+  }
+
+  const executed = models?.[executedRoute] || null;
+  const providerModel = executed?.providerModel || routing?.providerModel || executedRoute;
+  const apiBase = executed?.apiBase || null;
+  const displayModel = displayModelName(providerModel, executedRoute);
+  const modelLocation = inferModelLocation({
+    routedModel: executedRoute,
+    providerModel,
+    apiBase
+  });
+  const plannedLocation = String(routing?.modelLocation || "").trim().toLowerCase();
+  const fallbackToLocal = plannedLocation === "cloud" && modelLocation === "local";
+
+  return {
+    ...(routing && typeof routing === "object" ? routing : {}),
+    routedModel: executedRoute,
+    providerModel,
+    displayModel,
+    modelLocation,
+    ...(fallbackToLocal
+      ? {
+          fallbackUsed: true,
+          fallbackWarning: buildLocalFallbackWarning(displayModel)
+        }
+      : {})
   };
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyRoutingHeaders,
   decodeRoutingHeaders,
+  isConcreteRouting,
   routingFromTranscriptMetadata,
   routingToTranscriptMetadata,
   withResponseModel
@@ -38,20 +39,50 @@ test("routing header helpers round-trip shared gateway metadata", () => {
   });
 });
 
-test("routing transcript helpers preserve existing transcript contract", () => {
+test("routing transcript helpers preserve concrete routing metadata", () => {
   const routing = {
     lane: "general",
     targetModel: "smart-router-general",
-    confidence: "1.0000"
+    confidence: "1.0000",
+    routedModel: "general_local",
+    providerModel: "ollama_chat/qwen3.5:9b",
+    displayModel: "qwen3.5:9b",
+    modelLocation: "local",
+    responseModel: "ollama_chat/qwen3.5:9b"
   };
 
   const metadata = routingToTranscriptMetadata(routing);
   assert.deepEqual(metadata, {
     router_lane: "general",
     router_target_model: "smart-router-general",
-    router_confidence: "1.0000"
+    router_confidence: "1.0000",
+    router_routed_model: "general_local",
+    router_provider_model: "ollama_chat/qwen3.5:9b",
+    router_display_model: "qwen3.5:9b",
+    router_model_location: "local",
+    router_response_model: "ollama_chat/qwen3.5:9b"
   });
   assert.deepEqual(routingFromTranscriptMetadata(metadata), routing);
+});
+
+test("isConcreteRouting only accepts routing with real model and location", () => {
+  assert.equal(
+    isConcreteRouting({
+      lane: "general",
+      targetModel: "smart-router-general",
+      confidence: "1.0000"
+    }),
+    false
+  );
+  assert.equal(
+    isConcreteRouting({
+      lane: "general",
+      targetModel: "smart-router-general",
+      displayModel: "qwen3.5:9b",
+      modelLocation: "local"
+    }),
+    true
+  );
 });
 
 test("withResponseModel keeps smart-router display hidden and promotes concrete model", () => {

@@ -65,3 +65,58 @@ test("runPrompt estimates usage when gateway omits usage payload", async () => {
   assert.equal(session.history.length, 2);
   assert.equal(session.sessionUsage.total_tokens > 0, true);
 });
+
+test("runPrompt emits fallback warning when routing downgrades from cloud to local", async () => {
+  const session = createChatSession({ systemPrompt: "" });
+  const warnings = [];
+
+  const result = await runPrompt(session, {
+    prompt: "hello",
+    renderMode: "silent",
+    vaultContextBuilder: async () => null,
+    onWarning: (message) => warnings.push(message),
+    chatCompletion: async ({ onRouting, onUsage }) => {
+      onRouting?.({
+        lane: "general",
+        confidence: "1.0000",
+        targetModel: "smart-router-general",
+        routedModel: "general_cloud",
+        providerModel: "ollama_chat/deepseek-v3.2:cloud",
+        displayModel: "deepseek-v3.2:cloud",
+        modelLocation: "cloud"
+      });
+      onRouting?.({
+        lane: "general",
+        confidence: "1.0000",
+        targetModel: "smart-router-general",
+        routedModel: "general_local",
+        providerModel: "ollama_chat/qwen3.5:9b",
+        displayModel: "qwen3.5:9b",
+        modelLocation: "local",
+        responseModel: "ollama_chat/qwen3.5:9b",
+        fallbackUsed: true,
+        fallbackWarning: "cloud route fell back to local model qwen3.5:9b"
+      });
+      onUsage?.({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+      return {
+        assistantText: "ok",
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        routing: {
+          lane: "general",
+          confidence: "1.0000",
+          targetModel: "smart-router-general",
+          routedModel: "general_local",
+          providerModel: "ollama_chat/qwen3.5:9b",
+          displayModel: "qwen3.5:9b",
+          modelLocation: "local",
+          responseModel: "ollama_chat/qwen3.5:9b",
+          fallbackUsed: true,
+          fallbackWarning: "cloud route fell back to local model qwen3.5:9b"
+        }
+      };
+    }
+  });
+
+  assert.equal(result.routing?.fallbackUsed, true);
+  assert.deepEqual(warnings, ["[chat] warning: cloud route fell back to local model qwen3.5:9b"]);
+});

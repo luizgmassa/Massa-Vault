@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createSessionUsage } from "../domain/usage.js";
+import { isConcreteRouting } from "../../../shared/routing-metadata.js";
 
 export function createChatSession({
   systemPrompt = "",
@@ -56,6 +57,13 @@ export function addContextEntry(session, { source = "", content = "" } = {}) {
   return true;
 }
 
+function resolveLatestRouting(currentRouting, transcriptRouting) {
+  if (isConcreteRouting(transcriptRouting)) {
+    return transcriptRouting;
+  }
+  return currentRouting || null;
+}
+
 export function loadTranscriptIntoSession(
   session,
   {
@@ -79,7 +87,7 @@ export function loadTranscriptIntoSession(
     model: String(metadata?.model || "").trim() || fallbackModel,
     routing: routing || null
   };
-  session.latestRouting = session.activeTranscript.routing;
+  session.latestRouting = resolveLatestRouting(session.latestRouting, session.activeTranscript.routing);
   session.transcriptSavedPath = transcriptPath;
   session.lastSavedHistoryLength = session.history.length;
   session.sessionUsage = {

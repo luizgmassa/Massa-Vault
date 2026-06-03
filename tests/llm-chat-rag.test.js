@@ -1184,9 +1184,88 @@ test("executeCommand /history switch saves current session, loads selected trans
     assert.equal(state.history[0].content, "loaded user");
     assert.equal(state.history[1].content, "loaded assistant");
     assert.equal(state.activeTranscript?.path, transcriptPath);
+    assert.equal(state.activeTranscript?.routing?.targetModel, "smart-router-general");
+    assert.equal(state.latestRouting, null);
     assert.equal(state.transcriptSavedPath, transcriptPath);
     assert.equal(state.lastSavedHistoryLength, 2);
     assert.equal(state.sessionUsage.total_tokens, 10);
+  });
+});
+
+test("executeCommand /history switch preserves initialized concrete routing when transcript metadata is incomplete", async () => {
+  await withTempDir(async (tempDir) => {
+    const vaultPath = writeMinimalConfig(tempDir);
+    const chatDir = path.join(vaultPath, "AI Chats", "2026-05-30");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const transcriptPath = path.join(chatDir, "14-15-00--old-routing.md");
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        "---",
+        "id: \"old-routing\"",
+        "created_at: \"2026-05-30T14:15:00-03:00\"",
+        "gateway_url: \"http://127.0.0.1:4100\"",
+        "model: \"smart-router\"",
+        "router_lane: \"general\"",
+        "router_target_model: \"smart-router-general\"",
+        "router_confidence: \"1.0000\"",
+        "---",
+        "",
+        "## USER",
+        "",
+        "loaded user",
+        "",
+        "## ASSISTANT",
+        "",
+        "loaded assistant",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const state = createReplState({ systemPrompt: "" });
+    state.latestRouting = {
+      lane: "code",
+      confidence: "0.9500",
+      targetModel: "smart-router-code",
+      routedModel: "code_local",
+      providerModel: "ollama_chat/qwen2.5-coder:7b",
+      displayModel: "qwen2.5-coder:7b",
+      modelLocation: "local",
+      responseModel: "ollama_chat/qwen2.5-coder:7b"
+    };
+    const previousRouting = { ...state.latestRouting };
+    setHistoryConversationFlowState(state, {
+      rows: [
+        {
+          number: 1,
+          transcriptPath,
+          relativePath: "AI Chats/2026-05-30/14-15-00--old-routing.md",
+          fileName: "14-15-00--old-routing.md",
+          date: "2026-05-30",
+          time: "14:15:00",
+          title: "old routing",
+          score: null,
+          snippet: ""
+        }
+      ],
+      dateRows: [{ number: 1, date: "2026-05-30", count: 1 }]
+    });
+
+    const result = await executeCommand({
+      line: "/history switch 1",
+      state,
+      limitsByModel: {},
+      mode: "tui",
+      onSaveAndSync: async () => ({
+        saveResult: { path: "/tmp/current.md", saved: true },
+        summary: "[chat] sync status=idle conflicts=0"
+      })
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(state.activeTranscript?.routing?.targetModel, "smart-router-general");
+    assert.deepEqual(state.latestRouting, previousRouting);
   });
 });
 
@@ -1281,7 +1360,16 @@ test("executeCommand /history summary uses injected LLM runner and keeps transcr
         return {
           summary: "User asked for rollout plan. Assistant suggested phased delivery.",
           usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
-          routing: { targetModel: "smart-router-general" }
+          routing: {
+            lane: "general",
+            confidence: "1.0000",
+            targetModel: "smart-router-general",
+            routedModel: "general_local",
+            providerModel: "ollama_chat/qwen3.5:9b",
+            displayModel: "qwen3.5:9b",
+            modelLocation: "local",
+            responseModel: "ollama_chat/qwen3.5:9b"
+          }
         };
       }
     });
@@ -1296,6 +1384,8 @@ test("executeCommand /history summary uses injected LLM runner and keeps transcr
     assert.equal(state.history.length, 1);
     assert.equal(state.history[0].content, "keep conversation");
     assert.equal(state.sessionUsage.total_tokens, 3);
+    assert.equal(state.latestRouting?.displayModel, "qwen3.5:9b");
+    assert.equal(state.latestRouting?.modelLocation, "local");
   });
 });
 
