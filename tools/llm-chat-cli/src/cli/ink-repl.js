@@ -344,11 +344,15 @@ export function InkChatApp({
   const promptHistoryDraftRef = useRef("");
   const warmupWarningsRef = useRef([]);
   const warmupMessageSinkRef = useRef(null);
+  const warmupRoutingSinkRef = useRef(null);
   const shouldAutoWarmup = Boolean(startupWarmup || !chatCompletion);
   const warmupRef = useRef(
     shouldAutoWarmup
       ? startupWarmup ||
           createStartupWarmup({
+            onPrimaryRouting: (routing) => {
+              warmupRoutingSinkRef.current?.(routing);
+            },
             onWarning: (message) => {
               const sink = warmupMessageSinkRef.current;
               if (sink) {
@@ -360,7 +364,6 @@ export function InkChatApp({
           })
       : null
   );
-  const warmupAwaitedRef = useRef(false);
   const [items, setItems] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [slashSelectionIndex, setSlashSelectionIndex] = useState(null);
@@ -419,6 +422,16 @@ export function InkChatApp({
   const refreshModelStatus = useCallback((routing) => {
     setModelStatus(modelStatusFromRouting(routing));
   }, []);
+
+  useEffect(() => {
+    warmupRoutingSinkRef.current = (routing) => {
+      sessionRef.current.latestRouting = routing;
+      refreshModelStatus(routing);
+    };
+    return () => {
+      warmupRoutingSinkRef.current = null;
+    };
+  }, [refreshModelStatus]);
 
   const appendItem = useCallback((item) => {
     setItems((previous) => [...previous, item].slice(-120));
@@ -542,10 +555,6 @@ export function InkChatApp({
           entries: promptHistoryRef,
           cursor: promptHistoryCursorRef,
           draft: promptHistoryDraftRef
-        },
-        warmup: {
-          awaited: warmupAwaitedRef,
-          controller: warmupRef.current
         },
         slashState: {
           resolveEnterAction: resolveSlashEnterAction,

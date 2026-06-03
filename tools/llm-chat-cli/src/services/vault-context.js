@@ -14,7 +14,8 @@ import {
   classifyVaultContextIntent,
   combineVaultPayloads,
   emptyVaultMetadata,
-  getIndexFilePaths
+  getIndexFilePaths,
+  shouldSkipVaultContext
 } from "../domain/vault-context.js";
 
 const VAULT_CONTEXT_RESOLVERS = {
@@ -60,6 +61,9 @@ export async function buildVaultContext({
       messages: asVaultMessages(""),
       metadata: emptyVaultMetadata("semantic")
     };
+  }
+  if (shouldSkipVaultContext(query)) {
+    return null;
   }
 
   const config = loadConfig(DEFAULT_CONFIG_PATH);

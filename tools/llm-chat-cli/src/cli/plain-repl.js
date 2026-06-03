@@ -34,10 +34,12 @@ export function createPlainReplRunner({
       const warmup =
         startupWarmup ||
         createStartupWarmupFn({
+          onPrimaryRouting: (routing) => {
+            state.latestRouting = routing;
+          },
           onWarning: (message) => console.error(message)
         });
       warmup.start();
-      let firstPromptAwaitedWarmup = false;
       let nextIdleSyncAt = null;
       let closing = false;
 
@@ -136,10 +138,6 @@ export function createPlainReplRunner({
           }
 
           try {
-            if (!firstPromptAwaitedWarmup) {
-              firstPromptAwaitedWarmup = true;
-              await warmup.wait();
-            }
             state.transcriptSavedPath = null;
             const result = await promptRunner(state, {
               prompt: line,

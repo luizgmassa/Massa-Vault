@@ -522,7 +522,7 @@ test("Ink shows thinking timer during delayed chat and animated delayed /sync co
   syncApp.unmount();
 });
 
-test("Ink startup warmup starts once and first prompt waits in-flight warmup", async (t) => {
+test("Ink startup warmup starts once and first prompt does not wait", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
 
@@ -578,17 +578,17 @@ test("Ink startup warmup starts once and first prompt waits in-flight warmup", a
 
     const firstPrompt = driver.submit("hello");
     await delay(30);
-    assert.equal(chatCalls, 0);
+    assert.equal(chatCalls, 1);
     releaseWarmup();
     await firstPrompt;
     await delay(20);
     assert.equal(chatCalls, 1);
-    assert.equal(waitCalls, 1);
+    assert.equal(waitCalls, 0);
 
     await driver.submit("second");
     await delay(20);
     assert.equal(chatCalls, 2);
-    assert.equal(waitCalls, 1);
+    assert.equal(waitCalls, 0);
     app.unmount();
   });
 });

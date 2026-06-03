@@ -5,51 +5,32 @@ import {
 import { streamChatCompletion } from "../infrastructure/gateway.js";
 
 const GENERAL_SIMPLE_PROMPT = "Summarize today priorities.";
-const GENERAL_COMPLEX_PROMPT_SEED =
-  "Summarize stakeholder goals, tradeoffs, open questions, and delivery priorities in plain language. ";
-const GENERAL_COMPLEX_MIN_CHARS = 1600;
 const CODE_SIMPLE_PROMPT = "debug typescript stacktrace";
-const CODE_COMPLEX_PROMPT_SEED =
-  "debug typescript stacktrace for async handler crash and explain precise root cause plus fix steps. ";
-const CODE_COMPLEX_MIN_CHARS = 1200;
-const MULTIMODAL_PROMPT = "analyze this image and transcribe this audio";
-
-function expandPrompt(seed, minimumLength) {
-  let prompt = seed;
-  while (prompt.length < minimumLength) {
-    prompt += seed;
-  }
-  return prompt;
-}
 
 const DEFAULT_WARMUP_REQUESTS = Object.freeze([
   {
     name: "general-simple",
-    prompt: GENERAL_SIMPLE_PROMPT
-  },
-  {
-    name: "general-complex",
-    prompt: expandPrompt(GENERAL_COMPLEX_PROMPT_SEED, GENERAL_COMPLEX_MIN_CHARS)
+    prompt: GENERAL_SIMPLE_PROMPT,
+    required: true,
+    awaitReady: true,
+    publishStatus: true
   },
   {
     name: "code-simple",
-    prompt: CODE_SIMPLE_PROMPT
-  },
-  {
-    name: "code-complex",
-    prompt: expandPrompt(CODE_COMPLEX_PROMPT_SEED, CODE_COMPLEX_MIN_CHARS)
-  },
-  {
-    name: "multimodal",
-    prompt: MULTIMODAL_PROMPT
+    prompt: CODE_SIMPLE_PROMPT,
+    required: false,
+    awaitReady: false,
+    publishStatus: false
   }
 ]);
 
 export function createStartupWarmup({
   chatCompletion = streamChatCompletion,
-  onWarning
+  onWarning,
+  onPrimaryRouting
 } = {}) {
   let promise = null;
+  let readyPromise = null;
   const connectErrorCodes = new Set([
     "ECONNREFUSED",
     "ECONNRESET",
@@ -92,23 +73,34 @@ export function createStartupWarmup({
     if (promise) return promise;
 
     const gateway = buildGatewayOptions();
-    promise = Promise.all(
-      DEFAULT_WARMUP_REQUESTS.map(async ({ name, prompt }) => {
+    const taskEntries = DEFAULT_WARMUP_REQUESTS.map((request) => ({
+      request,
+      promise: (async () => {
+        const { name, prompt, required, publishStatus } = request;
         try {
-          await chatCompletion({
+          const result = await chatCompletion({
             baseUrl: gateway.gatewayUrl,
             apiKey: gateway.apiKey,
             body: buildWarmupBody(prompt)
           });
-          return { name, ok: true };
+          if (publishStatus && result?.routing && onPrimaryRouting) {
+            onPrimaryRouting(result.routing);
+          }
+          return { name, ok: true, required, routing: result?.routing || null };
         } catch (error) {
-          return { name, ok: false, error };
+          return { name, ok: false, error, required };
         }
-      })
+      })()
+    }));
+
+    readyPromise = Promise.all(
+      taskEntries
+        .filter(({ request }) => request.awaitReady)
+        .map(({ promise }) => promise)
     ).then((results) => {
-      const failures = results.filter((result) => !result.ok);
-      const firstFailure = failures[0]?.error;
-      const nonConnectivityFailures = failures.filter(
+      const requiredFailures = results.filter((result) => result.required && !result.ok);
+      const firstFailure = requiredFailures[0]?.error;
+      const nonConnectivityFailures = requiredFailures.filter(
         (result) => !isConnectivityFailure(result.error)
       );
 
@@ -124,8 +116,16 @@ export function createStartupWarmup({
         onWarning(message);
       }
 
-      if (failures.length) {
+      if (requiredFailures.length) {
         return { ok: false, error: firstFailure, results };
+      }
+      return { ok: true, results };
+    });
+
+    promise = Promise.all(taskEntries.map(({ promise: taskPromise }) => taskPromise)).then((results) => {
+      const requiredFailures = results.filter((result) => result.required && !result.ok);
+      if (requiredFailures.length) {
+        return { ok: false, error: requiredFailures[0]?.error, results };
       }
       return { ok: true, results };
     });
@@ -134,8 +134,8 @@ export function createStartupWarmup({
   };
 
   const wait = async () => {
-    if (!promise) return { ok: true, skipped: true, results: [] };
-    return promise;
+    if (!readyPromise) return { ok: true, skipped: true, results: [] };
+    return readyPromise;
   };
 
   return { start, wait };

@@ -20,7 +20,6 @@ export async function handleInkSubmit({
   createAssistantMessage,
   replaceAssistantText,
   promptHistory,
-  warmup,
   slashState,
   ui,
   nextIdRef
@@ -102,12 +101,6 @@ export async function handleInkSubmit({
     promptHistory.entries.current.push(line);
     promptHistory.cursor.current = null;
     promptHistory.draft.current = "";
-
-    if (!warmup.awaited.current && warmup.controller) {
-      warmup.awaited.current = true;
-      await warmup.controller.wait();
-    }
-
     const assistantMessageId = createAssistantMessage();
     let streamedAny = false;
     session.transcriptSavedPath = null;

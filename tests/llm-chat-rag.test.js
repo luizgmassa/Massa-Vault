@@ -24,12 +24,6 @@ const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TESTS_DIR, "..");
 const ROUTER_POLICY_PATH = path.join(REPO_ROOT, ".litellm", "router.json");
 const LITELLM_CONFIG_PATH = path.join(REPO_ROOT, ".litellm", "litellm-config.yaml");
-const GENERAL_COMPLEX_PROMPT_SEED =
-  "Summarize stakeholder goals, tradeoffs, open questions, and delivery priorities in plain language. ";
-const GENERAL_COMPLEX_MIN_CHARS = 1600;
-const CODE_COMPLEX_PROMPT_SEED =
-  "debug typescript stacktrace for async handler crash and explain precise root cause plus fix steps. ";
-const CODE_COMPLEX_MIN_CHARS = 1200;
 
 async function withTempDir(run) {
   const previousCwd = process.cwd();
@@ -275,6 +269,18 @@ test("default builder injects semantic mode for content prompts", async () => {
     assert.match(body.messages.at(-3).content, /Vault access contract/);
     assert.match(body.messages.at(-2).content, /Relevant Obsidian vault context/);
     assert.equal(body.messages.at(-1).content, "Summarize alpha security notes");
+  });
+});
+
+test("default builder skips vault context for low-signal greetings", async () => {
+  await withTempDir(async (tempDir) => {
+    const body = await captureProcessPromptBody({
+      prompt: "Hi",
+      tempDir
+    });
+
+    assert.equal(body.context, undefined);
+    assert.deepEqual(body.messages, [{ role: "user", content: "Hi" }]);
   });
 });
 
@@ -548,20 +554,49 @@ test("executeCommand treats /save and /help as unknown commands", async () => {
   assert.match(messages.join("\n"), /unknown command: \/help/i);
 });
 
-test("createStartupWarmup starts once, reuses promise, and sends hidden non-stream requests", async () => {
+test("createStartupWarmup starts once, reuses promise, and waits only for primary warmup", async () => {
   let calls = 0;
   const capturedBodies = [];
-  let resolveWarmup;
-  const gate = new Promise((resolve) => {
-    resolveWarmup = resolve;
+  const routed = [];
+  let resolveGeneralWarmup;
+  let resolveCodeWarmup;
+  const generalGate = new Promise((resolve) => {
+    resolveGeneralWarmup = resolve;
+  });
+  const codeGate = new Promise((resolve) => {
+    resolveCodeWarmup = resolve;
   });
   const warmup = createStartupWarmup({
     chatCompletion: async ({ body }) => {
       calls += 1;
       capturedBodies.push(body);
-      await gate;
-      return { assistantText: "", usage: null, routing: null };
-    }
+      const prompt = body?.messages?.[0]?.content;
+      if (prompt === "Summarize today priorities.") {
+        await generalGate;
+        return {
+          assistantText: "",
+          usage: null,
+          routing: {
+            targetModel: "smart-router-general",
+            routedModel: "general_local",
+            displayModel: "qwen3.5:9b",
+            modelLocation: "local"
+          }
+        };
+      }
+      await codeGate;
+      return {
+        assistantText: "",
+        usage: null,
+        routing: {
+          targetModel: "smart-router-code",
+          routedModel: "code_local",
+          displayModel: "qwen2.5-coder:7b",
+          modelLocation: "local"
+        }
+      };
+    },
+    onPrimaryRouting: (routing) => routed.push(routing)
   });
 
   const first = warmup.start();
@@ -574,34 +609,45 @@ test("createStartupWarmup starts once, reuses promise, and sends hidden non-stre
   });
   await delay(10);
   assert.equal(settled, false);
-  resolveWarmup();
-  await waitPromise;
+  resolveGeneralWarmup();
+  await delay(10);
+  assert.equal(settled, true);
 
-  assert.equal(calls, 5);
+  let aggregateSettled = false;
+  const aggregatePromise = first.then(() => {
+    aggregateSettled = true;
+  });
+  await waitPromise;
+  assert.equal(aggregateSettled, false);
+  resolveCodeWarmup();
+  await aggregatePromise;
+
+  assert.equal(calls, 2);
+  assert.deepEqual(routed, [
+    {
+      targetModel: "smart-router-general",
+      routedModel: "general_local",
+      displayModel: "qwen3.5:9b",
+      modelLocation: "local"
+    }
+  ]);
   assert.deepEqual(
     capturedBodies.map((body) => body.model),
-    Array.from({ length: 5 }, () => "smart-router")
+    Array.from({ length: 2 }, () => "smart-router")
   );
   assert.deepEqual(
     capturedBodies.map((body) => body.stream),
-    Array.from({ length: 5 }, () => false)
+    Array.from({ length: 2 }, () => false)
   );
   assert.deepEqual(
     capturedBodies.map((body) => body.max_tokens),
-    Array.from({ length: 5 }, () => 1)
+    Array.from({ length: 2 }, () => 1)
   );
   assert.deepEqual(capturedBodies[0].messages, [
     { role: "user", content: "Summarize today priorities." }
   ]);
-  assert.ok(capturedBodies[1].messages[0].content.startsWith(GENERAL_COMPLEX_PROMPT_SEED));
-  assert.ok(capturedBodies[1].messages[0].content.length >= GENERAL_COMPLEX_MIN_CHARS);
-  assert.deepEqual(capturedBodies[2].messages, [
+  assert.deepEqual(capturedBodies[1].messages, [
     { role: "user", content: "debug typescript stacktrace" }
-  ]);
-  assert.ok(capturedBodies[3].messages[0].content.startsWith(CODE_COMPLEX_PROMPT_SEED));
-  assert.ok(capturedBodies[3].messages[0].content.length >= CODE_COMPLEX_MIN_CHARS);
-  assert.deepEqual(capturedBodies[4].messages, [
-    { role: "user", content: "analyze this image and transcribe this audio" }
   ]);
 });
 
@@ -634,11 +680,34 @@ test("createStartupWarmup prompts resolve to active router lanes and concrete mo
 
   assert.deepEqual(resolutions, [
     { targetModel: "smart-router-general", routedModel: "general_local" },
-    { targetModel: "smart-router-general", routedModel: "general_cloud" },
-    { targetModel: "smart-router-code", routedModel: "code_local" },
-    { targetModel: "smart-router-code", routedModel: "code_cloud" },
-    { targetModel: "smart-router-multimodal", routedModel: "multimodal_cloud" }
+    { targetModel: "smart-router-code", routedModel: "code_local" }
   ]);
+});
+
+test("createStartupWarmup ignores optional background warmup failures", async () => {
+  const warnings = [];
+  const warmup = createStartupWarmup({
+    chatCompletion: async ({ body }) => {
+      const prompt = body?.messages?.[0]?.content;
+      if (prompt === "debug typescript stacktrace") {
+        throw new Error("code warmup backend offline");
+      }
+      return { assistantText: "", usage: null, routing: null };
+    },
+    onWarning: (message) => warnings.push(message)
+  });
+
+  const result = await warmup.start();
+  const codeWarmupResult = result.results.find((entry) => entry.name === "code-simple");
+
+  assert.equal(result.ok, true);
+  assert.equal(result.error, undefined);
+  assert.equal(result.results.length, 2);
+  assert.equal(codeWarmupResult?.name, "code-simple");
+  assert.equal(codeWarmupResult?.ok, false);
+  assert.equal(codeWarmupResult?.required, false);
+  assert.match(String(codeWarmupResult?.error?.message || ""), /backend offline/i);
+  assert.equal(warnings.length, 0);
 });
 
 test("createStartupWarmup connection failures are non-fatal and silent", async () => {
@@ -655,7 +724,7 @@ test("createStartupWarmup connection failures are non-fatal and silent", async (
   const result = await warmup.wait();
   assert.equal(result.ok, false);
   assert.equal(result.error, error);
-  assert.equal(result.results.length, 5);
+  assert.equal(result.results.length, 1);
   assert.equal(warnings.length, 0);
 });
 
@@ -671,7 +740,7 @@ test("createStartupWarmup non-connectivity failures still emit warning", async (
   warmup.start();
   const result = await warmup.wait();
   assert.equal(result.ok, false);
-  assert.equal(result.results.length, 5);
+  assert.equal(result.results.length, 1);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /startup warmup failed/i);
   assert.match(warnings[0], /continuing without warmup/i);

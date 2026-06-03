@@ -3,6 +3,8 @@ import path from "node:path";
 export const DEFAULT_RAG_CHUNK_LIMIT = 5;
 export const DEFAULT_RAG_MAX_CHARS = 6000;
 export const VAULT_CONTEXT_MODES = Object.freeze(["semantic", "manifest"]);
+const LOW_SIGNAL_CHAT_PATTERN =
+  /^(hi|hello|hey|hey there|hi there|thanks|thank you|ok|okay|cool|good morning|good afternoon|good evening|how are you|what'?s up)[!.?]*$/i;
 
 export function normalizeSourcePath(filePath) {
   const raw = String(filePath || "").trim();
@@ -39,6 +41,10 @@ export function classifyVaultContextIntent(prompt) {
       text
     ) || /\b(files|notes)\b[^?!.]*\babout\b/.test(text);
   return hasSemanticIntent ? "hybrid" : "manifest";
+}
+
+export function shouldSkipVaultContext(prompt) {
+  return LOW_SIGNAL_CHAT_PATTERN.test(String(prompt || "").trim());
 }
 
 export function buildVaultAccessContract() {
