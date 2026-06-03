@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureSearchIndex, searchIndex } from "../tools/llm-chat-cli/src/search.js";
+import {
+  ensureSearchIndex,
+  searchIndex
+} from "../tools/llm-chat-cli/src/infrastructure/search.js";
 
 function vectorForText(text) {
   const value = String(text || "").toLowerCase();

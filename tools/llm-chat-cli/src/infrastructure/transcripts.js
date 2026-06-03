@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { routingToTranscriptMetadata } from "../../shared/routing-metadata.js";
+import { routingToTranscriptMetadata } from "../../../shared/routing-metadata.js";
 
 function pad(value, size = 2) {
   return String(value).padStart(size, "0");
@@ -197,6 +197,10 @@ export function parseTranscriptMarkdown(markdown) {
 export function readTranscript(filePath) {
   const markdown = fs.readFileSync(filePath, "utf8");
   return parseTranscriptMarkdown(markdown);
+}
+
+export function readTranscriptMarkdown(filePath) {
+  return fs.readFileSync(filePath, "utf8");
 }
 
 export function listTranscriptDates(vaultPath) {

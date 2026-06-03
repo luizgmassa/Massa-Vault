@@ -1,4 +1,4 @@
-import { runPrompt } from "./chat-runtime.js";
+import { runPrompt } from "../services/chat-runtime.js";
 import { applyInkScreenAction, noticeForBlockedScreen } from "./ink-screen-controller.js";
 
 export async function handleInkSubmit({

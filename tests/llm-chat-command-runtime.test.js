@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCommandRuntime } from "../tools/llm-chat-cli/src/commands.js";
-import { createChatSession } from "../tools/llm-chat-cli/src/chat-session.js";
+import { createDefaultCommandRuntime } from "../tools/llm-chat-cli/src/services/command-executor.js";
+import { createChatSession } from "../tools/llm-chat-cli/src/services/chat-session.js";
 
 function createRuntime(overrides = {}) {
   return createCommandRuntime({
@@ -135,4 +136,35 @@ test("createCommandRuntime keeps unknown commands user-visible", async () => {
 
   assert.equal(result.handled, true);
   assert.match(messages[0], /unknown command: \/unknown/i);
+});
+
+test("createDefaultCommandRuntime wires default saveAndSync for /sync", async () => {
+  const runtime = createDefaultCommandRuntime({
+    saveAndSync: async () => ({
+      saveResult: { path: "/tmp/default-sync.md", saved: true },
+      summary: "[chat] sync status=idle conflicts=0"
+    }),
+    syncClient: {
+      formatSyncFeedback: (result) => result.summary || "[chat] sync status=idle conflicts=0",
+      readLocalSyncStatusModel: () => ({ status: "idle" }),
+      runNotesAutomationCommand: () => ({ ok: true, output: "{}", payload: {} })
+    }
+  });
+  const session = createChatSession({ systemPrompt: "" });
+  const messages = [];
+
+  const result = await runtime.execute({
+    line: "/sync",
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: {
+      message: (text) => messages.push(text)
+    }
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.match(messages.join("\n"), /default-sync\.md/);
+  assert.match(messages.join("\n"), /sync status=idle/i);
 });

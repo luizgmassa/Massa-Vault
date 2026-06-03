@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createStatusRenderer, processPrompt } from "../tools/llm-chat-cli/src/cli.js";
-import { createSessionUsage } from "../tools/llm-chat-cli/src/usage.js";
+import { createSessionUsage } from "../tools/llm-chat-cli/src/domain/usage.js";
 
 test("TTY chat rendering keeps assistant chunks contiguous", async () => {
   const originalCwd = process.cwd();

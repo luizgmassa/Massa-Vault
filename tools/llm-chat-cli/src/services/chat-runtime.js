@@ -1,9 +1,14 @@
 import { stdout as output } from "node:process";
-import { DEFAULT_GATEWAY_MODEL, buildGatewayOptions, isVaultContextEnabled } from "./chat-config.js";
+import {
+  DEFAULT_GATEWAY_MODEL,
+  buildGatewayOptions,
+  isVaultContextEnabled
+} from "../infrastructure/chat-config.js";
 import { createStatusLine, createStatusState } from "./chat-status.js";
-import { streamChatCompletion } from "./gateway.js";
-import { estimateTokensFromText } from "./token-estimator.js";
-import { addUsageToLedger, accumulateSessionUsage } from "./usage.js";
+import { streamChatCompletion } from "../infrastructure/gateway.js";
+import { estimateTokensFromText } from "../domain/token-estimator.js";
+import { accumulateSessionUsage } from "../domain/usage.js";
+import { addUsageToLedger } from "./usage.js";
 import { buildVaultContext } from "./vault-context.js";
 
 function asUsage(usage) {

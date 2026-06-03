@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createChatSession, addContextEntry } from "../tools/llm-chat-cli/src/chat-session.js";
-import { runPrompt } from "../tools/llm-chat-cli/src/chat-runtime.js";
+import {
+  createChatSession,
+  addContextEntry
+} from "../tools/llm-chat-cli/src/services/chat-session.js";
+import { runPrompt } from "../tools/llm-chat-cli/src/services/chat-runtime.js";
 
 test("runPrompt uses session context entries, updates routing, and clears staged context on success", async () => {
   const session = createChatSession({ systemPrompt: "global system" });

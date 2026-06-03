@@ -11,7 +11,7 @@ import {
   summarizeTranscriptTitle,
   transcriptFilePath,
   writeTranscript
-} from "../tools/llm-chat-cli/src/transcripts.js";
+} from "../tools/llm-chat-cli/src/infrastructure/transcripts.js";
 
 function pad(value) {
   return String(value).padStart(2, "0");

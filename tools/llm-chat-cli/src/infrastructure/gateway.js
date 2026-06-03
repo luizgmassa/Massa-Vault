@@ -2,7 +2,7 @@ import { createSSEParser } from "./stream.js";
 import {
   decodeRoutingHeaders,
   withResponseModel
-} from "../../shared/routing-metadata.js";
+} from "../../../shared/routing-metadata.js";
 
 function joinUrl(baseUrl, pathname) {
   const base = String(baseUrl || "").replace(/\/+$/, "");

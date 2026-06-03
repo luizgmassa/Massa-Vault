@@ -1,38 +1,8 @@
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig } from "../../notes-automation/src/config.js";
-import { loadLocalEnv } from "../../shared/env.js";
-import { buildSyncStatusModelFromResult } from "./sync-status.js";
+import { buildSyncStatusModelFromResult } from "../domain/sync-status.js";
 
-loadLocalEnv();
-
-export const DEFAULT_GATEWAY_URL = `http://127.0.0.1:${process.env.ROUTER_GATEWAY_PORT || 4100}`;
-export const DEFAULT_GATEWAY_MODEL = "smart-router";
-export const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 export const NOTES_AUTOMATION_CLI_PATH = path.resolve("tools/notes-automation/src/cli.js");
-export const DEFAULT_HISTORY_SUMMARY_MAX_CHARS = 16_000;
-export const DEFAULT_IDLE_SYNC_MS = Number(process.env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || 30_000);
-export const RAG_DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
-
-export function buildGatewayOptions() {
-  return {
-    gatewayUrl: process.env.MASSA_VAULT_CHAT_GATEWAY_URL || DEFAULT_GATEWAY_URL,
-    apiKey: process.env.LITELLM_MASTER_KEY || ""
-  };
-}
-
-export function isVaultContextEnabled(env = process.env) {
-  const raw = String(env.MASSA_VAULT_CHAT_RAG || "")
-    .trim()
-    .toLowerCase();
-  if (!raw) return true;
-  return !RAG_DISABLED_VALUES.has(raw);
-}
-
-export function resolveVaultPath() {
-  const config = loadConfig(DEFAULT_CONFIG_PATH);
-  return config.vaultPath;
-}
 
 function parseJsonOutput(value) {
   const text = String(value || "").trim();
@@ -42,25 +12,6 @@ function parseJsonOutput(value) {
   } catch {
     return null;
   }
-}
-
-export function runNotesAutomationCommand(args = []) {
-  try {
-    const output = execFileSync(process.execPath, [NOTES_AUTOMATION_CLI_PATH, ...args], {
-      cwd: process.cwd(),
-      env: process.env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
-    }).trim();
-    return { ok: true, output, payload: parseJsonOutput(output) };
-  } catch (error) {
-    const output = String(error?.stdout || error?.stderr || error?.message || "").trim();
-    return { ok: false, output, payload: parseJsonOutput(output) };
-  }
-}
-
-export function readLocalSyncStatusModel() {
-  return buildSyncStatusModelFromResult(runNotesAutomationCommand(["status"]));
 }
 
 export function formatSyncFeedback(result) {
@@ -130,3 +81,40 @@ export function formatSyncFeedback(result) {
   }
   return base;
 }
+
+export function createSyncClient({
+  notesAutomationCliPath = NOTES_AUTOMATION_CLI_PATH,
+  cwd = () => process.cwd(),
+  env = () => process.env,
+  execFileSyncImpl = execFileSync,
+  processExecPath = process.execPath,
+  statusModelBuilder = buildSyncStatusModelFromResult
+} = {}) {
+  const runNotesAutomationCommand = (args = []) => {
+    try {
+      const output = execFileSyncImpl(processExecPath, [notesAutomationCliPath, ...args], {
+        cwd: cwd(),
+        env: env(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }).trim();
+      return { ok: true, output, payload: parseJsonOutput(output) };
+    } catch (error) {
+      const output = String(error?.stdout || error?.stderr || error?.message || "").trim();
+      return { ok: false, output, payload: parseJsonOutput(output) };
+    }
+  };
+
+  return {
+    formatSyncFeedback,
+    readLocalSyncStatusModel() {
+      return statusModelBuilder(runNotesAutomationCommand(["status"]));
+    },
+    runNotesAutomationCommand
+  };
+}
+
+const defaultSyncClient = createSyncClient();
+
+export const readLocalSyncStatusModel = defaultSyncClient.readLocalSyncStatusModel;
+export const runNotesAutomationCommand = defaultSyncClient.runNotesAutomationCommand;

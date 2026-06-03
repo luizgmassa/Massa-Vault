@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createSessionUsage } from "./usage.js";
+import { createSessionUsage } from "../domain/usage.js";
 
 export function createChatSession({
   systemPrompt = "",

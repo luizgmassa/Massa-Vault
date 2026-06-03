@@ -2,7 +2,7 @@ import {
   completeCommandInput,
   getCommandSuggestions,
   resolveCommandSubmission
-} from "./commands.js";
+} from "../commands.js";
 
 export function modelStatusFromRouting(routing) {
   const displayCandidates = [routing?.displayModel, routing?.responseModel, routing?.targetModel]

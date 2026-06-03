@@ -12,7 +12,7 @@ import {
   processPrompt,
   saveTranscript
 } from "../tools/llm-chat-cli/src/cli.js";
-import { createSessionUsage } from "../tools/llm-chat-cli/src/usage.js";
+import { createSessionUsage } from "../tools/llm-chat-cli/src/domain/usage.js";
 
 async function withTempDir(run) {
   const previousCwd = process.cwd();

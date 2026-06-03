@@ -1,6 +1,7 @@
 import { stderr } from "node:process";
-import { DEFAULT_GATEWAY_MODEL } from "./chat-config.js";
-import { calculateRemainingFromLimits, getUsageLedger } from "./usage.js";
+import { DEFAULT_GATEWAY_MODEL } from "../infrastructure/chat-config.js";
+import { calculateRemainingFromLimits } from "../domain/usage.js";
+import { getUsageLedger } from "./usage.js";
 
 export function createStatusState({
   sessionUsage,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveSyncStatusModel } from "../tools/llm-chat-cli/src/sync-status.js";
+import { deriveSyncStatusModel } from "../tools/llm-chat-cli/src/domain/sync-status.js";
 
 function basePayload(overrides = {}) {
   return {

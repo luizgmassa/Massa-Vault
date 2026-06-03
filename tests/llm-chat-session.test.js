@@ -5,7 +5,7 @@ import {
   createChatSession,
   loadTranscriptIntoSession,
   resetChatSession
-} from "../tools/llm-chat-cli/src/chat-session.js";
+} from "../tools/llm-chat-cli/src/services/chat-session.js";
 
 test("createChatSession initializes mutable chat state and resetChatSession clears conversation data", () => {
   const session = createChatSession({ systemPrompt: "system prompt" });

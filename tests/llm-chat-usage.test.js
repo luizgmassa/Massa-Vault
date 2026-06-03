@@ -4,10 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  addUsageToLedger,
   calculateRemainingFromLimits,
+} from "../tools/llm-chat-cli/src/domain/usage.js";
+import {
+  addUsageToLedger,
   getUsageLedger
-} from "../tools/llm-chat-cli/src/usage.js";
+} from "../tools/llm-chat-cli/src/services/usage.js";
 
 test("usage ledger accumulates totals and per-model counters", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-usage-"));

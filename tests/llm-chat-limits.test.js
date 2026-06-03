@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseLiteLLMLimits } from "../tools/llm-chat-cli/src/litellm-limits.js";
+import { parseLiteLLMLimits } from "../tools/llm-chat-cli/src/infrastructure/litellm-limits.js";
 
 test("parseLiteLLMLimits extracts rpm/tpm per model", () => {
   const yaml = `

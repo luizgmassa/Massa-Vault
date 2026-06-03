@@ -12,7 +12,7 @@ async function loadInkStack(t) {
   try {
     const React = await import("react");
     const { render } = await import("ink-testing-library");
-    const inkRepl = await import("../tools/llm-chat-cli/src/ink-repl.js");
+    const inkRepl = await import("../tools/llm-chat-cli/src/cli/ink-repl.js");
     return {
       React,
       render,

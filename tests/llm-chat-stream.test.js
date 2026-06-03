@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSSEParser } from "../tools/llm-chat-cli/src/stream.js";
+import { createSSEParser } from "../tools/llm-chat-cli/src/infrastructure/stream.js";
 
 test("SSE parser handles split chunks and done events", () => {
   const events = [];

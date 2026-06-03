@@ -1,14 +1,12 @@
 import React, { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import {
-  buildGatewayOptions,
-  createChatSession,
-  createStartupWarmup,
-  executeCommand,
-  readLocalSyncStatusModel,
-  saveAndSyncSession
-} from "./cli.js";
+import { buildGatewayOptions } from "../infrastructure/chat-config.js";
+import { createChatSession } from "../services/chat-session.js";
+import { executeCommand } from "../services/command-executor.js";
+import { saveAndSyncSession } from "../services/transcript-store.js";
+import { readLocalSyncStatusModel } from "../infrastructure/sync-client.js";
+import { createStartupWarmup } from "./startup-warmup.js";
 import {
   getSlashCommandSuggestions as getSlashCommandSuggestionsImpl,
   modelStatusFromRouting as modelStatusFromRoutingImpl,
@@ -17,7 +15,7 @@ import {
   tabCompleteSlashCommandInput as tabCompleteSlashCommandInputImpl
 } from "./ink-controller.js";
 import { handleInkSubmit } from "./ink-submit-controller.js";
-import { readLiteLLMLimits } from "./litellm-limits.js";
+import { readLiteLLMLimits } from "../infrastructure/litellm-limits.js";
 
 export { moveSlashSuggestionSelection };
 
