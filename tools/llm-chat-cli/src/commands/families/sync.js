@@ -1,6 +1,25 @@
 import { createCommandSpec } from "../definitions.js";
 import { writeMessage } from "../shared.js";
 
+function resolveSyncStatusAction(deps, syncResult) {
+  if (!syncResult || typeof syncResult !== "object") {
+    return null;
+  }
+  if (typeof deps.syncStatusModelFromResult === "function") {
+    const derived = deps.syncStatusModelFromResult(syncResult);
+    if (derived && typeof derived === "object") {
+      return derived;
+    }
+  }
+  if (typeof deps.readLocalSyncStatusModel === "function") {
+    const fallback = deps.readLocalSyncStatusModel();
+    if (fallback && typeof fallback === "object") {
+      return fallback;
+    }
+  }
+  return null;
+}
+
 export function createSyncCommandSpecs(deps) {
   return [
     createCommandSpec("/sync", async ({ mode, handlers, state, onSaveAndSync }) => {
@@ -10,7 +29,18 @@ export function createSyncCommandSpecs(deps) {
         : "[chat] transcript already up to date";
       writeMessage(mode, handlers, transcriptMessage);
       writeMessage(mode, handlers, result.summary);
-      return { handled: true, exit: false };
+      const syncStatus =
+        mode === "plain" ? null : resolveSyncStatusAction(deps, result.syncResult);
+      return {
+        handled: true,
+        exit: false,
+        action: syncStatus
+          ? {
+              type: "refresh-sync-status",
+              syncStatus
+            }
+          : undefined
+      };
     }),
     createCommandSpec(
       "/sync status",

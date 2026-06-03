@@ -11,7 +11,16 @@ export function applyInkScreenAction({
   setSyncNotice,
   nextIdRef
 } = {}) {
-  if (!action || typeof action !== "object" || action.type !== "switch-screen") {
+  if (!action || typeof action !== "object") {
+    return false;
+  }
+
+  if (action.type === "refresh-sync-status") {
+    refreshSyncStatus(action.syncStatus);
+    return true;
+  }
+
+  if (action.type !== "switch-screen") {
     return false;
   }
 

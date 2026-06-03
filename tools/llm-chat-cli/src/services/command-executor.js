@@ -72,6 +72,7 @@ export function createDefaultCommandRuntime({
       saveAndSync,
       formatSyncFeedback: syncClient.formatSyncFeedback,
       readLocalSyncStatusModel: syncClient.readLocalSyncStatusModel,
+      syncStatusModelFromResult: syncClient.syncStatusModelFromResult,
       runNotesAutomationCommand: syncClient.runNotesAutomationCommand
     },
     historyClient,

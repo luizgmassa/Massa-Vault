@@ -37,6 +37,7 @@ export function colorForRole(role) {
 
 const ASSISTANT_PENDING_TOKEN = "__assistant_pending__";
 const HISTORY_PREVIEW_VIEWPORT_LINES = 24;
+const SYNC_STATUS_POLL_MS = 2000;
 
 function useAnimatedEllipsis(active, intervalMs = 250) {
   const frames = [".", "..", "..."];
@@ -713,15 +714,14 @@ export function InkChatApp({
   }, []);
 
   useEffect(() => {
-    if (screen !== "sync") return;
     refreshSyncStatus();
     const timer = setInterval(() => {
       refreshSyncStatus();
-    }, 2000);
+    }, SYNC_STATUS_POLL_MS);
     return () => {
       clearInterval(timer);
     };
-  }, [refreshSyncStatus, screen]);
+  }, [refreshSyncStatus]);
 
   useEffect(() => {
     if (!driver || typeof driver !== "object") return;

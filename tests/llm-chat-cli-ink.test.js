@@ -522,6 +522,122 @@ test("Ink shows thinking timer during delayed chat and animated delayed /sync co
   syncApp.unmount();
 });
 
+test("Ink /sync refresh action updates footer without opening sync screen", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: false,
+      sync: { status: "idle", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const driver = {};
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        driver,
+        chatCompletion: async () => ({
+          assistantText: "",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          routing: null
+        }),
+        commandExecutor: async ({ line, handlers }) => {
+          if (line === "/sync") {
+            handlers.message("[chat] transcript saved: /tmp/transcript.md");
+            handlers.message("[chat] sync status=paused conflicts=0 error=drive failed");
+            return {
+              handled: true,
+              exit: false,
+              action: {
+                type: "refresh-sync-status",
+                syncStatus: {
+                  status: "paused",
+                  running: false,
+                  paused: true,
+                  pid: null,
+                  reason: null,
+                  queuedReason: null,
+                  conflictCount: 0,
+                  backends: {
+                    git: { enabled: true, hasError: false },
+                    drive: { enabled: true, hasError: true }
+                  }
+                }
+              }
+            };
+          }
+          return { handled: true, exit: false };
+        }
+      })
+    );
+
+    await delay(20);
+    assert.match(app.lastFrame(), /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive ok \]/);
+
+    await driver.submit("/sync");
+    await delay(40);
+    const frame = app.lastFrame();
+    assert.match(frame, /transcript saved: \/tmp\/transcript\.md/i);
+    assert.match(frame, /sync status=paused conflicts=0 error=drive failed/i);
+    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive error \]/);
+    assert.doesNotMatch(frame, /sync status \(refresh every 2s\)/i);
+
+    app.unmount();
+  });
+});
+
+test("Ink footer polls sync state while conversation screen is active", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: false,
+      sync: { status: "idle", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        chatCompletion: async () => ({
+          assistantText: "",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          routing: null
+        })
+      })
+    );
+
+    await delay(40);
+    assert.match(app.lastFrame(), /\[ sync status: git ok \/ drive ok \]/);
+
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: true,
+      sync: {
+        status: "paused",
+        conflictCount: 0,
+        lastError: "drive failed"
+      },
+      lastGDriveError: "drive failed"
+    });
+
+    await delay(2300);
+    const frame = app.lastFrame();
+    assert.match(frame, /\[ sync status: git ok \/ drive error \]/);
+    assert.doesNotMatch(frame, /sync status \(refresh every 2s\)/i);
+
+    app.unmount();
+  });
+});
+
 test("Ink startup warmup starts once and first prompt does not wait", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;

@@ -70,6 +70,7 @@ export function createCommandRuntime({
     runNotesAutomationCommand: syncClient.runNotesAutomationCommand,
     setHistoryFlowConversations: historyClient.setHistoryFlowConversations,
     setHistoryFlowDatesRoot: historyClient.setHistoryFlowDatesRoot,
+    syncStatusModelFromResult: syncClient.syncStatusModelFromResult,
     usageFromTranscriptMetadata: historyClient.usageFromTranscriptMetadata
   };
 
@@ -172,6 +173,7 @@ export async function executeChatCommand(
       saveAndSync: onSaveAndSync,
       formatSyncFeedback: deps.formatSyncFeedback,
       readLocalSyncStatusModel: deps.readLocalSyncStatusModel,
+      syncStatusModelFromResult: deps.syncStatusModelFromResult,
       runNotesAutomationCommand: deps.runNotesAutomationCommand
     },
     historyClient: {

@@ -5,6 +5,17 @@ import { createDefaultCommandRuntime } from "../tools/llm-chat-cli/src/services/
 import { createChatSession } from "../tools/llm-chat-cli/src/services/chat-session.js";
 
 function createRuntime(overrides = {}) {
+  const defaultSyncStatus = {
+    status: "paused",
+    running: false,
+    paused: true,
+    conflictCount: 0,
+    backends: {
+      git: { enabled: true, hasError: false },
+      drive: { enabled: true, hasError: true }
+    }
+  };
+
   return createCommandRuntime({
     config: {
       defaultGatewayModel: "smart-router",
@@ -17,10 +28,12 @@ function createRuntime(overrides = {}) {
     syncClient: {
       saveAndSync: async () => ({
         saveResult: { path: "/tmp/chat.md", saved: true },
+        syncResult: { syntheticModel: defaultSyncStatus },
         summary: "[chat] sync status=idle conflicts=0"
       }),
       formatSyncFeedback: (result) => result.summary || "[chat] sync status=idle conflicts=0",
       readLocalSyncStatusModel: () => ({ status: "idle" }),
+      syncStatusModelFromResult: (result) => result.syntheticModel || { status: "idle" },
       runNotesAutomationCommand: () => ({ ok: true, output: "{}", payload: {} }),
       ...overrides.syncClient
     },
@@ -83,6 +96,8 @@ test("createCommandRuntime handles /sync via grouped clients", async () => {
   assert.equal(result.exit, false);
   assert.match(messages.join("\n"), /transcript saved/i);
   assert.match(messages.join("\n"), /sync status=idle/i);
+  assert.equal(result.action?.type, "refresh-sync-status");
+  assert.equal(result.action?.syncStatus?.backends?.drive?.hasError, true);
 });
 
 test("createCommandRuntime renders /usage and /routing without CLI globals", async () => {
@@ -142,11 +157,24 @@ test("createDefaultCommandRuntime wires default saveAndSync for /sync", async ()
   const runtime = createDefaultCommandRuntime({
     saveAndSync: async () => ({
       saveResult: { path: "/tmp/default-sync.md", saved: true },
+      syncResult: {
+        syntheticModel: {
+          status: "idle",
+          running: false,
+          paused: false,
+          conflictCount: 0,
+          backends: {
+            git: { enabled: true, hasError: false },
+            drive: { enabled: true, hasError: false }
+          }
+        }
+      },
       summary: "[chat] sync status=idle conflicts=0"
     }),
     syncClient: {
       formatSyncFeedback: (result) => result.summary || "[chat] sync status=idle conflicts=0",
       readLocalSyncStatusModel: () => ({ status: "idle" }),
+      syncStatusModelFromResult: (result) => result.syntheticModel || { status: "idle" },
       runNotesAutomationCommand: () => ({ ok: true, output: "{}", payload: {} })
     }
   });
@@ -167,4 +195,5 @@ test("createDefaultCommandRuntime wires default saveAndSync for /sync", async ()
   assert.equal(result.exit, false);
   assert.match(messages.join("\n"), /default-sync\.md/);
   assert.match(messages.join("\n"), /sync status=idle/i);
+  assert.equal(result.action?.type, "refresh-sync-status");
 });

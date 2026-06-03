@@ -104,11 +104,13 @@ export function createSyncClient({
       return { ok: false, output, payload: parseJsonOutput(output) };
     }
   };
+  const syncStatusModelFromResult = (result) => statusModelBuilder(result);
 
   return {
     formatSyncFeedback,
+    syncStatusModelFromResult,
     readLocalSyncStatusModel() {
-      return statusModelBuilder(runNotesAutomationCommand(["status"]));
+      return syncStatusModelFromResult(runNotesAutomationCommand(["status"]));
     },
     runNotesAutomationCommand
   };
@@ -118,3 +120,4 @@ const defaultSyncClient = createSyncClient();
 
 export const readLocalSyncStatusModel = defaultSyncClient.readLocalSyncStatusModel;
 export const runNotesAutomationCommand = defaultSyncClient.runNotesAutomationCommand;
+export const syncStatusModelFromResult = defaultSyncClient.syncStatusModelFromResult;
