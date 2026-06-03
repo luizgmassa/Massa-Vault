@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/classifier.js";
+import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/domain/classifier.js";
 import {
   parseLiteLLMModelConfig,
   resolveModelRoute
-} from "../tools/router-gateway/src/model-resolution.js";
-import { forwardRequest } from "../tools/router-gateway/src/proxy.js";
+} from "../tools/router-gateway/src/domain/model-resolution.js";
+import { forwardRequest } from "../tools/router-gateway/src/infrastructure/proxy.js";
 
 const litellmConfig = `
 model_list:

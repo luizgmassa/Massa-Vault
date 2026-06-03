@@ -9,8 +9,8 @@ import {
   prepareGoogleDriveSync,
   syncToGoogleDrive,
   validateRcloneRemotePath
-} from "../tools/notes-automation/src/gdrive.js";
-import { PROTECTED_ARTIFACT_GLOBS } from "../tools/notes-automation/src/protected-artifacts.js";
+} from "../tools/notes-automation/src/infrastructure/gdrive.js";
+import { PROTECTED_ARTIFACT_GLOBS } from "../tools/notes-automation/src/domain/protected-artifacts.js";
 
 function createResyncRequiredError(
   message = "CRITICAL: cannot find prior Path1 listing file. Must run --resync to recover"

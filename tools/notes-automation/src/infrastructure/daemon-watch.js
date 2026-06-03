@@ -1,24 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isProtectedArtifactPath } from "./protected-artifacts.js";
+import { matchesGlob } from "../domain/globs.js";
+import { isProtectedArtifactPath } from "../domain/protected-artifacts.js";
 
-function toPosix(p) {
-  return p.split(path.sep).join("/");
-}
-
-function escapeRegex(input) {
-  return input.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-}
-
-function matchesGlob(filePath, globs) {
-  const p = toPosix(filePath);
-  return globs.some((glob) => {
-    let pattern = escapeRegex(toPosix(glob));
-    pattern = pattern.replace(/\*\*/g, "###DOUBLESTAR###");
-    pattern = pattern.replace(/\*/g, "[^/]*");
-    pattern = pattern.replace(/###DOUBLESTAR###/g, ".*");
-    return new RegExp(`^${pattern}$`).test(p);
-  });
+function toPosix(filePath) {
+  return String(filePath || "").split(path.sep).join("/");
 }
 
 export function recordWatchFailure(service, watchPath, error) {

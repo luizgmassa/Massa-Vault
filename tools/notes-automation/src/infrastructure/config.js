@@ -19,7 +19,7 @@ import {
   DEFAULT_VAULT_PATH
 } from "./config-constants.js";
 import { createDefaultConfigDocument } from "./config-definition.js";
-import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
+import { PROTECTED_ARTIFACT_GLOBS } from "../domain/protected-artifacts.js";
 
 function toNumber(value, fallback) {
   const parsed = Number(value);

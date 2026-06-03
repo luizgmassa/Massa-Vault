@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { NotesAutomationService } from "../tools/notes-automation/src/service.js";
-import { readState } from "../tools/notes-automation/src/state.js";
+import { NotesAutomationService } from "../tools/notes-automation/src/services/daemon-service.js";
+import { readState } from "../tools/notes-automation/src/infrastructure/state.js";
 
 function createConfig(tempDir, vaultPath, overrides = {}) {
   const configPath = path.join(tempDir, "notes.config.json");

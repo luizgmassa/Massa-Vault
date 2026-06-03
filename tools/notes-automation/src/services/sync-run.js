@@ -10,19 +10,19 @@ import {
   gitReadStageFile,
   gitTrackedFiles,
   gitWorkingTreeChanges
-} from "./git.js";
-import { syncToGoogleDrive } from "./gdrive.js";
+} from "../infrastructure/git.js";
+import { syncToGoogleDrive } from "../infrastructure/gdrive.js";
 import {
   GDRIVE_IMPORT_CLASSIFICATION,
   GDRIVE_IMPORT_DANGEROUS_ALERT,
   GDRIVE_IMPORT_DANGEROUS_ERROR,
   requiresGDriveImportReview,
   resolveGDriveImportCommitSubject
-} from "./gdrive-import.js";
-import { normalizeRelativePath } from "./protected-artifacts.js";
-import { readState } from "./state.js";
+} from "../domain/gdrive-import.js";
+import { normalizeRelativePath } from "../domain/protected-artifacts.js";
+import { readState } from "../infrastructure/state.js";
 
-export { classifyGDriveImport } from "./gdrive-import.js";
+export { classifyGDriveImport } from "../domain/gdrive-import.js";
 
 function nowIso(clock) {
   return clock?.nowIso ? clock.nowIso() : new Date().toISOString();

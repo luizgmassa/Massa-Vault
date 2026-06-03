@@ -12,11 +12,14 @@ import {
   DEFAULT_GIT_MODE,
   DEFAULT_GIT_REMOTE,
   DEFAULT_SYNC_STRATEGY
-} from "./notes-automation/src/config-constants.js";
-import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/git.js";
-import { listRcloneRemotes, validateRcloneRemotePath } from "./notes-automation/src/gdrive.js";
-import { GDRIVE_REMOTE_PATH_EXAMPLE } from "./notes-automation/src/gdrive-constants.js";
-import { createConfigDocument } from "./notes-automation/src/config-definition.js";
+} from "./notes-automation/src/infrastructure/config-constants.js";
+import { gitHasRepo, gitInit, gitRemoteSetUrl } from "./notes-automation/src/infrastructure/git.js";
+import {
+  listRcloneRemotes,
+  validateRcloneRemotePath
+} from "./notes-automation/src/infrastructure/gdrive.js";
+import { GDRIVE_REMOTE_PATH_EXAMPLE } from "./notes-automation/src/infrastructure/gdrive-constants.js";
+import { createConfigDocument } from "./notes-automation/src/infrastructure/config-definition.js";
 import { loadLocalEnv } from "./shared/env.js";
 
 loadLocalEnv();

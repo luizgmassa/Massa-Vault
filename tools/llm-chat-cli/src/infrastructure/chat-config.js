@@ -1,5 +1,5 @@
 import path from "node:path";
-import { loadConfig } from "../../../notes-automation/src/config.js";
+import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
 import { loadLocalEnv } from "../../../shared/env.js";
 import {
   NOTES_AUTOMATION_CLI_PATH,

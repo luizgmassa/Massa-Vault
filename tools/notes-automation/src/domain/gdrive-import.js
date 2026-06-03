@@ -1,6 +1,9 @@
 import path from "node:path";
-import { DEFAULT_GDRIVE_IMPORT_THRESHOLDS } from "./config-constants.js";
-import { isProtectedArtifactPath, normalizeRelativePath } from "./protected-artifacts.js";
+import { DEFAULT_GDRIVE_IMPORT_THRESHOLDS } from "./gdrive-import-thresholds.js";
+import {
+  isProtectedArtifactPath,
+  normalizeRelativePath
+} from "./protected-artifacts.js";
 
 export const GDRIVE_IMPORT_CLASSIFICATION = Object.freeze({
   NORMAL: "normal",

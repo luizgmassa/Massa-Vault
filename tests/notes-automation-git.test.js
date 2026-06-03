@@ -8,7 +8,7 @@ import {
   gitFetchBranch,
   gitRebaseOnto,
   isRebaseConflictOutput
-} from "../tools/notes-automation/src/git.js";
+} from "../tools/notes-automation/src/infrastructure/git.js";
 
 function withTempDir(run) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-git-"));

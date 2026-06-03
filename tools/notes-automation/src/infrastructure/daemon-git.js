@@ -19,7 +19,7 @@ import {
   PROTECTED_GIT_PATHS,
   isProtectedArtifactPath,
   normalizeRelativePath
-} from "./protected-artifacts.js";
+} from "../domain/protected-artifacts.js";
 
 export function ensureVaultGitRepo(service) {
   if (!service.config.git.enabled) return true;

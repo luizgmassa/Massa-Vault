@@ -1,5 +1,5 @@
 import { stdin as input, stdout as output } from "node:process";
-import { loadConfig } from "../../../notes-automation/src/config.js";
+import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
 import {
   DEFAULT_CONFIG_PATH,
   buildGatewayOptions,

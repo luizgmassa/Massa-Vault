@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "../tools/notes-automation/src/config.js";
-import { createConfigDocument } from "../tools/notes-automation/src/config-definition.js";
+import { loadConfig } from "../tools/notes-automation/src/infrastructure/config.js";
+import { createConfigDocument } from "../tools/notes-automation/src/infrastructure/config-definition.js";
 
 const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_ENABLED",

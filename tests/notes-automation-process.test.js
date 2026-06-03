@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isProcessRunning } from "../tools/notes-automation/src/service.js";
+import { isProcessRunning } from "../tools/notes-automation/src/services/daemon-service.js";
 
 test("isProcessRunning treats EPERM as running", () => {
   const originalKill = process.kill;

@@ -1,4 +1,4 @@
-import { loadConfig } from "../../../notes-automation/src/config.js";
+import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
 import { DEFAULT_CONFIG_PATH } from "../infrastructure/chat-config.js";
 import {
   ensureSearchIndex,

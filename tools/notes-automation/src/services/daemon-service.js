@@ -1,7 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { loadConfig } from "./config.js";
+import { matchesGlob } from "../domain/globs.js";
+import { createSyncState } from "../domain/sync-state.js";
+import { loadConfig } from "../infrastructure/config.js";
 import {
   captureGDriveImportBaseline as captureGDriveImportBaselineImpl,
   collectInternalArtifactPaths as collectInternalArtifactPathsImpl,
@@ -15,8 +16,8 @@ import {
   enforceProtectedArtifacts as enforceProtectedArtifactsImpl,
   ensureVaultGitRepo as ensureVaultGitRepoImpl,
   isInternalArtifactPath as isInternalArtifactPathImpl
-} from "./daemon-git.js";
-import { pollRequestedAction } from "./daemon-controller.js";
+} from "../infrastructure/daemon-git.js";
+import { pollRequestedAction } from "../infrastructure/daemon-controller.js";
 import {
   captureTrackedSnapshot as captureTrackedSnapshotImpl,
   pollForChanges as pollForChangesImpl,
@@ -25,10 +26,8 @@ import {
   startPollingFallback as startPollingFallbackImpl,
   walkDirectory as walkDirectoryImpl,
   watchOne as watchOneImpl
-} from "./daemon-watch.js";
-import {
-  isProtectedArtifactPath
-} from "./protected-artifacts.js";
+} from "../infrastructure/daemon-watch.js";
+import { isProtectedArtifactPath } from "../domain/protected-artifacts.js";
 import {
   classifyGDriveImport as classifyGDriveImportImpl,
   createNotesAutomationAdapters,
@@ -40,28 +39,7 @@ import {
   runQueuedSync,
   syncGoogleDriveInbound as syncGoogleDriveInboundImpl
 } from "./sync-run.js";
-import { readState, writeState } from "./state.js";
-
-function toPosix(p) {
-  return p.split(path.sep).join("/");
-}
-
-function escapeRegex(input) {
-  return input.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-}
-
-export function globToRegex(glob) {
-  let pattern = escapeRegex(toPosix(glob));
-  pattern = pattern.replace(/\*\*/g, "###DOUBLESTAR###");
-  pattern = pattern.replace(/\*/g, "[^/]*");
-  pattern = pattern.replace(/###DOUBLESTAR###/g, ".*");
-  return new RegExp(`^${pattern}$`);
-}
-
-export function matchesGlob(filePath, globs) {
-  const p = toPosix(filePath);
-  return globs.some((glob) => globToRegex(glob).test(p));
-}
+import { readState, writeState } from "../infrastructure/state.js";
 
 function isProcessRunning(pid) {
   if (!pid || !Number.isInteger(pid)) return false;
@@ -82,26 +60,6 @@ function summarizeCommandOutput(value, { maxLines = 20, maxChars = 4000 } = {}) 
   const clippedLines = text.split(/\r?\n/).slice(-maxLines).join("\n");
   if (clippedLines.length <= maxChars) return clippedLines;
   return clippedLines.slice(-maxChars);
-}
-
-function createSyncState(overrides = {}) {
-  return {
-    status: "idle",
-    reason: null,
-    queuedReason: null,
-    startedAt: null,
-    finishedAt: null,
-    lastSuccessAt: null,
-    lastError: null,
-    conflictCount: 0,
-    conflicts: [],
-    lastGDriveImportClassification: null,
-    lastGDriveImportSummary: null,
-    lastPreGDriveSnapshotCommit: null,
-    preGDriveSnapshotSkipped: null,
-    reviewNeeded: false,
-    ...overrides
-  };
 }
 
 export class NotesAutomationService {
@@ -405,14 +363,6 @@ export class NotesAutomationService {
 export function startService(configPath) {
   const service = new NotesAutomationService(configPath);
   service.start();
-
-  const stop = async () => {
-    await service.shutdown();
-    process.exit(0);
-  };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
-
   return service;
 }
 

@@ -1,4 +1,4 @@
-import { PROTECTED_ARTIFACT_GLOBS } from "./protected-artifacts.js";
+import { PROTECTED_ARTIFACT_GLOBS } from "../domain/protected-artifacts.js";
 
 export const GDRIVE_REMOTE_PATH_EXAMPLE = "Personal:Obsidian";
 export const GDRIVE_RESYNC_MARKER_SEGMENTS = Object.freeze([

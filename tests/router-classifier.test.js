@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyRequest } from "../tools/router-gateway/src/classifier.js";
+import { classifyRequest } from "../tools/router-gateway/src/domain/classifier.js";
 
 const policy = {
   confidenceFloor: 0.55,

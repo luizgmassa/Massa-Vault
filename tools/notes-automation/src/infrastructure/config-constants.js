@@ -1,4 +1,5 @@
 import path from "node:path";
+export { DEFAULT_GDRIVE_IMPORT_THRESHOLDS } from "../domain/gdrive-import-thresholds.js";
 
 export const DEFAULT_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 export const DEFAULT_LOCAL_CONFIG_PATH = path.resolve("config/notes-automation.local.json");
@@ -26,10 +27,3 @@ export const ALLOWED_GDRIVE_RESYNC_MODES = Object.freeze([
   "older"
 ]);
 export const ALLOWED_GDRIVE_RESYNC_MODE_SET = new Set(ALLOWED_GDRIVE_RESYNC_MODES);
-
-export const DEFAULT_GDRIVE_IMPORT_THRESHOLDS = Object.freeze({
-  suspiciousFileThreshold: 20,
-  suspiciousDeleteThreshold: 5,
-  suspiciousPercentThreshold: 10,
-  dangerousPercentThreshold: 50
-});
