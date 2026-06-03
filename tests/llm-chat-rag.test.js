@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createStartupWarmup,
   createReplState,
@@ -13,6 +14,22 @@ import {
   saveTranscript
 } from "../tools/llm-chat-cli/src/cli.js";
 import { createSessionUsage } from "../tools/llm-chat-cli/src/domain/usage.js";
+import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/domain/classifier.js";
+import {
+  parseLiteLLMModelConfig,
+  resolveModelRoute
+} from "../tools/router-gateway/src/domain/model-resolution.js";
+
+const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(TESTS_DIR, "..");
+const ROUTER_POLICY_PATH = path.join(REPO_ROOT, ".litellm", "router.json");
+const LITELLM_CONFIG_PATH = path.join(REPO_ROOT, ".litellm", "litellm-config.yaml");
+const GENERAL_COMPLEX_PROMPT_SEED =
+  "Summarize stakeholder goals, tradeoffs, open questions, and delivery priorities in plain language. ";
+const GENERAL_COMPLEX_MIN_CHARS = 1600;
+const CODE_COMPLEX_PROMPT_SEED =
+  "debug typescript stacktrace for async handler crash and explain precise root cause plus fix steps. ";
+const CODE_COMPLEX_MIN_CHARS = 1200;
 
 async function withTempDir(run) {
   const previousCwd = process.cwd();
@@ -531,9 +548,9 @@ test("executeCommand treats /save and /help as unknown commands", async () => {
   assert.match(messages.join("\n"), /unknown command: \/help/i);
 });
 
-test("createStartupWarmup starts once, reuses promise, and sends hidden non-stream request", async () => {
+test("createStartupWarmup starts once, reuses promise, and sends hidden non-stream requests", async () => {
   let calls = 0;
-  let capturedBody = null;
+  const capturedBodies = [];
   let resolveWarmup;
   const gate = new Promise((resolve) => {
     resolveWarmup = resolve;
@@ -541,7 +558,7 @@ test("createStartupWarmup starts once, reuses promise, and sends hidden non-stre
   const warmup = createStartupWarmup({
     chatCompletion: async ({ body }) => {
       calls += 1;
-      capturedBody = body;
+      capturedBodies.push(body);
       await gate;
       return { assistantText: "", usage: null, routing: null };
     }
@@ -560,10 +577,68 @@ test("createStartupWarmup starts once, reuses promise, and sends hidden non-stre
   resolveWarmup();
   await waitPromise;
 
-  assert.equal(calls, 1);
-  assert.equal(capturedBody.model, "smart-router");
-  assert.equal(capturedBody.stream, false);
-  assert.deepEqual(capturedBody.messages, [{ role: "user", content: "warmup" }]);
+  assert.equal(calls, 5);
+  assert.deepEqual(
+    capturedBodies.map((body) => body.model),
+    Array.from({ length: 5 }, () => "smart-router")
+  );
+  assert.deepEqual(
+    capturedBodies.map((body) => body.stream),
+    Array.from({ length: 5 }, () => false)
+  );
+  assert.deepEqual(
+    capturedBodies.map((body) => body.max_tokens),
+    Array.from({ length: 5 }, () => 1)
+  );
+  assert.deepEqual(capturedBodies[0].messages, [
+    { role: "user", content: "Summarize today priorities." }
+  ]);
+  assert.ok(capturedBodies[1].messages[0].content.startsWith(GENERAL_COMPLEX_PROMPT_SEED));
+  assert.ok(capturedBodies[1].messages[0].content.length >= GENERAL_COMPLEX_MIN_CHARS);
+  assert.deepEqual(capturedBodies[2].messages, [
+    { role: "user", content: "debug typescript stacktrace" }
+  ]);
+  assert.ok(capturedBodies[3].messages[0].content.startsWith(CODE_COMPLEX_PROMPT_SEED));
+  assert.ok(capturedBodies[3].messages[0].content.length >= CODE_COMPLEX_MIN_CHARS);
+  assert.deepEqual(capturedBodies[4].messages, [
+    { role: "user", content: "analyze this image and transcribe this audio" }
+  ]);
+});
+
+test("createStartupWarmup prompts resolve to active router lanes and concrete models", async () => {
+  const capturedBodies = [];
+  const warmup = createStartupWarmup({
+    chatCompletion: async ({ body }) => {
+      capturedBodies.push(body);
+      return { assistantText: "", usage: null, routing: null };
+    }
+  });
+
+  const result = await warmup.start();
+  assert.equal(result.ok, true);
+
+  const policy = loadPolicy(ROUTER_POLICY_PATH);
+  const models = parseLiteLLMModelConfig(fs.readFileSync(LITELLM_CONFIG_PATH, "utf8"));
+  const resolutions = capturedBodies.map((body) => {
+    const routing = classifyRequest(body, policy);
+    const resolved = resolveModelRoute({
+      targetModel: routing.targetModel,
+      body,
+      models
+    });
+    return {
+      targetModel: routing.targetModel,
+      routedModel: resolved.routedModel
+    };
+  });
+
+  assert.deepEqual(resolutions, [
+    { targetModel: "smart-router-general", routedModel: "general_local" },
+    { targetModel: "smart-router-general", routedModel: "general_cloud" },
+    { targetModel: "smart-router-code", routedModel: "code_local" },
+    { targetModel: "smart-router-code", routedModel: "code_cloud" },
+    { targetModel: "smart-router-multimodal", routedModel: "multimodal_cloud" }
+  ]);
 });
 
 test("createStartupWarmup connection failures are non-fatal and silent", async () => {
@@ -580,6 +655,7 @@ test("createStartupWarmup connection failures are non-fatal and silent", async (
   const result = await warmup.wait();
   assert.equal(result.ok, false);
   assert.equal(result.error, error);
+  assert.equal(result.results.length, 5);
   assert.equal(warnings.length, 0);
 });
 
@@ -595,6 +671,7 @@ test("createStartupWarmup non-connectivity failures still emit warning", async (
   warmup.start();
   const result = await warmup.wait();
   assert.equal(result.ok, false);
+  assert.equal(result.results.length, 5);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /startup warmup failed/i);
   assert.match(warnings[0], /continuing without warmup/i);
