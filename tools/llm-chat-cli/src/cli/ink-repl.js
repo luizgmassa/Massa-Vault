@@ -16,6 +16,11 @@ import {
 } from "./ink-controller.js";
 import { handleInkSubmit } from "./ink-submit-controller.js";
 import { readLiteLLMLimits } from "../infrastructure/litellm-limits.js";
+import {
+  createInfoPanelState,
+  formatSyncStatusScreenLines
+} from "../domain/info-screen.js";
+import { placeholderForBlockedScreen } from "./ink-screen-controller.js";
 
 export { moveSlashSuggestionSelection };
 
@@ -104,23 +109,6 @@ function compactSyncColor(label) {
   if (label === "error") return "red";
   if (label === "running") return "yellow";
   return "gray";
-}
-
-function backendStatusLabel(backend) {
-  if (backend?.hasError) return "ERROR";
-  if (backend?.enabled === false) return "DISABLED";
-  return "OK";
-}
-
-function formatTimestamp(value) {
-  const text = String(value || "").trim();
-  return text || "-";
-}
-
-function splitSnippet(value) {
-  const text = String(value || "").trim();
-  if (!text) return [];
-  return text.split(/\r?\n/).slice(-10);
 }
 
 function modelStatusFromRouting(routing) {
@@ -382,6 +370,16 @@ export function InkChatApp({
   }));
   const [historyNotice, setHistoryNotice] = useState("");
   const [historyScrollOffset, setHistoryScrollOffset] = useState(0);
+  const [panelScreen, setPanelScreen] = useState(() =>
+    createInfoPanelState({
+      title: "Info",
+      lines: ["Run `/` to open commands."],
+      commandHint: "slash commands"
+    })
+  );
+  const [panelNotice, setPanelNotice] = useState("");
+  const [panelScrollOffset, setPanelScrollOffset] = useState(0);
+  const [syncScrollOffset, setSyncScrollOffset] = useState(0);
   const [modelStatus, setModelStatus] = useState(() => modelStatusFromRouting(null));
   const [liveTokenCount, setLiveTokenCount] = useState(() =>
     Number(sessionRef.current.estimatedTokensRef.value || 0)
@@ -565,6 +563,7 @@ export function InkChatApp({
         },
         ui: {
           assistantPendingToken: ASSISTANT_PENDING_TOKEN,
+          panelScreen,
           setBusyLabel,
           setHistoryNotice,
           setHistoryPanel,
@@ -572,6 +571,9 @@ export function InkChatApp({
           setInputValue,
           setIsBusy,
           setItems,
+          setPanelNotice,
+          setPanelScreen,
+          setPanelScrollOffset,
           setScreen,
           setSyncNotice
         },
@@ -587,6 +589,7 @@ export function InkChatApp({
       createAssistantMessage,
       finalizeExit,
       isBusy,
+      panelScreen,
       slashSelectionIndex,
       slashSuggestions,
       showSlashSuggestions,
@@ -606,14 +609,36 @@ export function InkChatApp({
     if (isBusy) {
       return;
     }
-    if (screen === "history" && historyPanel.scrollable && (key.upArrow || key.downArrow)) {
-      const panelLines = Array.isArray(historyPanel.lines) ? historyPanel.lines : [];
-      const renderedCount = historyPanel.renderMarkdown
-        ? markdownLines(panelLines.join("\n")).length
-        : panelLines.length;
+    const syncScreenPanel = createInfoPanelState({
+      id: "sync-status",
+      title: "Sync status",
+      lines: formatSyncStatusScreenLines(syncStatus),
+      scrollable: true,
+      commandHint: "/sync commands"
+    });
+    const activeScreenPanel =
+      screen === "history"
+        ? historyPanel
+        : screen === "panel"
+          ? panelScreen
+          : screen === "sync"
+            ? syncScreenPanel
+            : null;
+    if (activeScreenPanel?.scrollable && (key.upArrow || key.downArrow)) {
+      const panelLines = Array.isArray(activeScreenPanel.lines) ? activeScreenPanel.lines : [];
+      const renderedCount =
+        activeScreenPanel.renderMarkdown !== false
+          ? markdownLines(panelLines.join("\n")).length
+          : panelLines.length;
       const maxOffset = Math.max(0, renderedCount - HISTORY_PREVIEW_VIEWPORT_LINES);
       const delta = key.downArrow ? 1 : -1;
-      setHistoryScrollOffset((current) => clamp(current + delta, 0, maxOffset));
+      if (screen === "history") {
+        setHistoryScrollOffset((current) => clamp(current + delta, 0, maxOffset));
+      } else if (screen === "panel") {
+        setPanelScrollOffset((current) => clamp(current + delta, 0, maxOffset));
+      } else if (screen === "sync") {
+        setSyncScrollOffset((current) => clamp(current + delta, 0, maxOffset));
+      }
       return;
     }
     if (screen !== "conversation") {
@@ -658,9 +683,11 @@ export function InkChatApp({
     historyPanel.scrollable,
     inputValue,
     isBusy,
+    panelScreen,
     screen,
     showSlashSuggestions,
-    slashSuggestions
+    slashSuggestions,
+    syncStatus
   ]);
 
   useEffect(() => {
@@ -679,6 +706,33 @@ export function InkChatApp({
       setHistoryScrollOffset(maxOffset);
     }
   }, [historyPanel.lines, historyPanel.renderMarkdown, historyPanel.scrollable, historyScrollOffset]);
+
+  useEffect(() => {
+    if (!panelScreen.scrollable) {
+      if (panelScrollOffset !== 0) {
+        setPanelScrollOffset(0);
+      }
+      return;
+    }
+    const panelLines = Array.isArray(panelScreen.lines) ? panelScreen.lines : [];
+    const renderedCount =
+      panelScreen.renderMarkdown !== false
+        ? markdownLines(panelLines.join("\n")).length
+        : panelLines.length;
+    const maxOffset = Math.max(0, renderedCount - HISTORY_PREVIEW_VIEWPORT_LINES);
+    if (panelScrollOffset > maxOffset) {
+      setPanelScrollOffset(maxOffset);
+    }
+  }, [panelScreen.lines, panelScreen.renderMarkdown, panelScreen.scrollable, panelScrollOffset]);
+
+  useEffect(() => {
+    const syncLines = formatSyncStatusScreenLines(syncStatus);
+    const renderedCount = markdownLines(syncLines.join("\n")).length;
+    const maxOffset = Math.max(0, renderedCount - HISTORY_PREVIEW_VIEWPORT_LINES);
+    if (syncScrollOffset > maxOffset) {
+      setSyncScrollOffset(maxOffset);
+    }
+  }, [syncStatus, syncScrollOffset]);
 
   useEffect(() => {
     const handleSignal = () => {
@@ -738,89 +792,13 @@ export function InkChatApp({
     };
   }, [driver, finalizeExit, handleSubmit, screen]);
 
+  useEffect(() => {
+    sessionRef.current.activeScreen = screen;
+  }, [screen]);
+
   const visibleItems = items.slice(-20);
-  const backendGit = syncStatus?.backends?.git || { enabled: null, hasError: false };
-  const backendDrive = syncStatus?.backends?.drive || { enabled: null, hasError: false };
   const gitFooterLabel = compactSyncLabel(syncStatus, "git");
   const driveFooterLabel = compactSyncLabel(syncStatus, "drive");
-  const syncSections = [
-    {
-      id: "daemon",
-      title: "daemon",
-      color: "cyan",
-      lines: [
-        `running: ${syncStatus?.running ? "yes" : "no"} pid: ${syncStatus?.pid ?? "-"}`,
-        `paused: ${syncStatus?.paused ? "yes" : "no"}`,
-        `status: ${syncStatus?.status || "idle"} reason: ${syncStatus?.reason || "-"}`,
-        `queued_reason: ${syncStatus?.queuedReason || "-"}`,
-        `conflicts: ${Number(syncStatus?.conflictCount || 0)}`
-      ]
-    },
-    {
-      id: "git",
-      title: "github (git)",
-      color: "yellow",
-      lines: [
-        `state: ${backendStatusLabel(backendGit)}`,
-        `enabled: ${backendGit?.enabled === false ? "no" : backendGit?.enabled === true ? "yes" : "unknown"}`,
-        `reasons: ${(backendGit?.reasons || []).length ? backendGit.reasons.join(", ") : "-"}`,
-        `last_pull_at: ${formatTimestamp(syncStatus?.lastPullAt)}`,
-        `last_push_at: ${formatTimestamp(syncStatus?.lastPushAt)}`
-      ]
-    },
-    {
-      id: "drive",
-      title: "google drive",
-      color: "green",
-      lines: [
-        `state: ${backendStatusLabel(backendDrive)}`,
-        `enabled: ${backendDrive?.enabled === false ? "no" : backendDrive?.enabled === true ? "yes" : "unknown"}`,
-        `reasons: ${(backendDrive?.reasons || []).length ? backendDrive.reasons.join(", ") : "-"}`,
-        `import: ${backendDrive?.gdriveImport || "-"}`,
-        `review_needed: ${backendDrive?.reviewNeeded ? "yes" : "no"}`,
-        `requires_resync: ${backendDrive?.requiresResync ? "yes" : "no"}`,
-        `auto_resync: ${backendDrive?.autoResyncAttempted ? (backendDrive?.autoResyncApplied ? "applied" : "attempted") : "none"}`
-      ]
-    },
-    {
-      id: "timestamps",
-      title: "timestamps",
-      color: "magenta",
-      lines: [
-        `started_at: ${formatTimestamp(syncStatus?.startedAt)}`,
-        `finished_at: ${formatTimestamp(syncStatus?.finishedAt)}`,
-        `last_success_at: ${formatTimestamp(syncStatus?.lastSuccessAt)}`,
-        `updated_at: ${formatTimestamp(syncStatus?.updatedAt)}`,
-        `last_gdrive_attempt_at: ${formatTimestamp(syncStatus?.lastGDriveAttemptAt)}`,
-        `last_gdrive_sync_at: ${formatTimestamp(syncStatus?.lastGDriveSyncAt)}`,
-        `last_auto_resync_at: ${formatTimestamp(syncStatus?.lastGDriveAutoResyncAt)}`
-      ]
-    }
-  ];
-  const syncSnippets = [
-    { id: "alert", title: "alert", color: "yellow", lines: splitSnippet(syncStatus?.alert) },
-    { id: "sync-error", title: "sync error", color: "red", lines: splitSnippet(syncStatus?.lastError) },
-    { id: "git-pull", title: "git pull error", color: "red", lines: splitSnippet(backendGit?.lastPullError) },
-    { id: "git-push", title: "git push error", color: "red", lines: splitSnippet(backendGit?.lastPushError) },
-    {
-      id: "drive-error",
-      title: "drive error",
-      color: "red",
-      lines: splitSnippet(backendDrive?.lastGDriveError)
-    },
-    {
-      id: "drive-init-error",
-      title: "drive initial error",
-      color: "red",
-      lines: splitSnippet(backendDrive?.lastGDriveInitialError)
-    },
-    {
-      id: "drive-output",
-      title: "drive output",
-      color: "red",
-      lines: splitSnippet(backendDrive?.lastGDriveOutput)
-    }
-  ].filter((entry) => entry.lines.length);
 
   const renderItem = (item) => {
     if (item.kind === "panel") {
@@ -875,33 +853,72 @@ export function InkChatApp({
     `Auth: ${gatewayRef.current.apiKey ? "On" : "Off"}`;
   const syncScreenActive = screen === "sync";
   const historyScreenActive = screen === "history";
-  const historyPanelLines = Array.isArray(historyPanel.lines) ? historyPanel.lines : [];
-  const historyRenderedLines = historyPanel.renderMarkdown
-    ? markdownLines(historyPanelLines.join("\n"))
-    : historyPanelLines.map((line) => ({ text: String(line || "") }));
-  const historyViewportSize = historyPanel.scrollable
+  const panelScreenActive = screen === "panel";
+  const activeScreenPanel = syncScreenActive
+    ? createInfoPanelState({
+        id: "sync-status",
+        title: "Sync status",
+        lines: formatSyncStatusScreenLines(syncStatus),
+        scrollable: true,
+        commandHint: "/sync commands"
+      })
+    : historyScreenActive
+      ? historyPanel
+      : panelScreenActive
+        ? panelScreen
+        : null;
+  const activeScreenPanelLines = Array.isArray(activeScreenPanel?.lines)
+    ? activeScreenPanel.lines
+    : [];
+  const activeScreenRenderedLines = activeScreenPanel
+    ? activeScreenPanel.renderMarkdown !== false
+      ? markdownLines(activeScreenPanelLines.join("\n"))
+      : activeScreenPanelLines.map((line) => ({ text: String(line || "") }))
+    : [];
+  const activeScreenViewportSize = activeScreenPanel?.scrollable
     ? HISTORY_PREVIEW_VIEWPORT_LINES
-    : historyRenderedLines.length;
-  const maxHistoryScrollOffset = Math.max(0, historyRenderedLines.length - historyViewportSize);
-  const safeHistoryScrollOffset = historyPanel.scrollable
-    ? clamp(historyScrollOffset, 0, maxHistoryScrollOffset)
+    : activeScreenRenderedLines.length;
+  const maxActiveScreenScrollOffset = Math.max(
+    0,
+    activeScreenRenderedLines.length - activeScreenViewportSize
+  );
+  const rawActiveScreenScrollOffset = historyScreenActive
+    ? historyScrollOffset
+    : panelScreenActive
+      ? panelScrollOffset
+      : syncScreenActive
+        ? syncScrollOffset
+        : 0;
+  const safeActiveScreenScrollOffset = activeScreenPanel?.scrollable
+    ? clamp(rawActiveScreenScrollOffset, 0, maxActiveScreenScrollOffset)
     : 0;
-  const visibleHistoryRenderedLines = historyPanel.scrollable
-    ? historyRenderedLines.slice(safeHistoryScrollOffset, safeHistoryScrollOffset + historyViewportSize)
-    : historyRenderedLines;
-  const historyScrollStart = historyRenderedLines.length ? safeHistoryScrollOffset + 1 : 0;
-  const historyScrollEnd = historyRenderedLines.length
-    ? Math.min(safeHistoryScrollOffset + historyViewportSize, historyRenderedLines.length)
+  const visibleActiveScreenRenderedLines = activeScreenPanel?.scrollable
+    ? activeScreenRenderedLines.slice(
+        safeActiveScreenScrollOffset,
+        safeActiveScreenScrollOffset + activeScreenViewportSize
+      )
+    : activeScreenRenderedLines;
+  const activeScreenScrollStart = activeScreenRenderedLines.length
+    ? safeActiveScreenScrollOffset + 1
+    : 0;
+  const activeScreenScrollEnd = activeScreenRenderedLines.length
+    ? Math.min(
+        safeActiveScreenScrollOffset + activeScreenViewportSize,
+        activeScreenRenderedLines.length
+      )
     : 0;
   const screenBusyNotice = isBusy ? `${busyLabel || "working"}${inputBusyEllipsis || "."}` : "";
-  const syncPanelNotice = screenBusyNotice || syncNotice;
-  const historyPanelNotice = screenBusyNotice || historyNotice;
+  const activeScreenNotice = syncScreenActive
+    ? screenBusyNotice || syncNotice
+    : historyScreenActive
+      ? screenBusyNotice || historyNotice
+      : panelScreenActive
+        ? screenBusyNotice || panelNotice
+        : "";
   const inputPlaceholder = isBusy
     ? screenBusyNotice
-    : syncScreenActive
-      ? "Sync screen active. Type /conv to return"
-      : historyScreenActive
-        ? "History screen active. Type /back or /conv to return"
+    : activeScreenPanel
+      ? placeholderForBlockedScreen(screen, activeScreenPanel)
         : "Type message or /";
 
   return createElement(
@@ -926,66 +943,29 @@ export function InkChatApp({
         marginBottom: 1,
         paddingX: 1
       },
-      syncScreenActive
+      activeScreenPanel
         ? createElement(
             Box,
             { flexDirection: "column" },
-            createElement(Text, { color: "yellowBright", bold: true }, "sync status (refresh every 2s)"),
-            syncPanelNotice ? createElement(Text, { color: "yellow" }, syncPanelNotice) : null,
-            ...syncSections.map((section) =>
-              createElement(
-                Box,
-                {
-                  key: section.id,
-                  flexDirection: "column",
-                  marginTop: 1,
-                  borderStyle: "round",
-                  borderColor: section.color,
-                  paddingX: 1
-                },
-                createElement(Text, { color: section.color, bold: true }, `${section.title}:`),
-                ...section.lines.map((line, index) =>
-                  createElement(Text, { key: `${section.id}-${index}`, color: section.color }, line)
-                )
-              )
+            createElement(
+              Text,
+              { color: CHAT_THEME.assistant, bold: true },
+              `${activeScreenPanel.title || "Screen"}`
             ),
-            ...syncSnippets.map((section) =>
-              createElement(
-                Box,
-                {
-                  key: section.id,
-                  flexDirection: "column",
-                  marginTop: 1,
-                  borderStyle: "round",
-                  borderColor: section.color,
-                  paddingX: 1
-                },
-                createElement(Text, { color: section.color, bold: true }, `${section.title}:`),
-                ...section.lines.map((line, index) =>
-                  createElement(Text, { key: `${section.id}-${index}`, color: section.color }, line)
-                )
-              )
-            )
-          )
-        : historyScreenActive
-          ? createElement(
-              Box,
-              { flexDirection: "column" },
-              createElement(Text, { color: CHAT_THEME.assistant, bold: true }, `${historyPanel.title || "History"}`),
-              historyPanelNotice
-                ? createElement(Text, { color: CHAT_THEME.assistant }, historyPanelNotice)
+            activeScreenNotice
+                ? createElement(Text, { color: CHAT_THEME.assistant }, activeScreenNotice)
                 : null,
-              historyPanel.scrollable
+            activeScreenPanel.scrollable
                 ? createElement(
                     Text,
                     { color: CHAT_THEME.assistant },
-                    `Preview scroll : ${historyScrollStart}-${historyScrollEnd} / ${historyRenderedLines.length} (Up/Down)`
+                    `Preview scroll : ${activeScreenScrollStart}-${activeScreenScrollEnd} / ${activeScreenRenderedLines.length} (Up/Down)`
                   )
                 : null,
-              ...(visibleHistoryRenderedLines.length
-                ? visibleHistoryRenderedLines.map((line, index) =>
+            ...(visibleActiveScreenRenderedLines.length
+                ? visibleActiveScreenRenderedLines.map((line, index) =>
                     renderInlineLine({
-                      id: `history-${index}`,
+                      id: `screen-${index}`,
                       text: line.text === "" ? " " : line.text,
                       color: CHAT_THEME.assistant,
                       bold: line.bold,
@@ -993,7 +973,7 @@ export function InkChatApp({
                       forceColor: true
                     })
                   )
-                : [createElement(Text, { key: "history-empty", color: CHAT_THEME.assistant }, "No history output.")])
+                : [createElement(Text, { key: "screen-empty", color: CHAT_THEME.assistant }, "No screen output.")])
             )
         : visibleItems.length
           ? visibleItems.map((item) => renderItem(item))
@@ -1003,7 +983,7 @@ export function InkChatApp({
       Box,
       {
         borderStyle: "single",
-        borderColor: isBusy ? "yellow" : "green",
+        borderColor: CHAT_THEME.user,
         paddingX: 1
       },
       createElement(Text, { color: CHAT_THEME.user }, "you> "),

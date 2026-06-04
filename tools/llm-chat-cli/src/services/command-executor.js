@@ -6,6 +6,7 @@ import {
 import {
   createUsageSummary,
   formatUsagePanel,
+  formatUsageScreenLines,
   printUsageSummary
 } from "./chat-status.js";
 import {
@@ -20,6 +21,7 @@ import {
 import { runSearch } from "./search-runner.js";
 import {
   formatSearchPanel,
+  formatSearchScreenLines,
   printSearchPlain
 } from "../commands/search-ui.js";
 import { createSyncClient } from "../infrastructure/sync-client.js";
@@ -82,10 +84,12 @@ export function createDefaultCommandRuntime({
       asUsage,
       createUsageSummary,
       formatUsagePanel,
+      formatUsageScreenLines,
       printUsageSummary
     },
     searchClient: {
       formatSearchPanel,
+      formatSearchScreenLines,
       printSearchPlain
     },
     sessionClient: {

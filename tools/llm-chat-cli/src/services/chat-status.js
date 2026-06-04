@@ -87,6 +87,22 @@ export function formatUsagePanel(summary) {
   ];
 }
 
+export function formatUsageScreenLines(summary) {
+  return [
+    "| Field | Value |",
+    "| --- | --- |",
+    `| All-time total tokens | ${summary.allTimeTotalTokens} |`,
+    `| Session total tokens | ${summary.sessionTotalTokens} |`,
+    `| Session estimated tokens | ${summary.sessionEstimatedTokens} |`,
+    `| Model | ${summary.model} |`,
+    `| Remaining TPM | ${summary.remainingTpm} |`,
+    `| Remaining RPM | ${summary.remainingRpm} |`,
+    `| Quota refresh | ${summary.quotaRefresh} |`,
+    "",
+    "Usage : `/back` | `/conv`"
+  ];
+}
+
 export function printUsageSummary({
   sessionUsage,
   estimatedTokens,

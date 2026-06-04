@@ -58,6 +58,10 @@ function createRuntime(overrides = {}) {
         `session_total_tokens: ${summary.sessionTotalTokens}`,
         `model: ${summary.model}`
       ],
+      formatUsageScreenLines: (summary) => [
+        `session=${summary.sessionTotalTokens}`,
+        `model=${summary.model}`
+      ],
       printUsageSummary: ({ sessionUsage }) => {
         console.log(`usage=${sessionUsage.total_tokens}`);
       },
@@ -65,6 +69,7 @@ function createRuntime(overrides = {}) {
     },
     searchClient: {
       formatSearchPanel: () => [],
+      formatSearchScreenLines: () => ["Search ready."],
       printSearchPlain: () => {},
       ...overrides.searchClient
     },
@@ -100,38 +105,31 @@ test("createCommandRuntime handles /sync via grouped clients", async () => {
   assert.equal(result.action?.syncStatus?.backends?.drive?.hasError, true);
 });
 
-test("createCommandRuntime renders /usage and /routing without CLI globals", async () => {
+test("createCommandRuntime returns screen actions for /usage and /routing without CLI globals", async () => {
   const runtime = createRuntime();
   const session = createChatSession({ systemPrompt: "" });
   session.sessionUsage.total_tokens = 12;
   session.latestRouting = { targetModel: "smart-router-general", lane: "general" };
-  const panels = [];
 
   const usageResult = await runtime.execute({
     line: "/usage",
     session,
     limitsByModel: {},
-    mode: "tui",
-    io: {
-      panel: (title, lines) => panels.push({ title, lines })
-    }
+    mode: "tui"
   });
   const routingResult = await runtime.execute({
     line: "/routing",
     session,
     limitsByModel: {},
-    mode: "tui",
-    io: {
-      panel: (title, lines) => panels.push({ title, lines })
-    }
+    mode: "tui"
   });
 
   assert.equal(usageResult.handled, true);
   assert.equal(routingResult.handled, true);
-  assert.equal(panels[0].title, "usage");
-  assert.match(panels[0].lines.join("\n"), /session_total_tokens: 12/);
-  assert.equal(panels[1].title, "routing");
-  assert.match(panels[1].lines.join("\n"), /smart-router-general/);
+  assert.equal(usageResult.action?.screen, "panel");
+  assert.match(usageResult.action?.panelScreen?.lines?.join("\n") || "", /session=12/);
+  assert.equal(routingResult.action?.screen, "panel");
+  assert.match(routingResult.action?.panelScreen?.lines?.join("\n") || "", /smart-router-general/);
 });
 
 test("createCommandRuntime keeps unknown commands user-visible", async () => {
@@ -151,6 +149,46 @@ test("createCommandRuntime keeps unknown commands user-visible", async () => {
 
   assert.equal(result.handled, true);
   assert.match(messages[0], /unknown command: \/unknown/i);
+});
+
+test("createCommandRuntime returns info screens for sync conflicts and usage-style commands", async () => {
+  const runtime = createRuntime({
+    syncClient: {
+      runNotesAutomationCommand: () => ({
+        ok: true,
+        output: "conflict A\nconflict B",
+        payload: {}
+      }),
+      formatSyncFeedback: () => "[chat] sync status=conflict conflicts=2"
+    }
+  });
+  const session = createChatSession({ systemPrompt: "" });
+
+  const syncConflicts = await runtime.execute({
+    line: "/sync conflicts",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  const searchUsage = await runtime.execute({
+    line: "/search",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  const systemUsage = await runtime.execute({
+    line: "/system",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+
+  assert.equal(syncConflicts.action?.screen, "panel");
+  assert.match(syncConflicts.action?.panelScreen?.lines?.join("\n") || "", /conflict A/);
+  assert.equal(searchUsage.action?.screen, "panel");
+  assert.match(searchUsage.action?.panelScreen?.lines?.join("\n") || "", /\/search <query>/);
+  assert.equal(systemUsage.action?.screen, "panel");
+  assert.match(systemUsage.action?.panelScreen?.lines?.join("\n") || "", /\/system show/);
 });
 
 test("createDefaultCommandRuntime wires default saveAndSync for /sync", async () => {

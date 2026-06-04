@@ -1,4 +1,8 @@
 import { createCommandSpec } from "../definitions.js";
+import {
+  createInfoScreenAction,
+  formatTextScreenLines
+} from "../../domain/info-screen.js";
 import { writeMessage } from "../shared.js";
 
 function resolveSyncStatusAction(deps, syncResult) {
@@ -68,15 +72,28 @@ export function createSyncCommandSpecs(deps) {
     createCommandSpec("/sync conflicts", async ({ mode, handlers }) => {
       const result = deps.runNotesAutomationCommand(["sync-conflicts"]);
       const summary = deps.formatSyncFeedback(result);
-      writeMessage(mode, handlers, summary);
-      if (result.output) {
-        if (mode === "plain") {
+      if (mode === "plain") {
+        writeMessage(mode, handlers, summary);
+        if (result.output) {
           console.log(result.output);
-        } else {
-          handlers.panel("sync", result.output.split("\n"));
         }
+        return { handled: true, exit: false };
       }
-      return { handled: true, exit: false };
+      return {
+        handled: true,
+        exit: false,
+        action: createInfoScreenAction({
+          id: "sync-conflicts",
+          title: "Sync conflicts",
+          lines: formatTextScreenLines({
+            title: "Sync conflicts",
+            text: [summary, result.output || "No sync conflict details."].filter(Boolean).join("\n\n"),
+            footerLines: ["Usage : `/sync status` | `/back` | `/conv`"]
+          }),
+          scrollable: true,
+          commandHint: "/sync commands"
+        })
+      };
     })
   ];
 }

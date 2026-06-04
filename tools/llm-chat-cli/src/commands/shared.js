@@ -1,4 +1,11 @@
-import { getCommandPanelLines } from "./definitions.js";
+import {
+  createInfoScreenAction,
+  formatCommandScreenLines
+} from "../domain/info-screen.js";
+import {
+  getCommandDefinitions,
+  getCommandPanelLines
+} from "./definitions.js";
 
 export function writeMessage(mode, handlers, text) {
   if (mode === "plain") {
@@ -25,10 +32,19 @@ export function renderCommands(mode, handlers) {
     for (const commandLine of commandLines) {
       console.log(`  ${commandLine}`);
     }
+    return { handled: true, exit: false };
   } else {
-    handlers.panel("commands", commandLines);
+    return {
+      handled: true,
+      exit: false,
+      action: createInfoScreenAction({
+        id: "commands",
+        title: "Commands",
+        lines: formatCommandScreenLines(getCommandDefinitions()),
+        scrollable: true
+      })
+    };
   }
-  return { handled: true, exit: false };
 }
 
 export function createHistorySelectionUsage(command) {

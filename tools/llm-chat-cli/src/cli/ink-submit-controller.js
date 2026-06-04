@@ -57,6 +57,9 @@ export async function handleInkSubmit({
     const action = command?.action && typeof command.action === "object" ? command.action : null;
     applyInkScreenAction({
       action,
+      setPanelNotice: ui.setPanelNotice,
+      setPanelScreen: ui.setPanelScreen,
+      setPanelScrollOffset: ui.setPanelScrollOffset,
       refreshSyncStatus,
       setHistoryNotice: ui.setHistoryNotice,
       setHistoryPanel: ui.setHistoryPanel,
@@ -83,13 +86,15 @@ export async function handleInkSubmit({
       return;
     }
 
-    const blockedScreenNotice = noticeForBlockedScreen(screen);
+    const blockedScreenNotice = noticeForBlockedScreen(screen, ui.panelScreen);
     if (blockedScreenNotice) {
       if (screen === "sync") {
         ui.setSyncNotice(blockedScreenNotice);
         refreshSyncStatus();
       } else if (screen === "history") {
         ui.setHistoryNotice(blockedScreenNotice);
+      } else if (screen === "panel") {
+        ui.setPanelNotice(blockedScreenNotice);
       }
       return;
     }
@@ -157,6 +162,8 @@ export async function handleInkSubmit({
       refreshSyncStatus();
     } else if (screen === "history") {
       ui.setHistoryNotice(errorText);
+    } else if (screen === "panel") {
+      ui.setPanelNotice(errorText);
     } else {
       appendMessage("system", errorText);
     }

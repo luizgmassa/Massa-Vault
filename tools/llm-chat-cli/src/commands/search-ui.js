@@ -1,3 +1,5 @@
+import { formatSearchScreenLines } from "../domain/info-screen.js";
+
 export function formatSearchPanel({ rebuilt, results }) {
   const lines = [];
   if (rebuilt) {
@@ -29,3 +31,5 @@ export function printSearchPlain(searchResult) {
     console.log(`- ${line}`);
   }
 }
+
+export { formatSearchScreenLines };

@@ -1,4 +1,9 @@
 import { createCommandSpec } from "../definitions.js";
+import {
+  createInfoScreenAction,
+  formatKeyValueScreenLines,
+  formatTextScreenLines
+} from "../../domain/info-screen.js";
 import { writeLines, writeMessage } from "../shared.js";
 
 export function createSessionSystemCommandSpecs(deps) {
@@ -18,12 +23,49 @@ export function createSessionSystemCommandSpecs(deps) {
         `vault_context: ${deps.isVaultContextEnabled() ? "auto" : "disabled"}`,
         `vault_context_modes: ${deps.VAULT_CONTEXT_MODES.join(", ")}`
       ];
-      writeLines(mode, handlers, "config", lines);
-      return { handled: true, exit: false };
+      if (mode === "plain") {
+        writeLines(mode, handlers, "config", lines);
+        return { handled: true, exit: false };
+      }
+      return {
+        handled: true,
+        exit: false,
+        action: createInfoScreenAction({
+          id: "config",
+          title: "Config",
+          lines: formatKeyValueScreenLines({
+            title: "Config",
+            rows: [
+              ["Gateway URL", gateway.gatewayUrl],
+              ["System prompt", state.activeSystemPrompt ? "Configured" : "Empty"],
+              ["Auth header", gateway.apiKey ? "Enabled" : "Disabled"],
+              ["Vault context", deps.isVaultContextEnabled() ? "Auto" : "Disabled"],
+              ["Vault context modes", deps.VAULT_CONTEXT_MODES.join(", ")]
+            ],
+            footerLines: ["Usage : `/system show` | `/back` | `/conv`"]
+          })
+        })
+      };
     }),
     createCommandSpec("/system show", async ({ mode, handlers, state }) => {
-      writeLines(mode, handlers, "system", [state.activeSystemPrompt || "[empty]"]);
-      return { handled: true, exit: false };
+      if (mode === "plain") {
+        writeLines(mode, handlers, "system", [state.activeSystemPrompt || "[empty]"]);
+        return { handled: true, exit: false };
+      }
+      return {
+        handled: true,
+        exit: false,
+        action: createInfoScreenAction({
+          id: "system",
+          title: "System prompt",
+          lines: formatTextScreenLines({
+            title: "System prompt",
+            text: state.activeSystemPrompt,
+            footerLines: ["Usage : `/system set ...` | `/system clear` | `/back` | `/conv`"]
+          }),
+          scrollable: true
+        })
+      };
     }),
     createCommandSpec(
       "/system set",

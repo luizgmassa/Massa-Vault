@@ -112,7 +112,7 @@ function setHistoryConversationFlowState(state, { rows, dateRows }) {
       screen: "dates",
       panel: {
         title: "History",
-        lines: ["## History dates"],
+        lines: ["Dates (newest first)."],
         scrollable: false,
         previewMode: false
       }
@@ -121,7 +121,7 @@ function setHistoryConversationFlowState(state, { rows, dateRows }) {
       screen: "conversations",
       panel: {
         title: "History",
-        lines: ["## History conversations"],
+        lines: ["Conversations."],
         scrollable: false,
         previewMode: false
       }
@@ -452,21 +452,17 @@ test("MASSA_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports 
       assert.equal("context" in capturedBody, false);
 
       const state = createReplState({ systemPrompt: "" });
-      const panels = [];
       const command = await executeCommand({
         line: "/config",
         state,
         limitsByModel: {},
-        mode: "tui",
-        handlers: {
-          panel: (title, lines) => panels.push({ title, lines })
-        }
+        mode: "tui"
       });
       assert.equal(command.handled, true);
       assert.equal(command.exit, false);
-      assert.equal(panels.length, 1);
-      assert.match(panels[0].lines.join("\n"), /vault_context: disabled/);
-      assert.match(panels[0].lines.join("\n"), /vault_context_modes: semantic, manifest/);
+      assert.equal(command.action?.screen, "panel");
+      assert.match(command.action?.panelScreen?.lines?.join("\n") || "", /Vault context \| Disabled/i);
+      assert.match(command.action?.panelScreen?.lines?.join("\n") || "", /Vault context modes \| semantic, manifest/i);
     });
   } finally {
     if (previousRag === undefined) {
@@ -984,7 +980,7 @@ test("executeCommand /history and /history date build visible rows and keep tran
       });
       assert.equal(openResult.handled, true);
       assert.equal(openResult.action?.screen, "history");
-      assert.match(openResult.action?.historyPanel?.lines?.join("\n") || "", /history dates/i);
+      assert.match(openResult.action?.historyPanel?.lines?.join("\n") || "", /Dates \(newest first\)\./i);
       assert.equal(state.history.length, 0);
 
       const dateResult = await executeCommand({
@@ -1377,7 +1373,7 @@ test("executeCommand /history summary uses injected LLM runner and keeps transcr
     assert.equal(result.handled, true);
     assert.equal(result.action?.screen, "history");
     assert.equal(result.action?.historyPanel?.renderMarkdown, true);
-    assert.match(result.action?.historyPanel?.lines?.join("\n") || "", /History summary/i);
+    assert.equal(result.action?.historyPanel?.title, "History summary");
     assert.match(result.action?.historyPanel?.lines?.join("\n") || "", /User asked for rollout plan\./);
     assert.match(capturedMarkdown, /## USER/);
     assert.equal(summaryCalls, 1);
@@ -1502,7 +1498,7 @@ test("executeCommand history conversation aliases route to full commands", async
       mode: "tui"
     });
     assert.equal(backResult.handled, true);
-    assert.match(backResult.action?.historyPanel?.lines?.join("\n") || "", /History conversations/i);
+    assert.match(backResult.action?.historyPanel?.lines?.join("\n") || "", /Conversations/i);
 
     const previewResult = await executeCommand({
       line: "/preview 1",
@@ -1563,7 +1559,7 @@ test("executeCommand /back follows history stack and exits to conversation", asy
       assert.equal(backToConversations.handled, true);
       assert.match(
         backToConversations.action?.historyPanel?.lines?.join("\n") || "",
-        /History conversations for 2026-05-30/i
+        /Conversations for 2026-05-30/i
       );
 
       const backToDates = await executeCommand({
@@ -1573,7 +1569,7 @@ test("executeCommand /back follows history stack and exits to conversation", asy
         mode: "tui"
       });
       assert.equal(backToDates.handled, true);
-      assert.match(backToDates.action?.historyPanel?.lines?.join("\n") || "", /History dates/i);
+      assert.match(backToDates.action?.historyPanel?.lines?.join("\n") || "", /Dates \(newest first\)\./i);
 
       const backToConversation = await executeCommand({
         line: "/back",
@@ -1586,6 +1582,30 @@ test("executeCommand /back follows history stack and exits to conversation", asy
       assert.equal(state.historyFlowStack.length, 0);
     });
   });
+});
+
+test("executeCommand /back exits sync and info screens to conversation", async () => {
+  const state = createReplState({ systemPrompt: "" });
+
+  state.activeScreen = "sync";
+  const syncBack = await executeCommand({
+    line: "/back",
+    state,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  assert.equal(syncBack.handled, true);
+  assert.equal(syncBack.action?.screen, "conversation");
+
+  state.activeScreen = "panel";
+  const panelBack = await executeCommand({
+    line: "/back",
+    state,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  assert.equal(panelBack.handled, true);
+  assert.equal(panelBack.action?.screen, "conversation");
 });
 
 test("executeCommand allows aliases and full selectors in history search conversations list", async () => {

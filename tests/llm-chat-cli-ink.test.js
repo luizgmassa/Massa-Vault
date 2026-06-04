@@ -709,7 +709,7 @@ test("Ink startup warmup starts once and first prompt does not wait", async (t) 
   });
 });
 
-test("Ink /usage command renders compact usage panel", async (t) => {
+test("Ink /usage opens info screen and /back restores conversation", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
 
@@ -732,14 +732,24 @@ test("Ink /usage command renders compact usage panel", async (t) => {
   await driver.submit("/usage");
   await delay(20);
 
-  const frame = app.lastFrame();
-  assert.match(frame, /usage:/i);
-  assert.match(frame, /session_total_tokens:/);
-  assert.match(frame, /remaining_tpm:/);
+  let frame = app.lastFrame();
+  assert.match(frame, /\n Usage\n/i);
+  assert.match(frame, /Session total tokens/i);
+  assert.match(frame, /Remaining TPM/i);
+
+  await driver.submit("blocked prompt");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /usage screen active\. run \/back or \/conv or use slash commands\./i);
+
+  await driver.submit("/back");
+  await delay(20);
+  frame = app.lastFrame();
+  assert.match(frame, /massa-vault chat started/i);
   app.unmount();
 });
 
-test("Ink /sync status switches to sync screen, blocks prompts, and /conv restores conversation", async (t) => {
+test("Ink /sync status switches to sync screen, blocks prompts, and /back restores conversation", async (t) => {
   const stack = await loadInkStack(t);
   if (!stack) return;
 
@@ -789,8 +799,9 @@ test("Ink /sync status switches to sync screen, blocks prompts, and /conv restor
     await driver.submit("/sync status");
     await delay(30);
     let frame = app.lastFrame();
-    assert.match(frame, /sync status \(refresh every 2s\)/i);
-    assert.match(frame, /daemon:/i);
+    assert.match(frame, /\n Sync status\n/i);
+    assert.match(frame, /Refresh every 2s\./i);
+    assert.match(frame, /Daemon/i);
     assert.doesNotMatch(frame, /massa-vault chat started/i);
 
     await driver.submit("this should be blocked");
@@ -798,9 +809,9 @@ test("Ink /sync status switches to sync screen, blocks prompts, and /conv restor
     assert.equal(chatCalls, 0);
     assert.equal(driver.getSessionState().history.length, 0);
     frame = app.lastFrame();
-    assert.match(frame, /run \/conv before sending prompts/i);
+    assert.match(frame, /run \/back or \/conv or use \/sync commands/i);
 
-    await driver.submit("/conv");
+    await driver.submit("/back");
     await delay(30);
     frame = app.lastFrame();
     assert.match(frame, /massa-vault chat started/i);
@@ -997,7 +1008,8 @@ test("Ink history flow supports /back stack navigation end-to-end", async (t) =>
       await driver.submit("/history");
       await delay(20);
       let frame = app.lastFrame();
-      assert.match(frame, /History dates/i);
+      assert.match(frame, /\n History\n/i);
+      assert.match(frame, /Dates \(newest first\)\./i);
 
       await driver.submit("blocked prompt");
       await delay(20);
@@ -1008,7 +1020,7 @@ test("Ink history flow supports /back stack navigation end-to-end", async (t) =>
       await driver.submit("1");
       await delay(20);
       frame = app.lastFrame();
-      assert.match(frame, /History conversations for 2026-05-30/i);
+      assert.match(frame, /Conversations for 2026-05-30\./i);
 
       await driver.submit("/summary 1");
       await delay(20);
@@ -1019,12 +1031,12 @@ test("Ink history flow supports /back stack navigation end-to-end", async (t) =>
       await driver.submit("/back");
       await delay(20);
       frame = app.lastFrame();
-      assert.match(frame, /History conversations for 2026-05-30/i);
+      assert.match(frame, /Conversations for 2026-05-30\./i);
 
       await driver.submit("/back");
       await delay(20);
       frame = app.lastFrame();
-      assert.match(frame, /History dates/i);
+      assert.match(frame, /Dates \(newest first\)\./i);
 
       await driver.submit("/back");
       await delay(20);
@@ -1183,7 +1195,7 @@ test("Ink /history summary shows busy state while summary is running", async (t)
       const frameA = app.lastFrame();
       await delay(280);
       const frameB = app.lastFrame();
-      assert.match(frameA, /History conversations for 2026-05-30/i);
+      assert.match(frameA, /Conversations for 2026-05-30\./i);
       assert.match(frameA, /running \/history summary 1\.{1,3}/);
       assert.match(frameB, /running \/history summary 1\.{1,3}/);
       assert.notEqual(frameA, frameB);
@@ -1258,7 +1270,7 @@ test("Ink /history summary keeps history screen and shows command errors inline"
       await delay(20);
       const frame = app.lastFrame();
       assert.match(frame, /\n History\n \[chat\] history summary exploded/i);
-      assert.match(frame, /History conversations for 2026-05-30/i);
+      assert.match(frame, /Conversations for 2026-05-30\./i);
       assert.match(frame, /\[chat\] history summary exploded/i);
       app.unmount();
     } finally {
@@ -1298,7 +1310,7 @@ test("Ink History markdown table keeps header/separator/data pipe alignment", as
                 title: "History",
                 renderMarkdown: true,
                 lines: [
-                  "## History dates",
+                  "Dates (newest first).",
                   "",
                   "| # | Date | Conversations |",
                   "| --- | --- | --- |",
@@ -1354,7 +1366,7 @@ test("Ink History summary preserves blank sentence spacing", async (t) => {
               historyPanel: {
                 title: "History summary",
                 renderMarkdown: true,
-                lines: ["## History summary", "", "Sentence one.", "", "Sentence two."]
+                lines: ["Sentence one.", "", "Sentence two."]
               }
             }
           };
@@ -1408,7 +1420,7 @@ test("Ink /history summary refreshes footer model from updated session routing",
               historyPanel: {
                 title: "History summary",
                 renderMarkdown: true,
-                lines: ["## History summary", "", "Updated summary."]
+                lines: ["Updated summary."]
               }
             }
           };
@@ -1457,8 +1469,6 @@ test("Ink /history preview screen scrolls with Up/Down arrows", async (t) => {
                 scrollable: true,
                 previewMode: true,
                 lines: [
-                  "## History preview",
-                  "",
                   "### Transcript",
                   "",
                   "```markdown",

@@ -1,5 +1,9 @@
 import { createCommandSpec } from "../definitions.js";
-import { writeLines, writeMessage } from "../shared.js";
+import {
+  createInfoScreenAction,
+  formatJsonScreenLines
+} from "../../domain/info-screen.js";
+import { writeMessage } from "../shared.js";
 
 export function createUsageCommandSpecs(deps) {
   return [
@@ -18,18 +22,61 @@ export function createUsageCommandSpecs(deps) {
           routing: state.latestRouting,
           limitsByModel
         });
-        handlers.panel("usage", deps.formatUsagePanel(summary));
+        return {
+          handled: true,
+          exit: false,
+          action: createInfoScreenAction({
+            id: "usage",
+            title: "Usage",
+            lines: deps.formatUsageScreenLines(summary)
+          })
+        };
       }
       return { handled: true, exit: false };
     }),
     createCommandSpec("/routing", async ({ mode, handlers, state }) => {
       if (!state.latestRouting) {
-        writeMessage(mode, handlers, "[chat] no routing metadata yet");
+        if (mode === "plain") {
+          writeMessage(mode, handlers, "[chat] no routing metadata yet");
+          return { handled: true, exit: false };
+        }
+        return {
+          handled: true,
+          exit: false,
+          action: createInfoScreenAction({
+            id: "routing",
+            title: "Routing",
+            lines: formatJsonScreenLines({
+              title: "Routing",
+              data: null,
+              emptyText: "No routing metadata yet.",
+              footerLines: ["Usage : send a prompt first | `/back` | `/conv`"]
+            }),
+            scrollable: true
+          })
+        };
+      }
+      if (mode === "plain") {
+        const lines = JSON.stringify(state.latestRouting, null, 2).split("\n");
+        for (const line of lines) {
+          console.log(line);
+        }
         return { handled: true, exit: false };
       }
-      const lines = JSON.stringify(state.latestRouting, null, 2).split("\n");
-      writeLines(mode, handlers, "routing", lines);
-      return { handled: true, exit: false };
+      return {
+        handled: true,
+        exit: false,
+        action: createInfoScreenAction({
+          id: "routing",
+          title: "Routing",
+          lines: formatJsonScreenLines({
+            title: "Routing",
+            data: state.latestRouting,
+            footerLines: ["Usage : `/back` | `/conv`"]
+          }),
+          scrollable: true
+        })
+      };
     })
   ];
 }

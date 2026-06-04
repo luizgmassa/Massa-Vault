@@ -22,7 +22,8 @@ export function createChatSession({
     historyDateRows: [],
     historyFlowStack: [],
     activeTranscript: null,
-    addedContextEntries: []
+    addedContextEntries: [],
+    activeScreen: "conversation"
   };
 }
 
@@ -41,6 +42,7 @@ export function resetChatSession(session) {
   session.historyFlowStack = [];
   session.activeTranscript = null;
   session.addedContextEntries = [];
+  session.activeScreen = "conversation";
   return session;
 }
 
@@ -101,5 +103,6 @@ export function loadTranscriptIntoSession(
   session.historyDateRows = Array.isArray(session.historyDateRows) ? session.historyDateRows : [];
   session.historyFlowStack = [];
   session.addedContextEntries = [];
+  session.activeScreen = "conversation";
   return session;
 }

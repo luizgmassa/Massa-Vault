@@ -127,7 +127,7 @@ function spacingForHistorySentences(text) {
 
 export function formatHistoryDateLines({ rows }) {
   const list = Array.isArray(rows) ? rows : [];
-  const lines = ["## History dates", "", "History dates (newest first).", ""];
+  const lines = ["Dates (newest first).", ""];
   if (!list.length) {
     lines.push("No transcript date folders found under `AI Chats/`.");
     lines.push("");
@@ -151,7 +151,8 @@ export function formatHistoryDateLines({ rows }) {
 export function formatHistoryConversationLines({ rows, title, includeScore = false }) {
   const list = Array.isArray(rows) ? rows : [];
   const heading = String(title || "History conversations").trim() || "History conversations";
-  const lines = [`## ${heading}`];
+  const shortHeading = heading.replace(/^History\s+/i, "");
+  const lines = [`${shortHeading}.`];
   if (!list.length) {
     lines.push("");
     lines.push("No conversations found.");
@@ -197,7 +198,7 @@ export function formatHistoryConversationLines({ rows, title, includeScore = fal
 
 export function formatHistorySummaryLines({ row, summary }) {
   const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
-  const lines = ["## History summary", ""];
+  const lines = [];
   lines.push(
     ...buildHistoryMarkdownTable(
       ["Field", "Value"],
@@ -220,7 +221,7 @@ export function formatHistorySummaryLines({ row, summary }) {
 
 export function formatHistoryPreviewLines({ row, transcriptMarkdown }) {
   const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
-  const lines = ["## History preview", ""];
+  const lines = [];
   lines.push(
     ...buildHistoryMarkdownTable(
       ["Field", "Value"],

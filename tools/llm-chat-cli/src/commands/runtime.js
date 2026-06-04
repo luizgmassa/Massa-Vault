@@ -3,6 +3,7 @@ import { createSearchCommandSpecs } from "./families/search.js";
 import { createSessionSystemCommandSpecs } from "./families/session-system.js";
 import { createSyncCommandSpecs } from "./families/sync.js";
 import { createUsageCommandSpecs } from "./families/usage.js";
+import { createInfoScreenAction } from "../domain/info-screen.js";
 import { writeMessage } from "./shared.js";
 
 function createCommandRegistry(deps) {
@@ -50,8 +51,10 @@ export function createCommandRuntime({
     formatHistorySummaryLines: historyClient.formatHistorySummaryLines,
     formatRelativeTranscriptLabel: historyClient.formatRelativeTranscriptLabel,
     formatSearchPanel: searchClient.formatSearchPanel,
+    formatSearchScreenLines: searchClient.formatSearchScreenLines,
     formatSyncFeedback: syncClient.formatSyncFeedback,
     formatUsagePanel: usageClient.formatUsagePanel,
+    formatUsageScreenLines: usageClient.formatUsageScreenLines,
     getHistoryRowFromSelection: historyClient.getHistoryRowFromSelection,
     historyBackStep: historyClient.historyBackStep,
     isHistoryConversationsScreen: historyClient.isHistoryConversationsScreen,
@@ -106,14 +109,34 @@ export function createCommandRuntime({
       const matched = registry.find((entry) => entry.match(normalizedLine));
       if (!matched) {
         if (normalizedLine.startsWith("/sync ")) {
-          writeMessage(mode, tuiHandlers, "usage: /sync | /sync status | /sync conflicts");
-          return { handled: true, exit: false };
+          if (mode === "plain") {
+            writeMessage(mode, tuiHandlers, "usage: /sync | /sync status | /sync conflicts");
+            return { handled: true, exit: false };
+          }
+          return {
+            handled: true,
+            exit: false,
+            action: createInfoScreenAction({
+              id: "sync",
+              title: "Sync",
+              lines: ["Usage : `/sync` | `/sync status` | `/sync conflicts` | `/back` | `/conv`"],
+              commandHint: "/sync commands"
+            })
+          };
         }
         if (normalizedLine === "/system" || normalizedLine.startsWith("/system ")) {
           if (mode === "plain") {
             console.log("usage: /system show|set <prompt>|clear");
           } else {
-            tuiHandlers.panel("system", ["usage: /system show|set <prompt>|clear"]);
+            return {
+              handled: true,
+              exit: false,
+              action: createInfoScreenAction({
+                id: "system",
+                title: "System prompt",
+                lines: ["Usage : `/system show` | `/system set ...` | `/system clear` | `/back` | `/conv`"]
+              })
+            };
           }
           return { handled: true, exit: false };
         }
@@ -216,10 +239,12 @@ export async function executeChatCommand(
       asUsage: deps.asUsage,
       createUsageSummary: deps.createUsageSummary,
       formatUsagePanel: deps.formatUsagePanel,
+      formatUsageScreenLines: deps.formatUsageScreenLines,
       printUsageSummary: deps.printUsageSummary
     },
     searchClient: {
       formatSearchPanel: deps.formatSearchPanel,
+      formatSearchScreenLines: deps.formatSearchScreenLines,
       printSearchPlain: deps.printSearchPlain
     },
     sessionClient: {

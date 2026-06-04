@@ -36,6 +36,20 @@ export function createHistoryCommandSpecs(deps) {
       };
     }),
     createCommandSpec("/back", async ({ mode, handlers, state }) => {
+      if (state?.activeScreen === "sync" || state?.activeScreen === "panel") {
+        if (mode === "plain") {
+          console.log("[chat] conversation mode");
+          return { handled: true, exit: false };
+        }
+        return {
+          handled: true,
+          exit: false,
+          action: {
+            type: "switch-screen",
+            screen: "conversation"
+          }
+        };
+      }
       const back = deps.historyBackStep(state);
       if (back.type === "none") {
         writeMessage(mode, handlers, "[History] /back available only inside history flow.");
