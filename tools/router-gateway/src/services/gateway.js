@@ -21,6 +21,10 @@ import {
 import { forwardRequest } from "../infrastructure/proxy.js";
 import { loadGatewayRuntimeConfig } from "../infrastructure/runtime-config.js";
 import { applyRoutingHeaders } from "../../../shared/routing-metadata.js";
+import {
+  readModelManagerState,
+  resolveLiteLLMConfigPath
+} from "../../../shared/model-managers.js";
 
 export function createGatewayServer({
   policyPath,
@@ -30,12 +34,11 @@ export function createGatewayServer({
 } = {}) {
   const runtime = loadGatewayRuntimeConfig();
   const resolvedPolicyPath = policyPath || runtime.policyPath;
-  const resolvedLiteLLMConfigPath = liteLLMConfigPath || runtime.liteLLMConfigPath;
+  const resolvedLiteLLMConfigPath = liteLLMConfigPath || runtime.liteLLMConfigPath || null;
   const resolvedLiteLLMBaseUrl = liteLLMBaseUrl || runtime.liteLLMBaseUrl;
   const enforceSmartRouterModel =
     requireSmartRouterModel ?? runtime.requireSmartRouterModel;
   const policy = loadPolicy(resolvedPolicyPath);
-  const modelConfig = loadLiteLLMModelConfig(resolvedLiteLLMConfigPath);
 
   return http.createServer(async (req, res) => {
     try {
@@ -68,10 +71,15 @@ export function createGatewayServer({
       }
 
       const routing = classifyRequest(body, policy);
+      const modelConfig = loadLiteLLMModelConfig(
+        resolvedLiteLLMConfigPath || resolveLiteLLMConfigPath()
+      );
+      const modelManagerState = readModelManagerState();
       const modelRouting = resolveModelRoute({
         targetModel: routing.targetModel,
         body,
-        models: modelConfig
+        models: modelConfig,
+        modelManagerState
       });
       const resolvedRouting = { ...routing, ...modelRouting, targetModel: routing.targetModel };
       const forwardedBody = { ...body, model: resolvedRouting.routedModel || routing.targetModel };

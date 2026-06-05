@@ -18,6 +18,7 @@ Your actual notes/memories live in an external vault path configured by CLI.
 - Sync mode is selectable: `git`, `gdrive`, or `both`.
 - New CLI for install/config/start/stop/status.
 - New LLM chat CLI with streaming, transcript persistence, usage counters, and semantic search.
+- Model Manager Tools (MMT) can discover local Ollama/LM Studio models, generate LiteLLM config, and pin active models from chat.
 
 ## Architecture
 
@@ -101,6 +102,8 @@ Repository Node entrypoints (`npm run vault*`, `npm run router-gateway`, `npm ru
 - `npm run vault -- chat search "query"` runs semantic search over markdown notes + AI chats.
 - `npm run vault -- chat search index` forces/rebuilds local semantic index.
 - REPL command `/sync` saves transcript if needed and triggers sync.
+- REPL command `/mmt` opens model-manager setup.
+- REPL command `/model` opens active model selection.
 - Type `/` in REPL input to see inline slash-command suggestions.
 - `/exit`, Ctrl-C, SIGTERM, and SIGHUP perform best-effort save+sync before exit.
 - Idle save+sync runs automatically after assistant responses (default 30 seconds).
@@ -116,6 +119,70 @@ Chat defaults:
 - auto vault context: enabled by default (`MASSA_VAULT_CHAT_RAG=off` disables auto retrieval)
 - `/config` includes `vault_context` mode (`auto` or `disabled`)
 - vault context modes: semantic note chunks for content questions, manifest file lists for vault listing questions
+
+### Model Manager Tools (MMT) and models
+
+MMT keeps the chat request contract stable (`smart-router`) while letting local model managers provide the concrete models LiteLLM runs.
+
+Supported managers:
+
+- Ollama: default base URL `http://127.0.0.1:11434`
+- LM Studio: default OpenAI-compatible base URL `http://127.0.0.1:1234/v1`
+
+Runtime files:
+
+- State: `.automation/llm-chat-cli/model-managers.json`
+- Generated LiteLLM config: `.automation/llm-chat-cli/litellm-config.generated.yaml`
+- Lane policy: `config/router-gateway.json`
+
+Config precedence:
+
+1. `LITELLM_CONFIG_PATH` when explicitly set.
+2. `.automation/llm-chat-cli/litellm-config.generated.yaml`.
+
+Run `/mmt apply` before starting LiteLLM so the generated config exists.
+`config/router-gateway.json` only chooses the semantic lane (`general`, `code`, `multimodal`) and target smart-router alias; it does not choose concrete models.
+
+First-time MMT setup:
+
+```text
+/mmt
+/mmt add ollama http://127.0.0.1:11434 Ollama
+/mmt add lmstudio http://127.0.0.1:1234/v1 LM Studio
+/mmt select 1
+/mmt discover
+/mmt apply
+```
+
+Notes:
+
+- Add only the manager you use; the two `add` commands above are examples.
+- `/mmt discover` creates candidates only.
+- `/mmt apply` smoke-validates discovered models before writing generated LiteLLM config.
+- `/mmt apply` also checks LiteLLM `/v1/models` using `LITELLM_MASTER_KEY` when configured.
+- LM Studio entries include a local dummy `api_key` because LiteLLM's OpenAI-compatible adapter requires credentials even when LM Studio does not.
+- Embedding-only, subscription-blocked, resource-blocked, missing, and already-failed models are skipped during repeated `/mmt apply` runs and are not emitted into chat routing config.
+- Run `/mmt discover` after changing model availability if you want MMT to retry previously failed models.
+- If aliases show `pending restart`, restart LiteLLM, then run `/model refresh`.
+- MMT v1 does not pull, download, load, or unload models. Install models in Ollama/LM Studio first.
+
+Model selection:
+
+```text
+/model
+/model select 1
+/model auto
+/model refresh
+```
+
+Behavior:
+
+- Default mode is local-first auto routing through `smart-router`.
+- `/model select <row|alias>` pins one active verified concrete alias until `/model auto`.
+- Pending aliases cannot be selected.
+- In the TUI model screen, typing a row number pins that row.
+- Header/footer show `Model: <model> @ <local|cloud> via <manager>`.
+- Old transcripts or missing metadata render as `via unknown`.
 
 ### `install`
 
@@ -216,6 +283,8 @@ Gateway classifies into:
 - `smart-router-general`
 
 Then LiteLLM runs complexity routing within that lane.
+
+When MMT generated config exists, router-gateway and chat usage limits read that generated config by default. `/model` pins still keep external clients on `smart-router`; the gateway forwards the pinned active alias to LiteLLM internally.
 
 ## Security
 

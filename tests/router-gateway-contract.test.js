@@ -66,6 +66,19 @@ test("parses LiteLLM config and resolves local/cloud concrete models", () => {
   assert.equal(cloud.modelLocation, "cloud");
   assert.deepEqual(cloud.fallbackRoutes, ["code_local"]);
   assert.equal(cloud.localFallbackAvailable, true);
+
+  const dashCloud = resolveModelRoute({
+    targetModel: "dash_cloud",
+    body: { messages: [{ role: "user", content: "debug" }] },
+    models: parseLiteLLMModelConfig(`
+model_list:
+  - model_name: dash_cloud
+    litellm_params:
+      model: ollama_chat/gpt-oss:120b-cloud
+      api_base: http://localhost:11434
+`)
+  });
+  assert.equal(dashCloud.modelLocation, "cloud");
 });
 
 test("resolveExecutedModelRoute corrects executed fallback route from upstream model group", () => {

@@ -99,6 +99,10 @@ model_list:
     litellm_params:
       model: ollama_chat/qwen2.5-coder:7b
       api_base: http://localhost:11434
+    model_info:
+      model_manager_id: ollama
+      model_manager_tool: ollama
+      model_location: local
   - model_name: code_cloud
     litellm_params:
       model: ollama_chat/qwen3-coder-next:cloud
@@ -165,6 +169,8 @@ model_list:
     assert.equal(response.headers.get("x-router-provider-model"), "ollama_chat/qwen2.5-coder:7b");
     assert.equal(response.headers.get("x-router-display-model"), "qwen2.5-coder:7b");
     assert.equal(response.headers.get("x-router-model-location"), "local");
+    assert.equal(response.headers.get("x-router-model-manager-id"), "ollama");
+    assert.equal(response.headers.get("x-router-model-manager-tool"), "ollama");
   } finally {
     globalThis.fetch = originalFetch;
     await new Promise((resolve, reject) => {

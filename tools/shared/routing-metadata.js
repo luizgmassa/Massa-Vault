@@ -9,7 +9,9 @@ const ROUTING_HEADER_MAP = Object.freeze({
   fallbackRoutes: "x-router-fallback-routes",
   localFallbackAvailable: "x-router-local-fallback-available",
   fallbackUsed: "x-router-fallback-used",
-  fallbackWarning: "x-router-fallback-warning"
+  fallbackWarning: "x-router-fallback-warning",
+  modelManagerId: "x-router-model-manager-id",
+  modelManagerTool: "x-router-model-manager-tool"
 });
 
 const ROUTING_TRANSCRIPT_MAP = Object.freeze({
@@ -20,7 +22,9 @@ const ROUTING_TRANSCRIPT_MAP = Object.freeze({
   providerModel: "router_provider_model",
   displayModel: "router_display_model",
   modelLocation: "router_model_location",
-  responseModel: "router_response_model"
+  responseModel: "router_response_model",
+  modelManagerId: "router_model_manager_id",
+  modelManagerTool: "router_model_manager_tool"
 });
 const ROUTING_DEFAULT_VALUE = "unknown";
 const SMART_ROUTER_PREFIX = "smart-router";
@@ -131,6 +135,8 @@ export function decodeRoutingHeaders(headers) {
     providerModel: firstText(getHeaderValue(headers, ROUTING_HEADER_MAP.providerModel)),
     displayModel: firstText(getHeaderValue(headers, ROUTING_HEADER_MAP.displayModel)),
     modelLocation: firstText(getHeaderValue(headers, ROUTING_HEADER_MAP.modelLocation)),
+    modelManagerId: firstText(getHeaderValue(headers, ROUTING_HEADER_MAP.modelManagerId)),
+    modelManagerTool: firstText(getHeaderValue(headers, ROUTING_HEADER_MAP.modelManagerTool)),
     responseModel: null
   };
 
@@ -229,6 +235,8 @@ export function routingFromTranscriptMetadata(metadata) {
   const displayModel = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.displayModel]);
   const modelLocation = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.modelLocation]);
   const responseModel = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.responseModel]);
+  const modelManagerId = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.modelManagerId]);
+  const modelManagerTool = firstText(metadata?.[ROUTING_TRANSCRIPT_MAP.modelManagerTool]);
   if (
     !lane &&
     !targetModel &&
@@ -237,7 +245,9 @@ export function routingFromTranscriptMetadata(metadata) {
     !providerModel &&
     !displayModel &&
     !modelLocation &&
-    !responseModel
+    !responseModel &&
+    !modelManagerId &&
+    !modelManagerTool
   ) {
     return null;
   }
@@ -252,6 +262,8 @@ export function routingFromTranscriptMetadata(metadata) {
   if (displayModel) routing.displayModel = displayModel;
   if (modelLocation) routing.modelLocation = modelLocation;
   if (responseModel) routing.responseModel = responseModel;
+  if (modelManagerId) routing.modelManagerId = modelManagerId;
+  if (modelManagerTool) routing.modelManagerTool = modelManagerTool;
   return routing;
 }
 
@@ -266,12 +278,16 @@ export function routingToTranscriptMetadata(routing) {
   const displayModel = firstText(routing?.displayModel);
   const modelLocation = firstText(routing?.modelLocation);
   const responseModel = firstText(routing?.responseModel);
+  const modelManagerId = firstText(routing?.modelManagerId);
+  const modelManagerTool = firstText(routing?.modelManagerTool);
 
   if (routedModel) metadata[ROUTING_TRANSCRIPT_MAP.routedModel] = routedModel;
   if (providerModel) metadata[ROUTING_TRANSCRIPT_MAP.providerModel] = providerModel;
   if (displayModel) metadata[ROUTING_TRANSCRIPT_MAP.displayModel] = displayModel;
   if (modelLocation) metadata[ROUTING_TRANSCRIPT_MAP.modelLocation] = modelLocation;
   if (responseModel) metadata[ROUTING_TRANSCRIPT_MAP.responseModel] = responseModel;
+  if (modelManagerId) metadata[ROUTING_TRANSCRIPT_MAP.modelManagerId] = modelManagerId;
+  if (modelManagerTool) metadata[ROUTING_TRANSCRIPT_MAP.modelManagerTool] = modelManagerTool;
   return metadata;
 }
 

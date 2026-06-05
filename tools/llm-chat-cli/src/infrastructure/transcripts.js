@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { routingToTranscriptMetadata } from "../../../shared/routing-metadata.js";
+import {
+  ROUTING_TRANSCRIPT_MAP,
+  routingToTranscriptMetadata
+} from "../../../shared/routing-metadata.js";
 
 function pad(value, size = 2) {
   return String(value).padStart(size, "0");
@@ -266,6 +269,19 @@ export function formatTranscript({
   lines.push(`router_lane: "${escapeFrontmatterString(routingMetadata.router_lane)}"`);
   lines.push(`router_target_model: "${escapeFrontmatterString(routingMetadata.router_target_model)}"`);
   lines.push(`router_confidence: "${escapeFrontmatterString(routingMetadata.router_confidence)}"`);
+  for (const key of [
+    ROUTING_TRANSCRIPT_MAP.routedModel,
+    ROUTING_TRANSCRIPT_MAP.providerModel,
+    ROUTING_TRANSCRIPT_MAP.displayModel,
+    ROUTING_TRANSCRIPT_MAP.modelLocation,
+    ROUTING_TRANSCRIPT_MAP.responseModel,
+    ROUTING_TRANSCRIPT_MAP.modelManagerId,
+    ROUTING_TRANSCRIPT_MAP.modelManagerTool
+  ]) {
+    if (routingMetadata[key]) {
+      lines.push(`${key}: "${escapeFrontmatterString(routingMetadata[key])}"`);
+    }
+  }
   lines.push(`prompt_tokens: ${Number(usage?.prompt_tokens || 0)}`);
   lines.push(`completion_tokens: ${Number(usage?.completion_tokens || 0)}`);
   lines.push(`total_tokens: ${Number(usage?.total_tokens || 0)}`);

@@ -83,6 +83,37 @@ test("writeTranscript stores created_at local offset and filename summary/fallba
   );
 });
 
+test("writeTranscript stores optional concrete routing and MMT metadata", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-transcript-routing-"));
+  const filePath = writeTranscript({
+    vaultPath: tempDir,
+    id: "routing-id",
+    createdAt: "2026-05-26T12:34:56.789Z",
+    gatewayUrl: "http://127.0.0.1:4100",
+    model: "smart-router",
+    routing: {
+      lane: "general",
+      targetModel: "smart-router-general",
+      confidence: "1.0000",
+      routedModel: "mmt_ollama_qwen3_5_9b",
+      providerModel: "ollama_chat/qwen3.5:9b",
+      displayModel: "qwen3.5:9b",
+      modelLocation: "local",
+      modelManagerId: "ollama",
+      modelManagerTool: "ollama"
+    },
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  const content = fs.readFileSync(filePath, "utf8");
+  assert.match(content, /router_routed_model: "mmt_ollama_qwen3_5_9b"/);
+  assert.match(content, /router_model_manager_id: "ollama"/);
+  assert.match(content, /router_model_manager_tool: "ollama"/);
+  const parsed = readTranscript(filePath);
+  assert.equal(parsed.metadata.router_model_manager_tool, "ollama");
+});
+
 test("listTranscriptDates and listTranscriptsForDate are newest-first", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-transcript-list-"));
   const chatsDir = path.join(tempDir, "AI Chats");

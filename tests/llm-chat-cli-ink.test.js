@@ -97,10 +97,10 @@ test("Ink chat renders compact header/footer format", async (t) => {
     await delay(20);
     const frame = app.lastFrame();
     assert.match(frame, /Massa Vault AI Assistant/);
-    assert.match(frame, /Gateway: .* \| Model: pending @ unknown \| Auth: (On|Off)/);
+    assert.match(frame, /Gateway: .* \| Model: pending @ unknown via unknown \| Auth: (On|Off)/);
     assert.doesNotMatch(frame, /smart-router/);
     assert.match(frame, /you>/);
-    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive ok \]/);
+    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown via unknown \] \[ sync: git ok \/ drive ok \]/);
     app.unmount();
   });
 });
@@ -256,7 +256,7 @@ test("Ink footer shows running labels while daemon sync is syncing", async (t) =
     const frame = app.lastFrame();
     assert.match(
       frame,
-      /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git running \/ drive running \]/
+      /\[ 0 tokens \] \[ model: pending @ unknown via unknown \] \[ sync: git running \/ drive running \]/
     );
     app.unmount();
   });
@@ -316,14 +316,14 @@ test("Ink chat shows thinking state and updates compact footer after streaming",
     assert.equal(typeof driver.submit, "function");
     const pending = driver.submit("ping");
     await delay(30);
-    assert.match(app.lastFrame(), /Model: qwen3\.5:9b @ local/);
+    assert.match(app.lastFrame(), /Model: qwen3\.5:9b @ local via unknown/);
     assert.match(app.lastFrame(), /assistant> thinking\.\.\. 00:00/);
 
     await pending;
     await delay(20);
     const frame = app.lastFrame();
     assert.match(frame, /assistant> Hello/);
-    assert.match(frame, /\[ 3 tokens \] \[ model: qwen3\.5:9b @ local \] \[ sync status: git ok \/ drive ok \]/);
+    assert.match(frame, /\[ 3 tokens \] \[ model: qwen3\.5:9b @ local via unknown \] \[ sync: git ok \/ drive ok \]/);
     assert.equal((frame.match(/\[\s*\d+\s+tokens\s*\]/g) || []).length, 1);
     app.unmount();
   });
@@ -371,8 +371,8 @@ test("Ink chat hides smart-router aliases when concrete model metadata is missin
   await delay(30);
 
   const frame = app.lastFrame();
-  assert.match(frame, /Model: pending @ unknown/);
-  assert.match(frame, /\[ 2 tokens \] \[ model: pending @ unknown \]/);
+  assert.match(frame, /Model: pending @ unknown via unknown/);
+  assert.match(frame, /\[ 2 tokens \] \[ model: pending @ unknown via unknown \]/);
   assert.doesNotMatch(frame, /smart-router/);
   app.unmount();
 });
@@ -576,17 +576,97 @@ test("Ink /sync refresh action updates footer without opening sync screen", asyn
     );
 
     await delay(20);
-    assert.match(app.lastFrame(), /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive ok \]/);
+    assert.match(app.lastFrame(), /\[ 0 tokens \] \[ model: pending @ unknown via unknown \] \[ sync: git ok \/ drive ok \]/);
 
     await driver.submit("/sync");
     await delay(40);
     const frame = app.lastFrame();
     assert.match(frame, /transcript saved: \/tmp\/transcript\.md/i);
     assert.match(frame, /sync status=paused conflicts=0 error=drive failed/i);
-    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown \] \[ sync status: git ok \/ drive error \]/);
+    assert.match(frame, /\[ 0 tokens \] \[ model: pending @ unknown via unknown \] \[ sync: git ok \/ drive error \]/);
     assert.doesNotMatch(frame, /sync status \(refresh every 2s\)/i);
 
     app.unmount();
+  });
+});
+
+test("Ink /model select refreshes header and footer immediately", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  await withTempDir(async (tempDir) => {
+    writeState(tempDir, {
+      running: false,
+      pid: null,
+      paused: false,
+      sync: { status: "idle", conflictCount: 0 }
+    });
+
+    const { React, render, InkChatApp } = stack;
+    const driver = {};
+    const modelLines = [
+      "Mode : pinned mmt_ollama_qwen3_5_9b | restart_required=no",
+      "",
+      "| # | Alias | Model | Location | Via | Status | Selected |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| 1 | mmt_ollama_qwen3_5_9b | qwen3.5:9b | local | ollama | active | yes |",
+      "",
+      "Actions : `/model select <row|alias>` selects and pins an active model | row number shortcut = `/model select <row>` | `/model auto` clears selection | `/model refresh` | `/back` | `/conv`"
+    ];
+    const app = render(
+      React.createElement(InkChatApp, {
+        systemPrompt: "",
+        driver,
+        chatCompletion: async () => ({
+          assistantText: "",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          routing: null
+        }),
+        commandExecutor: async ({ line, state }) => {
+          if (line === "/model select 1") {
+            state.latestRouting = {
+              routedModel: "mmt_ollama_qwen3_5_9b",
+              providerModel: "ollama_chat/qwen3.5:9b",
+              displayModel: "qwen3.5:9b",
+              modelLocation: "local",
+              modelManagerTool: "ollama"
+            };
+            return {
+              handled: true,
+              exit: false,
+              action: {
+                type: "switch-screen",
+                screen: "panel",
+                panelScreen: {
+                  id: "model",
+                  title: "Models",
+                  lines: modelLines,
+                  scrollable: true,
+                  commandHint: "/model select <row|alias> or row number"
+                }
+              }
+            };
+          }
+          return { handled: true, exit: false };
+        }
+      })
+    );
+
+    try {
+      await delay(20);
+      assert.match(app.lastFrame(), /Model: pending @ unknown via unknown/);
+
+      await driver.submit("/model select 1");
+      await delay(40);
+      const frame = app.lastFrame();
+      assert.match(frame, /Model: qwen3\.5:9b @ local via ollama/);
+      assert.match(frame, /\[ model: qwen3\.5:9b @ local via ollama \]/);
+      assert.match(frame, /Status\s+\|\s+Selected/);
+      assert.match(frame, /\/model select <row\|alias>/);
+      assert.doesNotMatch(frame, /Pinned/);
+    } finally {
+      app.unmount();
+    }
   });
 });
 
@@ -615,7 +695,7 @@ test("Ink footer polls sync state while conversation screen is active", async (t
     );
 
     await delay(40);
-    assert.match(app.lastFrame(), /\[ sync status: git ok \/ drive ok \]/);
+    assert.match(app.lastFrame(), /\[ sync: git ok \/ drive ok \]/);
 
     writeState(tempDir, {
       running: false,
@@ -631,7 +711,7 @@ test("Ink footer polls sync state while conversation screen is active", async (t
 
     await delay(2300);
     const frame = app.lastFrame();
-    assert.match(frame, /\[ sync status: git ok \/ drive error \]/);
+    assert.match(frame, /\[ sync: git ok \/ drive error \]/);
     assert.doesNotMatch(frame, /sync status \(refresh every 2s\)/i);
 
     app.unmount();
@@ -1434,8 +1514,8 @@ test("Ink /history summary refreshes footer model from updated session routing",
   await driver.submit("/history summary 1");
   await delay(30);
   const frame = app.lastFrame();
-  assert.match(frame, /Model: qwen3\.5:9b @ local/);
-  assert.match(frame, /\[ 0 tokens \] \[ model: qwen3\.5:9b @ local \]/);
+  assert.match(frame, /Model: qwen3\.5:9b @ local via unknown/);
+  assert.match(frame, /\[ 0 tokens \] \[ model: qwen3\.5:9b @ local via unknown \]/);
   app.unmount();
 });
 

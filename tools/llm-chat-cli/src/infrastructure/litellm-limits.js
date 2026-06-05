@@ -1,7 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
-
-const DEFAULT_CONFIG_PATH = path.resolve(".litellm/litellm-config.yaml");
+import { resolveLiteLLMConfigPath } from "../../../shared/model-managers.js";
 
 export function parseLiteLLMLimits(yamlText) {
   const limits = {};
@@ -54,7 +52,7 @@ export function parseLiteLLMLimits(yamlText) {
   return limits;
 }
 
-export function readLiteLLMLimits(configPath = DEFAULT_CONFIG_PATH) {
+export function readLiteLLMLimits(configPath = resolveLiteLLMConfigPath()) {
   try {
     const raw = fs.readFileSync(configPath, "utf8");
     return parseLiteLLMLimits(raw);

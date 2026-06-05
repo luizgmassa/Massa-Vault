@@ -78,6 +78,26 @@ function createRuntime(overrides = {}) {
         session.history = [];
       },
       ...overrides.sessionClient
+    },
+    modelManagerClient: overrides.modelManagerClient || {
+      readState: () => ({
+        managers: [],
+        verifiedModels: [],
+        selectedManagerIds: [],
+        preferences: { mode: "auto", pinnedAlias: null },
+        restartRequired: false
+      }),
+      formatMmtScreenLines: () => ["No model managers configured."],
+      formatModelScreenLines: () => ["No verified MMT models."],
+      addManagerFromInput: () => ({}),
+      editManagerFromInput: () => ({}),
+      removeManagerFromInput: () => ({}),
+      selectManagerFromInput: () => ({}),
+      discoverManagers: async () => ({ state: {}, errors: [] }),
+      applyModelManagerConfig: async () => ({ state: {}, error: null }),
+      refreshActiveModels: async () => ({}),
+      pinModelFromInput: () => ({}),
+      autoModelMode: () => ({})
     }
   });
 }
@@ -189,6 +209,101 @@ test("createCommandRuntime returns info screens for sync conflicts and usage-sty
   assert.match(searchUsage.action?.panelScreen?.lines?.join("\n") || "", /\/search <query>/);
   assert.equal(systemUsage.action?.screen, "panel");
   assert.match(systemUsage.action?.panelScreen?.lines?.join("\n") || "", /\/system show/);
+});
+
+test("createCommandRuntime handles MMT and model screens with active/pending selection", async () => {
+  let state = {
+    activeScreen: "conversation",
+    managers: [{ id: "ollama", tool: "ollama", baseUrl: "http://127.0.0.1:11434" }],
+    selectedManagerIds: ["ollama"],
+    verifiedModels: [
+      {
+        alias: "mmt_ollama_qwen3_5_9b",
+        name: "qwen3.5:9b",
+        managerTool: "ollama",
+        location: "local",
+        status: "active"
+      },
+      {
+        alias: "mmt_ollama_pending",
+        name: "pending",
+        managerTool: "ollama",
+        location: "local",
+        status: "pending"
+      }
+    ],
+    preferences: { mode: "auto", pinnedAlias: null },
+    restartRequired: true
+  };
+  const runtime = createRuntime({
+    modelManagerClient: {
+      readState: () => state,
+      formatMmtScreenLines: (nextState) => [`Manager ${nextState.managers[0].id}`, "Actions : /mmt apply"],
+      formatModelScreenLines: (nextState) => nextState.verifiedModels.map((model, index) => `${index + 1} ${model.alias} ${model.status}`),
+      routingFromPinnedModelState: (nextState) => {
+        if (nextState.preferences.mode !== "pin") return null;
+        const selected = nextState.verifiedModels.find(
+          (model) => model.alias === nextState.preferences.pinnedAlias
+        );
+        return selected
+          ? {
+              routedModel: selected.alias,
+              displayModel: selected.name,
+              modelLocation: selected.location,
+              modelManagerTool: selected.managerTool
+            }
+          : null;
+      },
+      addManagerFromInput: () => state,
+      editManagerFromInput: () => state,
+      removeManagerFromInput: () => state,
+      selectManagerFromInput: () => state,
+      discoverManagers: async () => ({ state, errors: [] }),
+      applyModelManagerConfig: async () => ({ state, error: "LiteLLM offline" }),
+      refreshActiveModels: async () => state,
+      pinModelFromInput: (value) => {
+        const alias = value === "1" ? state.verifiedModels[0].alias : value === "2" ? state.verifiedModels[1].alias : value;
+        const selected = state.verifiedModels.find((model) => model.alias === alias);
+        if (selected?.status !== "active") {
+          throw new Error(`Model alias ${alias} is pending; restart required before selection.`);
+        }
+        state = {
+          ...state,
+          preferences: { mode: "pin", pinnedAlias: alias }
+        };
+        return state;
+      },
+      autoModelMode: () => {
+        state = { ...state, preferences: { mode: "auto", pinnedAlias: null } };
+        return state;
+      }
+    }
+  });
+  const session = createChatSession({ systemPrompt: "" });
+
+  const mmt = await runtime.execute({ line: "/mmt", session, limitsByModel: {}, mode: "tui" });
+  assert.equal(mmt.action?.screen, "panel");
+  assert.match(mmt.action?.panelScreen?.lines?.join("\n") || "", /Manager ollama/);
+
+  const model = await runtime.execute({ line: "/model", session, limitsByModel: {}, mode: "tui" });
+  assert.equal(model.action?.panelScreen?.id, "model");
+  assert.equal(model.action?.panelScreen?.commandHint, "/model select <row|alias> or row number");
+  assert.match(model.action?.panelScreen?.lines?.join("\n") || "", /mmt_ollama_qwen3_5_9b active/);
+
+  session.activeScreen = "model";
+  const pinned = await runtime.execute({ line: "1", session, limitsByModel: {}, mode: "tui" });
+  assert.equal(pinned.action?.panelScreen?.id, "model");
+  assert.equal(state.preferences.pinnedAlias, "mmt_ollama_qwen3_5_9b");
+  assert.equal(session.latestRouting?.displayModel, "qwen3.5:9b");
+  assert.equal(session.latestRouting?.modelLocation, "local");
+
+  const rejected = await runtime.execute({ line: "/model select 2", session, limitsByModel: {}, mode: "tui" });
+  assert.match(rejected.action?.panelScreen?.lines?.join("\n") || "", /restart required/);
+
+  const auto = await runtime.execute({ line: "/model auto", session, limitsByModel: {}, mode: "tui" });
+  assert.equal(auto.action?.panelScreen?.id, "model");
+  assert.equal(state.preferences.mode, "auto");
+  assert.equal(session.latestRouting, null);
 });
 
 test("createDefaultCommandRuntime wires default saveAndSync for /sync", async () => {

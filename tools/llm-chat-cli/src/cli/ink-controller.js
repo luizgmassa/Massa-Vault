@@ -10,9 +10,11 @@ export function modelStatusFromRouting(routing) {
     .filter((value) => value && !value.toLowerCase().startsWith("smart-router"));
   const displayModel = displayCandidates[0] || "";
   const modelLocation = String(routing?.modelLocation || "").trim();
+  const modelManagerTool = String(routing?.modelManagerTool || "").trim();
   return {
     displayModel: displayModel || "pending",
-    modelLocation: modelLocation || "unknown"
+    modelLocation: modelLocation || "unknown",
+    modelManagerTool: modelManagerTool || "unknown"
   };
 }
 

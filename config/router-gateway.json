@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "description": "Router-gateway lane policy only. Concrete model aliases live in the generated MMT LiteLLM config.",
   "confidenceFloor": 0.55,
   "lanes": {
     "code": {

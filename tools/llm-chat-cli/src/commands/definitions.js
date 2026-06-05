@@ -87,6 +87,55 @@ export const CHAT_COMMAND_DEFINITIONS = Object.freeze([
     description: "Show latest router metadata"
   },
   {
+    command: "/mmt",
+    description: "Open model manager tools screen"
+  },
+  {
+    command: "/mmt add",
+    description: "Add Ollama or LM Studio manager",
+    requiresInput: true
+  },
+  {
+    command: "/mmt select",
+    description: "Select manager by row or ID",
+    requiresInput: true
+  },
+  {
+    command: "/mmt edit",
+    description: "Edit manager base URL/name",
+    requiresInput: true
+  },
+  {
+    command: "/mmt remove",
+    description: "Remove manager by row or ID",
+    requiresInput: true
+  },
+  {
+    command: "/mmt discover",
+    description: "Discover installed manager models"
+  },
+  {
+    command: "/mmt apply",
+    description: "Generate LiteLLM config and check active aliases"
+  },
+  {
+    command: "/model",
+    description: "Open verified model selection screen"
+  },
+  {
+    command: "/model select",
+    description: "Select and pin active model by row or alias",
+    requiresInput: true
+  },
+  {
+    command: "/model auto",
+    description: "Clear selected model and return to local-first auto routing"
+  },
+  {
+    command: "/model refresh",
+    description: "Refresh active/pending model status"
+  },
+  {
     command: "/search",
     description: "Semantic search in chats + vault markdown",
     requiresInput: true

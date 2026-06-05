@@ -3,6 +3,10 @@ import { createSearchCommandSpecs } from "./families/search.js";
 import { createSessionSystemCommandSpecs } from "./families/session-system.js";
 import { createSyncCommandSpecs } from "./families/sync.js";
 import { createUsageCommandSpecs } from "./families/usage.js";
+import {
+  createModelManagerCommandSpecs,
+  normalizeModelManagerInputShortcut
+} from "./families/model-manager.js";
 import { createInfoScreenAction } from "../domain/info-screen.js";
 import { writeMessage } from "./shared.js";
 
@@ -12,6 +16,7 @@ function createCommandRegistry(deps) {
     ...createSyncCommandSpecs(deps),
     ...createSessionSystemCommandSpecs(deps),
     ...createUsageCommandSpecs(deps),
+    ...createModelManagerCommandSpecs(deps),
     ...createSearchCommandSpecs(deps)
   ];
 }
@@ -22,7 +27,8 @@ export function createCommandRuntime({
   historyClient = {},
   usageClient = {},
   searchClient = {},
-  sessionClient = {}
+  sessionClient = {},
+  modelManagerClient = {}
 } = {}) {
   const deps = {
     HISTORY_FLOW_PREVIEW: config.historyFlowPreview,
@@ -55,6 +61,7 @@ export function createCommandRuntime({
     formatSyncFeedback: syncClient.formatSyncFeedback,
     formatUsagePanel: usageClient.formatUsagePanel,
     formatUsageScreenLines: usageClient.formatUsageScreenLines,
+    modelManagerClient,
     getHistoryRowFromSelection: historyClient.getHistoryRowFromSelection,
     historyBackStep: historyClient.historyBackStep,
     isHistoryConversationsScreen: historyClient.isHistoryConversationsScreen,
@@ -99,12 +106,13 @@ export function createCommandRuntime({
         }
       };
       const typedLine = String(line || "").trim();
-      const alias = deps.parseHistoryConversationAlias(typedLine);
+      const modelManagerLine = normalizeModelManagerInputShortcut(typedLine, session);
+      const alias = deps.parseHistoryConversationAlias(modelManagerLine);
       if (alias && !deps.isHistoryConversationsScreen(session)) {
         writeMessage(mode, tuiHandlers, deps.createHistoryConversationsOnlyMessage(alias.alias));
         return { handled: true, exit: false };
       }
-      const normalizedLine = deps.normalizeHistoryInputShortcut(typedLine, session);
+      const normalizedLine = deps.normalizeHistoryInputShortcut(modelManagerLine, session);
       const registry = createCommandRegistry(deps);
       const matched = registry.find((entry) => entry.match(normalizedLine));
       if (!matched) {

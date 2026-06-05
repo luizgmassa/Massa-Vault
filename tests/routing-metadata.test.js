@@ -35,6 +35,8 @@ test("routing header helpers round-trip shared gateway metadata", () => {
 
   assert.deepEqual(decoded, {
     ...routing,
+    modelManagerId: null,
+    modelManagerTool: null,
     responseModel: null
   });
 });
@@ -48,7 +50,9 @@ test("routing transcript helpers preserve concrete routing metadata", () => {
     providerModel: "ollama_chat/qwen3.5:9b",
     displayModel: "qwen3.5:9b",
     modelLocation: "local",
-    responseModel: "ollama_chat/qwen3.5:9b"
+    responseModel: "ollama_chat/qwen3.5:9b",
+    modelManagerId: "ollama",
+    modelManagerTool: "ollama"
   };
 
   const metadata = routingToTranscriptMetadata(routing);
@@ -60,7 +64,9 @@ test("routing transcript helpers preserve concrete routing metadata", () => {
     router_provider_model: "ollama_chat/qwen3.5:9b",
     router_display_model: "qwen3.5:9b",
     router_model_location: "local",
-    router_response_model: "ollama_chat/qwen3.5:9b"
+    router_response_model: "ollama_chat/qwen3.5:9b",
+    router_model_manager_id: "ollama",
+    router_model_manager_tool: "ollama"
   });
   assert.deepEqual(routingFromTranscriptMetadata(metadata), routing);
 });

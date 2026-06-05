@@ -22,8 +22,41 @@ import {
 
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TESTS_DIR, "..");
-const ROUTER_POLICY_PATH = path.join(REPO_ROOT, ".litellm", "router.json");
-const LITELLM_CONFIG_PATH = path.join(REPO_ROOT, ".litellm", "litellm-config.yaml");
+const ROUTER_POLICY_PATH = path.join(REPO_ROOT, "config", "router-gateway.json");
+const MMT_LITELLM_CONFIG = `
+model_list:
+  - model_name: mmt_lm_studio_qwen_qwen3_5_9b
+    litellm_params:
+      model: openai/qwen/qwen3.5-9b
+      api_base: http://127.0.0.1:1234/v1
+      api_key: lm-studio
+    model_info:
+      model_manager_id: lm_studio
+      model_manager_tool: lmstudio
+      model_location: local
+
+  - model_name: smart-router-general
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: mmt_lm_studio_qwen_qwen3_5_9b
+          MEDIUM: mmt_lm_studio_qwen_qwen3_5_9b
+          COMPLEX: mmt_lm_studio_qwen_qwen3_5_9b
+          REASONING: mmt_lm_studio_qwen_qwen3_5_9b
+      complexity_router_default_model: mmt_lm_studio_qwen_qwen3_5_9b
+
+  - model_name: smart-router-code
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: mmt_lm_studio_qwen_qwen3_5_9b
+          MEDIUM: mmt_lm_studio_qwen_qwen3_5_9b
+          COMPLEX: mmt_lm_studio_qwen_qwen3_5_9b
+          REASONING: mmt_lm_studio_qwen_qwen3_5_9b
+      complexity_router_default_model: mmt_lm_studio_qwen_qwen3_5_9b
+`;
 
 async function withTempDir(run) {
   const previousCwd = process.cwd();
@@ -660,7 +693,7 @@ test("createStartupWarmup prompts resolve to active router lanes and concrete mo
   assert.equal(result.ok, true);
 
   const policy = loadPolicy(ROUTER_POLICY_PATH);
-  const models = parseLiteLLMModelConfig(fs.readFileSync(LITELLM_CONFIG_PATH, "utf8"));
+  const models = parseLiteLLMModelConfig(MMT_LITELLM_CONFIG);
   const resolutions = capturedBodies.map((body) => {
     const routing = classifyRequest(body, policy);
     const resolved = resolveModelRoute({
@@ -675,8 +708,8 @@ test("createStartupWarmup prompts resolve to active router lanes and concrete mo
   });
 
   assert.deepEqual(resolutions, [
-    { targetModel: "smart-router-general", routedModel: "general_local" },
-    { targetModel: "smart-router-code", routedModel: "code_local" }
+    { targetModel: "smart-router-general", routedModel: "mmt_lm_studio_qwen_qwen3_5_9b" },
+    { targetModel: "smart-router-code", routedModel: "mmt_lm_studio_qwen_qwen3_5_9b" }
   ]);
 });
 

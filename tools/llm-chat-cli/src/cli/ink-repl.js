@@ -849,7 +849,7 @@ export function InkChatApp({
 
   const headerMeta =
     `Gateway: ${gatewayRef.current.gatewayUrl} | ` +
-    `Model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} | ` +
+    `Model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} via ${modelStatus.modelManagerTool} | ` +
     `Auth: ${gatewayRef.current.apiKey ? "On" : "Off"}`;
   const syncScreenActive = screen === "sync";
   const historyScreenActive = screen === "history";
@@ -1032,7 +1032,7 @@ export function InkChatApp({
       createElement(
         Text,
         { color: "gray" },
-        `[ ${liveTokenCount} tokens ] [ model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} ] [ sync status: git `
+        `[ ${liveTokenCount} tokens ] [ model: ${modelStatus.displayModel} @ ${modelStatus.modelLocation} via ${modelStatus.modelManagerTool} ] [ sync: git `
       ),
       createElement(Text, { color: compactSyncColor(gitFooterLabel) }, gitFooterLabel),
       createElement(Text, { color: "gray" }, " / drive "),

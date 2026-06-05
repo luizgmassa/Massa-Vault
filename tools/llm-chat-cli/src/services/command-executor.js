@@ -35,6 +35,7 @@ import {
   DEFAULT_RAG_MAX_CHARS,
   VAULT_CONTEXT_MODES
 } from "../domain/vault-context.js";
+import { createModelManagerClient } from "./model-manager.js";
 
 const { createCommandRuntime } = await import("../commands/runtime.js");
 
@@ -52,7 +53,8 @@ export function createDefaultCommandRuntime({
   transcriptMarkdownReader,
   historySummaryRunner,
   saveAndSync = saveAndSyncSession,
-  syncClient = createSyncClient()
+  syncClient = createSyncClient(),
+  modelManagerClient = createModelManagerClient()
 } = {}) {
   const historyClient = createHistoryClient({
     searchRunner: historySearchRunner,
@@ -92,6 +94,7 @@ export function createDefaultCommandRuntime({
       formatSearchScreenLines,
       printSearchPlain
     },
+    modelManagerClient,
     sessionClient: {
       loadTranscript: (session, payload) =>
         loadTranscriptIntoSession(session, {

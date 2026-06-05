@@ -22,12 +22,14 @@ export function createStatusState({
 export function createStatusLine(state) {
   const lane = state.routing?.lane || "unknown";
   const model = state.routing?.targetModel || DEFAULT_GATEWAY_MODEL;
+  const modelManagerTool = state.routing?.modelManagerTool || "unknown";
   return (
     `[tokens session=${state.sessionUsage.total_tokens}` +
     ` all_time=${state.ledgerTotals.total_tokens}` +
     ` est=${state.estimatedTokens}` +
     ` lane=${lane}` +
     ` model=${model}` +
+    ` via=${modelManagerTool}` +
     ` auth=${state.authEnabled ? "on" : "off"}]`
   );
 }

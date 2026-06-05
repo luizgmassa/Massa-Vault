@@ -1,7 +1,6 @@
 export const ROUTER_GATEWAY_DEFAULT_PORT = 4100;
 export const ROUTER_GATEWAY_DEFAULT_HOST = "127.0.0.1";
-export const ROUTER_GATEWAY_DEFAULT_POLICY_PATH = ".litellm/router.json";
-export const ROUTER_GATEWAY_DEFAULT_LITELLM_CONFIG_PATH = ".litellm/litellm-config.yaml";
+export const ROUTER_GATEWAY_DEFAULT_POLICY_PATH = "config/router-gateway.json";
 export const ROUTER_GATEWAY_DEFAULT_LITELLM_BASE_URL = "http://127.0.0.1:4000";
 export const ROUTER_GATEWAY_REQUIRED_MODEL = "smart-router";
 export const ROUTER_GATEWAY_HEALTH_PATH = "/health";
