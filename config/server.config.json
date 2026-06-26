@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "state_path": ".automation/server/state.json",
+  "pid_path": ".automation/server/supervisor.pid",
+  "log_dir": ".logs/server",
+  "startup_timeout_ms": 30000,
+  "shutdown_timeout_ms": 5000,
+  "services": {
+    "litellm": {
+      "enabled": true,
+      "command": "bash",
+      "args": ["scripts/run-litellm.sh"],
+      "health_url": "http://127.0.0.1:4000/health/liveliness"
+    },
+    "router-gateway": {
+      "enabled": true,
+      "command": "node",
+      "args": ["tools/router-gateway/src/server.js"],
+      "health_url": "http://127.0.0.1:4100/health"
+    },
+    "mcp-server": {
+      "enabled": true,
+      "command": "node",
+      "args": ["tools/mcp-server/src/server.js"],
+      "health_url": "http://127.0.0.1:4200/health"
+    },
+    "notes-automation": {
+      "enabled": true,
+      "command": "node",
+      "args": ["tools/notes-automation/src/cli.js", "run"],
+      "startup_grace_ms": 750
+    }
+  }
+}

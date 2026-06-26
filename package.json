@@ -3,6 +3,10 @@
   "version": "1.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "massa-vault": "./tools/cli.js",
+    "massa-vault-server": "./tools/server/src/cli.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -29,10 +33,15 @@
     "vault:status": "node tools/cli.js status",
     "vault:flush-sync": "node tools/cli.js flush-sync",
     "vault:resume": "node tools/cli.js resume",
-    "vault:mcp": "node tools/mcp-server/src/server.js",
-    "mcp-server": "node tools/mcp-server/src/server.js",
-    "router-gateway": "node tools/router-gateway/src/server.js",
-    "litellm": "bash scripts/run-litellm.sh",
+    "vault:mcp": "node tools/server/src/cli.js run --only mcp-server",
+    "server": "node tools/server/src/cli.js",
+    "server:start": "node tools/server/src/cli.js start",
+    "server:stop": "node tools/server/src/cli.js stop",
+    "server:restart": "node tools/server/src/cli.js restart",
+    "server:status": "node tools/server/src/cli.js status --json",
+    "mcp-server": "node tools/server/src/cli.js run --only mcp-server",
+    "router-gateway": "node tools/server/src/cli.js run --only router-gateway",
+    "litellm": "node tools/server/src/cli.js run --only litellm",
     "notes-automation": "node tools/notes-automation/src/cli.js",
     "notes-automation:start": "node tools/notes-automation/src/cli.js start",
     "notes-automation:stop": "node tools/notes-automation/src/cli.js stop",

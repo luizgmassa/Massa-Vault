@@ -27,6 +27,7 @@ loadLocalEnv();
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");
 const CHAT_CLI = path.resolve("tools/llm-chat-cli/src/cli.js");
+const SERVER_CLI = path.resolve("tools/server/src/cli.js");
 const TRUE_LIKE = new Set(["y", "yes", "true", "1"]);
 const FALSE_LIKE = new Set(["n", "no", "false", "0"]);
 const GDRIVE_COMMANDS = new Map([
@@ -38,17 +39,19 @@ const SYNC_COMMANDS = new Map([
   ["resolve", ["sync-resolve"]],
   ["status", ["status"]]
 ]);
-const NOTES_PROXY_COMMANDS = new Set(["start", "stop", "status", "resume", "flush-sync", "flush-push"]);
+const SERVER_PROXY_COMMANDS = new Set(["start", "stop", "status", "restart"]);
+const NOTES_PROXY_COMMANDS = new Set(["resume", "flush-sync", "flush-push"]);
 const USAGE_LINES = Object.freeze([
   "Usage:",
   "  npm run vault:install",
   "  npm run vault:configure",
   "  npm run vault:chat",
   "  npm run vault:sync",
+  "  npm run server:start|server:stop|server:status",
   "  npm run vault -- gdrive check|dry-run",
   "  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync",
   "  # or",
-  "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|resume|flush-sync"
+  "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|restart|resume|flush-sync"
 ]);
 
 function runTool(command, args = []) {
@@ -258,6 +261,11 @@ function proxyNotes(...args) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
+function proxyServer(...args) {
+  const result = runTool(process.execPath, [SERVER_CLI, ...args]);
+  if (result.status !== 0) process.exit(result.status || 1);
+}
+
 async function proxyChat(args) {
   const status = await runToolInteractive(process.execPath, [CHAT_CLI, ...args]);
   if (status !== 0) process.exit(status || 1);
@@ -303,6 +311,9 @@ async function main() {
     }
     console.error("Usage: npm run vault -- sync [conflicts|resolve|status]");
     process.exit(1);
+  }
+  if (SERVER_PROXY_COMMANDS.has(cmd)) {
+    return proxyServer(cmd, ...process.argv.slice(3));
   }
   if (NOTES_PROXY_COMMANDS.has(cmd)) {
     return proxyNotes(cmd);

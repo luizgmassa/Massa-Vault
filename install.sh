@@ -724,27 +724,8 @@ start_services() {
 
   [[ "$should_start" -eq 1 ]] || return 0
 
-  mkdir -p ".logs"
-
-  if ! curl -fsS "http://127.0.0.1:4000/health/liveliness" >/dev/null 2>&1; then
-    nohup npm run litellm > ".logs/litellm.log" 2>&1 &
-    echo "$!" > ".logs/litellm.pid"
-    log "started LiteLLM (pid $(cat .logs/litellm.pid), log .logs/litellm.log)"
-    wait_for_url "http://127.0.0.1:4000/health/liveliness" "LiteLLM"
-  else
-    log "LiteLLM already running"
-  fi
-
-  if ! curl -fsS "http://127.0.0.1:4100/health" >/dev/null 2>&1; then
-    nohup npm run router-gateway > ".logs/router-gateway.log" 2>&1 &
-    echo "$!" > ".logs/router-gateway.pid"
-    log "started router-gateway (pid $(cat .logs/router-gateway.pid), log .logs/router-gateway.log)"
-    wait_for_url "http://127.0.0.1:4100/health" "router-gateway"
-  else
-    log "router-gateway already running"
-  fi
-
-  npm run vault:start
+  npm run server:start
+  wait_for_url "http://127.0.0.1:4100/health" "router-gateway"
 }
 
 main() {

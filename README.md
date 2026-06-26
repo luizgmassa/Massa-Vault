@@ -24,8 +24,9 @@ Your actual notes/memories live in an external vault path configured by CLI.
 
 - `tools/router-gateway`: OpenAI-compatible gateway (`smart-router`) with semantic lane selection.
 - `tools/notes-automation`: file watcher + sync orchestrator for external vault.
+- `tools/server`: supervisor for background services: LiteLLM, router-gateway, MCP server, and notes automation.
 - `tools/security`: secret scanning + git hook installer.
-- `tools/cli.js`: one CLI entrypoint for installation and configuration.
+- `tools/cli.js`: `massa-vault` client entrypoint for installation, configuration, chat, and sync actions.
 
 ## Sync Backends
 
@@ -57,8 +58,9 @@ npm run vault:status
 npm run vault:flush-sync
 npm run vault:resume
 npm run vault:stop
-npm run litellm
-npm run router-gateway
+npm run server:start
+npm run server:status
+npm run server:stop
 npm run build
 ```
 
@@ -88,12 +90,46 @@ Noninteractive example:
 Common flags:
 
 - `--check-only` checks tools without writing files.
-- `--start` starts LiteLLM, router-gateway, and notes automation after validation.
+- `--start` starts `massa-vault-server` after validation.
 - `--no-start` installs and validates only.
 - `--vault-path`, `--sync-strategy`, `--git-mode`, `--git-repo-url`, `--gdrive-remote-path` configure local sync.
 
 Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`. Both are ignored by git.
-Repository Node entrypoints (`npm run vault*`, `npm run router-gateway`, `npm run notes-automation*`) auto-load `.env` without overriding already-exported shell variables.
+Repository Node entrypoints auto-load `.env` without overriding already-exported shell variables.
+
+### Executables and service ownership
+
+Package binaries:
+
+- `massa-vault`: client CLI for install/configure/chat/sync/gdrive and compatibility `start|stop|status` wrappers.
+- `massa-vault-server`: background supervisor for LiteLLM, router-gateway, MCP server, and notes automation.
+
+Server lifecycle:
+
+```bash
+npm run server:start
+npm run server:status
+npm run server:stop
+npm run server:restart
+```
+
+Compatibility wrappers:
+
+```bash
+npm run vault:start
+npm run vault:status
+npm run vault:stop
+```
+
+`massa-vault-server run` stays in the foreground for development or system supervisors. `massa-vault-server start` daemonizes the supervisor and records state in `.automation/server/state.json`. Services detected as already healthy are marked as `external` and are not stopped by the supervisor.
+
+Primary config files:
+
+- Server supervisor: `config/server.config.json`
+- Client CLI defaults: `config/vault-cli.config.json`
+- Notes automation: `config/notes-automation.config.json` plus ignored local override `config/notes-automation.local.json`
+
+Config is file-first. Environment variables and `.env` remain supported for secrets and explicit local overrides such as `LITELLM_MASTER_KEY`, `MASSA_VAULT_CHAT_GATEWAY_URL`, `ROUTER_GATEWAY_PORT`, and `MCP_SERVER_PORT`.
 
 ### `chat`
 
@@ -122,7 +158,7 @@ Chat defaults:
 
 ### Local MCP grounded source server
 
-`npm run vault:mcp` starts a local Streamable HTTP MCP server for grounded source workflows.
+`npm run vault:mcp` starts only the MCP service through `massa-vault-server run --only mcp-server` for grounded source workflows. `npm run server:start` starts it together with the other background services.
 
 Defaults:
 
@@ -321,11 +357,10 @@ Each sync run executes in this order:
 
 ## Router Gateway
 
-Start (in order):
+Start the full background stack:
 
 ```bash
-npm run litellm
-npm run router-gateway
+npm run server:start
 ```
 
 Default endpoint:
@@ -343,6 +378,14 @@ Gateway classifies into:
 Then LiteLLM runs complexity routing within that lane.
 
 When MMT generated config exists, router-gateway and chat usage limits read that generated config by default. `/model` pins still keep external clients on `smart-router`; the gateway forwards the pinned active alias to LiteLLM internally.
+
+For focused development, the legacy service script names now run individual services through the supervisor:
+
+```bash
+npm run litellm
+npm run router-gateway
+npm run mcp-server
+```
 
 ## Security
 

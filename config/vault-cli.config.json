@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "notes_config_path": "config/notes-automation.config.json",
+  "chat": {
+    "gateway_url": "http://127.0.0.1:4100",
+    "model": "smart-router",
+    "rag_enabled": true,
+    "idle_sync_ms": 30000
+  }
+}
