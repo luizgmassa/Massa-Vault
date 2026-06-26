@@ -51,6 +51,19 @@ function normalizeGlobs(globs) {
     .map(toPosix);
 }
 
+function normalizeFilterPaths(filePaths) {
+  if (!Array.isArray(filePaths)) return null;
+  const normalized = filePaths
+    .map((filePath) =>
+      String(filePath || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.\//, "")
+    )
+    .filter(Boolean);
+  return normalized.length ? new Set(normalized) : null;
+}
+
 function listMarkdownFiles(vaultPath, { ignoreGlobs = [], includeGlobs = [] } = {}) {
   const files = [];
   const stack = [vaultPath];
@@ -342,11 +355,13 @@ export async function searchIndex({
   baseUrl = DEFAULT_OLLAMA_BASE_URL,
   model = DEFAULT_EMBED_MODEL,
   limit = 8,
-  includeText = false
+  includeText = false,
+  filePaths = []
 }) {
   const value = String(query || "").trim();
   if (!value) return [];
   if (!indexData || !Array.isArray(indexData.items) || !indexData.items.length) return [];
+  const allowedPaths = normalizeFilterPaths(filePaths);
 
   const vectors = await embedTexts({
     baseUrl,
@@ -358,6 +373,7 @@ export async function searchIndex({
 
   const ranked = [];
   for (const item of indexData.items) {
+    if (allowedPaths && !allowedPaths.has(String(item.relativePath || ""))) continue;
     const score = cosineSimilarity(queryVector, item.embedding);
     if (!Number.isFinite(score)) continue;
     ranked.push({

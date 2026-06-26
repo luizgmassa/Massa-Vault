@@ -120,6 +120,64 @@ Chat defaults:
 - `/config` includes `vault_context` mode (`auto` or `disabled`)
 - vault context modes: semantic note chunks for content questions, manifest file lists for vault listing questions
 
+### Local MCP grounded source server
+
+`npm run vault:mcp` starts a local Streamable HTTP MCP server for grounded source workflows.
+
+Defaults:
+
+- endpoint: `http://127.0.0.1:4200/mcp`
+- auth config: `config/mcp-server.config.json`
+- user: `admin`
+- password: `admin`
+- source library state: `.automation/mcp-server/source-library.json`
+- supported source type: vault-relative Markdown files from configured `vault_path`
+
+Start:
+
+```bash
+npm run vault:mcp
+```
+
+Login:
+
+```bash
+curl -s http://127.0.0.1:4200/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"admin"}'
+```
+
+Use the returned `access_token` as `Authorization: Bearer <access_token>` for MCP requests. Tokens are local in-memory sessions; restart the MCP server to clear them all, or call `POST /auth/logout`.
+
+MCP client config shape:
+
+```json
+{
+  "mcpServers": {
+    "massa-vault-sources": {
+      "url": "http://127.0.0.1:4200/mcp",
+      "headers": {
+        "Authorization": "Bearer <access_token>"
+      }
+    }
+  }
+}
+```
+
+Tools exposed:
+
+- `source_add`, `source_update`, `source_remove`
+- `source_list`, `source_get`, `source_search`
+- `source_select`
+- `ask_sources`
+- `answer_session_cleanup`
+
+Resources exposed:
+
+- `vault-source://<source_id>` for enabled source-library entries
+
+Security note: this is a local-only v1 convenience server with a tracked plain-text admin config. It binds to localhost, validates browser `Origin` headers for `/mcp`, and does not implement MCP OAuth. Do not expose it on a network interface or reuse the default credentials outside local development.
+
 ### Model Manager Tools (MMT) and models
 
 MMT keeps the chat request contract stable (`smart-router`) while letting local model managers provide the concrete models LiteLLM runs.

@@ -7,9 +7,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ink": "^6.2.3",
     "ink-text-input": "^6.0.0",
-    "react": "^19.1.0"
+    "react": "^19.1.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "ink-testing-library": "^4.0.0"
@@ -27,6 +29,8 @@
     "vault:status": "node tools/cli.js status",
     "vault:flush-sync": "node tools/cli.js flush-sync",
     "vault:resume": "node tools/cli.js resume",
+    "vault:mcp": "node tools/mcp-server/src/server.js",
+    "mcp-server": "node tools/mcp-server/src/server.js",
     "router-gateway": "node tools/router-gateway/src/server.js",
     "litellm": "bash scripts/run-litellm.sh",
     "notes-automation": "node tools/notes-automation/src/cli.js",
