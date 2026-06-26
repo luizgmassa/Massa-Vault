@@ -260,6 +260,7 @@ export function createHistoryCommandSpecs(deps) {
             usage: deps.usageFromTranscriptMetadata(metadata)
           });
         } else {
+          const conversationPrompt = String(metadata.conversation_prompt || "").trim();
           state.history = Array.isArray(transcript.messages) ? [...transcript.messages] : [];
           state.activeTranscript = {
             path: row.transcriptPath,
@@ -267,11 +268,14 @@ export function createHistoryCommandSpecs(deps) {
             createdAt: String(metadata.created_at || "").trim() || state.sessionStartedAt,
             gatewayUrl: String(metadata.gateway_url || "").trim() || deps.buildGatewayOptions().gatewayUrl,
             model: String(metadata.model || "").trim() || DEFAULT_GATEWAY_MODEL,
-            routing: loadedRouting
+            routing: loadedRouting,
+            conversationPrompt
           };
           state.latestRouting = isConcreteRouting(loadedRouting) ? loadedRouting : state.latestRouting;
+          state.activeConversationPrompt = conversationPrompt;
           state.transcriptSavedPath = row.transcriptPath;
           state.lastSavedHistoryLength = state.history.length;
+          state.lastSavedConversationPrompt = conversationPrompt;
           state.sessionUsage = deps.usageFromTranscriptMetadata(metadata);
           state.estimatedTokensRef.value = Number(state.sessionUsage.total_tokens || 0);
           state.addedContextEntries = [];

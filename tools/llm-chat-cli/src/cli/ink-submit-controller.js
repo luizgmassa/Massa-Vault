@@ -55,6 +55,10 @@ export async function handleInkSubmit({
       }
     });
     const action = command?.action && typeof command.action === "object" ? command.action : null;
+    if (action?.type === "edit-conversation-prompt") {
+      ui.setPromptEditorValue?.(String(action.prompt || ""));
+      ui.setScreen("conversation");
+    }
     applyInkScreenAction({
       action,
       setPanelNotice: ui.setPanelNotice,

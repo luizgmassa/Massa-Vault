@@ -6,6 +6,18 @@ import {
 } from "../../domain/info-screen.js";
 import { writeLines, writeMessage } from "../shared.js";
 
+function normalizeConversationPromptValue(value) {
+  const text = String(value || "").trim();
+  if (text === '""' || text === "''") return "";
+  return text;
+}
+
+function setConversationPrompt(state, value) {
+  const nextPrompt = normalizeConversationPromptValue(value);
+  state.activeConversationPrompt = nextPrompt;
+  return nextPrompt;
+}
+
 export function createSessionSystemCommandSpecs(deps) {
   return [
     createCommandSpec("/exit", async () => ({ handled: true, exit: true })),
@@ -15,10 +27,14 @@ export function createSessionSystemCommandSpecs(deps) {
       return { handled: true, exit: false };
     }),
     createCommandSpec("/config", async ({ mode, handlers, state }) => {
-      const gateway = deps.buildGatewayOptions();
+      const gateway =
+        typeof deps.buildGatewayOptions === "function"
+          ? deps.buildGatewayOptions()
+          : { gatewayUrl: "", apiKey: "" };
       const lines = [
         `gateway_url: ${gateway.gatewayUrl}`,
         `system_prompt: ${state.activeSystemPrompt ? "configured" : "empty"}`,
+        `conversation_prompt: ${state.activeConversationPrompt ? "configured" : "empty"}`,
         `auth_header: ${gateway.apiKey ? "enabled" : "disabled"}`,
         `vault_context: ${deps.isVaultContextEnabled() ? "auto" : "disabled"}`,
         `vault_context_modes: ${deps.VAULT_CONTEXT_MODES.join(", ")}`
@@ -38,15 +54,48 @@ export function createSessionSystemCommandSpecs(deps) {
             rows: [
               ["Gateway URL", gateway.gatewayUrl],
               ["System prompt", state.activeSystemPrompt ? "Configured" : "Empty"],
+              ["Conversation prompt", state.activeConversationPrompt ? "Configured" : "Empty"],
               ["Auth header", gateway.apiKey ? "Enabled" : "Disabled"],
               ["Vault context", deps.isVaultContextEnabled() ? "Auto" : "Disabled"],
               ["Vault context modes", deps.VAULT_CONTEXT_MODES.join(", ")]
             ],
-            footerLines: ["Usage : `/system show` | `/back` | `/conv`"]
+            footerLines: ["Usage : `/prompt` | `/system show` | `/back` | `/conv`"]
           })
         })
       };
     }),
+    createCommandSpec("/prompt", async ({ mode, handlers, state }) => {
+      const activePrompt = String(state.activeConversationPrompt || "");
+      if (mode === "plain") {
+        writeLines(mode, handlers, "conversation prompt", [
+          activePrompt || "[empty]",
+          "",
+          "usage: /prompt <prompt> | /prompt \"\""
+        ]);
+        return { handled: true, exit: false };
+      }
+      return {
+        handled: true,
+        exit: false,
+        action: {
+          type: "edit-conversation-prompt",
+          prompt: activePrompt
+        }
+      };
+    }),
+    createCommandSpec(
+      "/prompt",
+      async ({ mode, handlers, state, parsed }) => {
+        const nextPrompt = setConversationPrompt(state, parsed.value);
+        writeMessage(
+          mode,
+          handlers,
+          nextPrompt ? "[chat] conversation prompt updated" : "[chat] conversation prompt cleared"
+        );
+        return { handled: true, exit: false };
+      },
+      { requiresInput: true }
+    ),
     createCommandSpec("/system show", async ({ mode, handlers, state }) => {
       if (mode === "plain") {
         writeLines(mode, handlers, "system", [state.activeSystemPrompt || "[empty]"]);

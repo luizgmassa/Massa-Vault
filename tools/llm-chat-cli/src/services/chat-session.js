@@ -4,19 +4,23 @@ import { isConcreteRouting } from "../../../shared/routing-metadata.js";
 
 export function createChatSession({
   systemPrompt = "",
+  conversationPrompt = "",
   sessionId = randomUUID(),
   sessionStartedAt = new Date().toISOString()
 } = {}) {
+  const activeConversationPrompt = String(conversationPrompt || "").trim();
   return {
     history: [],
     sessionUsage: createSessionUsage(),
     estimatedTokensRef: { value: 0 },
     latestRouting: null,
     activeSystemPrompt: systemPrompt,
+    activeConversationPrompt,
     sessionId,
     sessionStartedAt,
     transcriptSavedPath: null,
     lastSavedHistoryLength: 0,
+    lastSavedConversationPrompt: activeConversationPrompt,
     historySelectedDate: null,
     historyVisibleRows: [],
     historyDateRows: [],
@@ -34,8 +38,10 @@ export function resetChatSession(session) {
   session.sessionUsage.completion_tokens = 0;
   session.sessionUsage.total_tokens = 0;
   session.latestRouting = null;
+  session.activeConversationPrompt = "";
   session.transcriptSavedPath = null;
   session.lastSavedHistoryLength = 0;
+  session.lastSavedConversationPrompt = "";
   session.historySelectedDate = null;
   session.historyVisibleRows = [];
   session.historyDateRows = [];
@@ -59,6 +65,12 @@ export function addContextEntry(session, { source = "", content = "" } = {}) {
   return true;
 }
 
+export function setConversationPrompt(session, prompt = "") {
+  const nextPrompt = String(prompt || "").trim();
+  session.activeConversationPrompt = nextPrompt;
+  return nextPrompt;
+}
+
 function resolveLatestRouting(currentRouting, transcriptRouting) {
   if (isConcreteRouting(transcriptRouting)) {
     return transcriptRouting;
@@ -80,6 +92,7 @@ export function loadTranscriptIntoSession(
     usage
   }
 ) {
+  const conversationPrompt = String(metadata?.conversation_prompt || "").trim();
   session.history = Array.isArray(transcript?.messages) ? [...transcript.messages] : [];
   session.activeTranscript = {
     path: transcriptPath,
@@ -87,11 +100,14 @@ export function loadTranscriptIntoSession(
     createdAt: String(metadata?.created_at || "").trim() || fallbackSessionStartedAt,
     gatewayUrl: String(metadata?.gateway_url || "").trim() || fallbackGatewayUrl,
     model: String(metadata?.model || "").trim() || fallbackModel,
-    routing: routing || null
+    routing: routing || null,
+    conversationPrompt
   };
   session.latestRouting = resolveLatestRouting(session.latestRouting, session.activeTranscript.routing);
+  session.activeConversationPrompt = conversationPrompt;
   session.transcriptSavedPath = transcriptPath;
   session.lastSavedHistoryLength = session.history.length;
+  session.lastSavedConversationPrompt = conversationPrompt;
   session.sessionUsage = {
     prompt_tokens: Number(usage?.prompt_tokens || 0),
     completion_tokens: Number(usage?.completion_tokens || 0),

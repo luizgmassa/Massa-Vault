@@ -10,6 +10,7 @@ import { createStartupWarmup } from "./startup-warmup.js";
 import {
   getSlashCommandSuggestions as getSlashCommandSuggestionsImpl,
   modelStatusFromRouting as modelStatusFromRoutingImpl,
+  applyPromptEditorInput as applyPromptEditorInputImpl,
   moveSlashSuggestionSelection,
   resolveSlashEnterAction as resolveSlashEnterActionImpl,
   tabCompleteSlashCommandInput as tabCompleteSlashCommandInputImpl
@@ -125,6 +126,10 @@ export function tabCompleteSlashCommandInput(inputValue) {
 
 export function resolveSlashEnterAction({ inputValue, suggestions, selectedIndex }) {
   return resolveSlashEnterActionImpl({ inputValue, suggestions, selectedIndex });
+}
+
+export function applyPromptEditorInput({ currentValue, input, key }) {
+  return applyPromptEditorInputImpl({ currentValue, input, key });
 }
 
 export function navigatePromptHistory({
@@ -355,6 +360,7 @@ export function InkChatApp({
   );
   const [items, setItems] = useState([]);
   const [inputValue, setInputValue] = useState("");
+  const [promptEditorValue, setPromptEditorValue] = useState(null);
   const [slashSelectionIndex, setSlashSelectionIndex] = useState(null);
   const [isBusy, setIsBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
@@ -388,8 +394,9 @@ export function InkChatApp({
   const inputBusyEllipsis = useAnimatedEllipsis(isBusy);
   const thinkingSeconds = useElapsedSeconds(Boolean(assistantPendingId) && isBusy);
   const slashSuggestions = getSlashCommandSuggestions(inputValue);
+  const isPromptEditorOpen = promptEditorValue !== null;
   const showSlashSuggestions =
-    !isBusy && screen === "conversation" && String(inputValue || "").startsWith("/");
+    !isBusy && !isPromptEditorOpen && screen === "conversation" && String(inputValue || "").startsWith("/");
   const effectiveSlashSelectionIndex = showSlashSuggestions
     ? moveSlashSuggestionSelection({
         currentIndex: slashSelectionIndex,
@@ -574,6 +581,7 @@ export function InkChatApp({
           setPanelNotice,
           setPanelScreen,
           setPanelScrollOffset,
+          setPromptEditorValue,
           setScreen,
           setSyncNotice
         },
@@ -590,6 +598,7 @@ export function InkChatApp({
       finalizeExit,
       isBusy,
       panelScreen,
+      promptEditorValue,
       slashSelectionIndex,
       slashSuggestions,
       showSlashSuggestions,
@@ -607,6 +616,28 @@ export function InkChatApp({
       return;
     }
     if (isBusy) {
+      return;
+    }
+    if (isPromptEditorOpen) {
+      const result = applyPromptEditorInput({
+        currentValue: promptEditorValue,
+        input: value,
+        key
+      });
+      if (result.action === "cancel") {
+        setPromptEditorValue(null);
+        appendMessage("system", "[chat] conversation prompt edit canceled");
+      } else if (result.action === "submit") {
+        const nextPrompt = String(result.value || "").trim();
+        sessionRef.current.activeConversationPrompt = nextPrompt;
+        setPromptEditorValue(null);
+        appendMessage(
+          "system",
+          nextPrompt ? "[chat] conversation prompt updated" : "[chat] conversation prompt cleared"
+        );
+      } else if (result.action === "change") {
+        setPromptEditorValue(result.value);
+      }
       return;
     }
     const syncScreenPanel = createInfoPanelState({
@@ -683,7 +714,9 @@ export function InkChatApp({
     historyPanel.scrollable,
     inputValue,
     isBusy,
+    isPromptEditorOpen,
     panelScreen,
+    promptEditorValue,
     screen,
     showSlashSuggestions,
     slashSuggestions,
@@ -783,6 +816,7 @@ export function InkChatApp({
     driver.exit = () => finalizeExit();
     driver.getSessionState = () => ({
       history: [...sessionRef.current.history],
+      activeConversationPrompt: sessionRef.current.activeConversationPrompt,
       screen
     });
     return () => {
@@ -917,9 +951,12 @@ export function InkChatApp({
         : "";
   const inputPlaceholder = isBusy
     ? screenBusyNotice
-    : activeScreenPanel
+    : isPromptEditorOpen
+      ? "Editing conversation prompt"
+      : activeScreenPanel
       ? placeholderForBlockedScreen(screen, activeScreenPanel)
         : "Type message or /";
+  const promptEditorLines = String(promptEditorValue || "").split("\n");
 
   return createElement(
     Box,
@@ -975,6 +1012,26 @@ export function InkChatApp({
                   )
                 : [createElement(Text, { key: "screen-empty", color: CHAT_THEME.assistant }, "No screen output.")])
             )
+        : isPromptEditorOpen
+          ? createElement(
+              Box,
+              { flexDirection: "column" },
+              createElement(Text, { color: CHAT_THEME.assistant, bold: true }, "Conversation prompt"),
+              createElement(
+                Text,
+                { color: CHAT_THEME.assistant },
+                "Enter saves. Shift+Enter adds line. Escape cancels. Empty saves clear."
+              ),
+              ...(String(promptEditorValue || "").length
+                ? promptEditorLines.map((line, index) =>
+                    createElement(
+                      Text,
+                      { key: `prompt-editor-${index}`, color: CHAT_THEME.assistant },
+                      line || " "
+                    )
+                  )
+                : [createElement(Text, { key: "prompt-editor-empty", color: "gray" }, "[empty]")])
+            )
         : visibleItems.length
           ? visibleItems.map((item) => renderItem(item))
           : createElement(Text, { dimColor: true }, "No messages yet.")
@@ -986,14 +1043,16 @@ export function InkChatApp({
         borderColor: CHAT_THEME.user,
         paddingX: 1
       },
-      createElement(Text, { color: CHAT_THEME.user }, "you> "),
-      createElement(TextInput, {
-        value: inputValue,
-        onChange: handleInputChange,
-        onSubmit: handleSubmit,
-        placeholder: inputPlaceholder,
-        focus: !isBusy
-      })
+      createElement(Text, { color: CHAT_THEME.user }, isPromptEditorOpen ? "prompt> " : "you> "),
+      isPromptEditorOpen
+        ? createElement(Text, { color: CHAT_THEME.user }, inputPlaceholder)
+        : createElement(TextInput, {
+            value: inputValue,
+            onChange: handleInputChange,
+            onSubmit: handleSubmit,
+            placeholder: inputPlaceholder,
+            focus: !isBusy
+          })
     ),
     showSlashSuggestions
       ? createElement(

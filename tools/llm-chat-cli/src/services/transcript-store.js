@@ -12,6 +12,7 @@ export function buildTranscriptPayload({
   gatewayUrl,
   history,
   model,
+  conversationPrompt,
   routing,
   usage
 }) {
@@ -20,6 +21,7 @@ export function buildTranscriptPayload({
     createdAt,
     gatewayUrl,
     model: model || DEFAULT_GATEWAY_MODEL,
+    conversationPrompt: String(conversationPrompt || "").trim(),
     routing,
     usage,
     messages: history
@@ -39,7 +41,8 @@ export function createTranscriptSessionStore({
     history,
     latestRouting,
     sessionUsage,
-    activeTranscript
+    activeTranscript,
+    activeConversationPrompt
   }) => {
     if (!history.length) return null;
     const vaultPath = resolveVaultPathFn();
@@ -55,6 +58,7 @@ export function createTranscriptSessionStore({
         gatewayUrl: metadata?.gatewayUrl || gateway.gatewayUrl,
         history,
         model: metadata?.model || defaultGatewayModel,
+        conversationPrompt: activeConversationPrompt ?? metadata?.conversationPrompt ?? "",
         routing: latestRouting || metadata?.routing || null,
         usage: sessionUsage
       })
@@ -62,7 +66,13 @@ export function createTranscriptSessionStore({
   };
 
   const persistSession = async (state) => {
-    if (state.transcriptSavedPath && state.lastSavedHistoryLength === state.history.length) {
+    const activeConversationPrompt = String(state.activeConversationPrompt || "").trim();
+    const lastSavedConversationPrompt = String(state.lastSavedConversationPrompt || "").trim();
+    if (
+      state.transcriptSavedPath &&
+      state.lastSavedHistoryLength === state.history.length &&
+      lastSavedConversationPrompt === activeConversationPrompt
+    ) {
       return { path: state.transcriptSavedPath, saved: false };
     }
 
@@ -72,7 +82,8 @@ export function createTranscriptSessionStore({
       history: state.history,
       latestRouting: state.latestRouting,
       sessionUsage: state.sessionUsage,
-      activeTranscript: state.activeTranscript
+      activeTranscript: state.activeTranscript,
+      activeConversationPrompt
     });
     if (!filePath) {
       return { path: null, saved: false };
@@ -80,6 +91,7 @@ export function createTranscriptSessionStore({
 
     state.transcriptSavedPath = filePath;
     state.lastSavedHistoryLength = state.history.length;
+    state.lastSavedConversationPrompt = activeConversationPrompt;
     return { path: filePath, saved: true };
   };
 

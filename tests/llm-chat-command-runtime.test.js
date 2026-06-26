@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCommandRuntime } from "../tools/llm-chat-cli/src/commands.js";
 import { createDefaultCommandRuntime } from "../tools/llm-chat-cli/src/services/command-executor.js";
-import { createChatSession } from "../tools/llm-chat-cli/src/services/chat-session.js";
+import {
+  createChatSession,
+  resetChatSession
+} from "../tools/llm-chat-cli/src/services/chat-session.js";
 
 function createRuntime(overrides = {}) {
   const defaultSyncStatus = {
@@ -74,9 +77,7 @@ function createRuntime(overrides = {}) {
       ...overrides.searchClient
     },
     sessionClient: {
-      resetSession: (session) => {
-        session.history = [];
-      },
+      resetSession: resetChatSession,
       ...overrides.sessionClient
     },
     modelManagerClient: overrides.modelManagerClient || {
@@ -202,6 +203,13 @@ test("createCommandRuntime returns info screens for sync conflicts and usage-sty
     limitsByModel: {},
     mode: "tui"
   });
+  session.activeConversationPrompt = "persona";
+  const config = await runtime.execute({
+    line: "/config",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
 
   assert.equal(syncConflicts.action?.screen, "panel");
   assert.match(syncConflicts.action?.panelScreen?.lines?.join("\n") || "", /conflict A/);
@@ -209,6 +217,65 @@ test("createCommandRuntime returns info screens for sync conflicts and usage-sty
   assert.match(searchUsage.action?.panelScreen?.lines?.join("\n") || "", /\/search <query>/);
   assert.equal(systemUsage.action?.screen, "panel");
   assert.match(systemUsage.action?.panelScreen?.lines?.join("\n") || "", /\/system show/);
+  assert.match(config.action?.panelScreen?.lines?.join("\n") || "", /Conversation prompt.*Configured/);
+});
+
+test("createCommandRuntime edits and sets conversation prompt", async () => {
+  const runtime = createRuntime();
+  const session = createChatSession({ systemPrompt: "" });
+  const messages = [];
+
+  const edit = await runtime.execute({
+    line: "/prompt",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  assert.equal(edit.handled, true);
+  assert.equal(edit.action?.type, "edit-conversation-prompt");
+  assert.equal(edit.action?.prompt, "");
+
+  const updated = await runtime.execute({
+    line: "/prompt Speak like a careful analyst.",
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: { message: (text) => messages.push(text) }
+  });
+  assert.equal(updated.handled, true);
+  assert.equal(session.activeConversationPrompt, "Speak like a careful analyst.");
+  assert.match(messages.join("\n"), /conversation prompt updated/);
+
+  const secondEdit = await runtime.execute({
+    line: "/prompt",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+  assert.equal(secondEdit.action?.prompt, "Speak like a careful analyst.");
+
+  await runtime.execute({
+    line: '/prompt ""',
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: { message: (text) => messages.push(text) }
+  });
+  assert.equal(session.activeConversationPrompt, "");
+  assert.match(messages.join("\n"), /conversation prompt cleared/);
+
+  session.activeConversationPrompt = "temporary persona";
+  session.history.push({ role: "user", content: "hello" });
+  const clearConversation = await runtime.execute({
+    line: "/clear",
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: { message: (text) => messages.push(text) }
+  });
+  assert.equal(clearConversation.handled, true);
+  assert.equal(session.activeConversationPrompt, "");
+  assert.deepEqual(session.history, []);
 });
 
 test("createCommandRuntime handles MMT and model screens with active/pending selection", async () => {

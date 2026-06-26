@@ -19,9 +19,17 @@ function asUsage(usage) {
   };
 }
 
-function buildMessages(history, systemPrompt) {
-  if (!systemPrompt) return [...history];
-  return [{ role: "system", content: systemPrompt }, ...history];
+function buildMessages(history, systemPrompt, conversationPrompt) {
+  const messages = [];
+  const normalizedSystemPrompt = String(systemPrompt || "").trim();
+  const normalizedConversationPrompt = String(conversationPrompt || "").trim();
+  if (normalizedSystemPrompt) {
+    messages.push({ role: "system", content: normalizedSystemPrompt });
+  }
+  if (normalizedConversationPrompt) {
+    messages.push({ role: "system", content: normalizedConversationPrompt });
+  }
+  return [...messages, ...history];
 }
 
 function normalizeContextMessages(messages) {
@@ -90,7 +98,11 @@ export async function runPrompt(
   session.history.push(userMessage);
   session.estimatedTokensRef.value += estimatedPromptTokens;
 
-  const requestMessages = buildMessages(session.history, session.activeSystemPrompt);
+  const requestMessages = buildMessages(
+    session.history,
+    session.activeSystemPrompt,
+    session.activeConversationPrompt
+  );
   const normalizedVaultMessages = normalizeContextMessages(
     Array.isArray(vaultContext?.messages)
       ? vaultContext.messages

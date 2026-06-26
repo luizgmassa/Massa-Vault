@@ -70,6 +70,10 @@ export const CHAT_COMMAND_DEFINITIONS = Object.freeze([
     description: "Show active gateway/system settings"
   },
   {
+    command: "/prompt",
+    description: "Edit or set conversation prompt"
+  },
+  {
     command: "/system show",
     description: "Show system prompt"
   },

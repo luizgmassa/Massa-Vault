@@ -20,6 +20,7 @@ async function loadInkStack(t) {
       CHAT_THEME: inkRepl.CHAT_THEME,
       colorForRole: inkRepl.colorForRole,
       getSlashCommandSuggestions: inkRepl.getSlashCommandSuggestions,
+      applyPromptEditorInput: inkRepl.applyPromptEditorInput,
       moveSlashSuggestionSelection: inkRepl.moveSlashSuggestionSelection,
       resolveSlashEnterAction: inkRepl.resolveSlashEnterAction,
       tabCompleteSlashCommandInput: inkRepl.tabCompleteSlashCommandInput,
@@ -129,6 +130,7 @@ test("slash suggestions filter commands and tab completes only single match", as
   assert.equal(root.length > 6, true);
   assert.equal(root.some((entry) => entry.command === "/sync"), true);
   assert.equal(root.some((entry) => entry.command === "/routing"), true);
+  assert.equal(root.some((entry) => entry.command === "/prompt"), true);
   assert.equal(root.some((entry) => entry.command === "/search"), true);
   assert.equal(root.some((entry) => entry.command === "/history"), true);
   assert.equal(root.some((entry) => entry.command === "/back"), true);
@@ -143,6 +145,96 @@ test("slash suggestions filter commands and tab completes only single match", as
   assert.equal(tabCompleteSlashCommandInput("/sync s"), "/sync status");
   assert.equal(tabCompleteSlashCommandInput("/search"), "/search ");
   assert.equal(tabCompleteSlashCommandInput("/system set"), "/system set ");
+  assert.equal(tabCompleteSlashCommandInput("/prompt"), "/prompt");
+});
+
+test("prompt editor input reducer handles Shift+Enter, submit, cancel, and blank clear", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { applyPromptEditorInput } = stack;
+  assert.deepEqual(
+    applyPromptEditorInput({
+      currentValue: "line one",
+      input: "",
+      key: { return: true, shift: true }
+    }),
+    { action: "change", value: "line one\n" }
+  );
+  assert.deepEqual(
+    applyPromptEditorInput({
+      currentValue: "line one\nline two",
+      input: "",
+      key: { return: true, shift: false }
+    }),
+    { action: "submit", value: "line one\nline two" }
+  );
+  assert.deepEqual(
+    applyPromptEditorInput({
+      currentValue: "draft",
+      input: "",
+      key: { escape: true }
+    }),
+    { action: "cancel", value: "draft" }
+  );
+  assert.deepEqual(
+    applyPromptEditorInput({
+      currentValue: "",
+      input: "",
+      key: { return: true }
+    }),
+    { action: "submit", value: "" }
+  );
+});
+
+test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
+  const stack = await loadInkStack(t);
+  if (!stack) return;
+
+  const { React, render, InkChatApp } = stack;
+  const driver = {};
+  const app = render(
+    React.createElement(InkChatApp, {
+      systemPrompt: "",
+      driver,
+      chatCompletion: async () => ({
+        assistantText: "",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        routing: null
+      })
+    })
+  );
+
+  try {
+    await delay(20);
+    await driver.submit("/prompt");
+    await delay(30);
+    assert.match(app.lastFrame(), /Conversation prompt/);
+    assert.match(app.lastFrame(), /Empty saves clear/);
+
+    app.stdin.write("Persona one");
+    await delay(20);
+    assert.match(app.lastFrame(), /Persona one/);
+    app.stdin.write("\r");
+    await delay(30);
+    assert.equal(driver.getSessionState().activeConversationPrompt, "Persona one");
+    assert.match(app.lastFrame(), /conversation prompt updated/);
+
+    await driver.submit("/prompt");
+    await delay(30);
+    assert.match(app.lastFrame(), /Persona one/);
+
+    for (let index = 0; index < "Persona one".length; index += 1) {
+      app.stdin.write("\u007f");
+      await delay(5);
+    }
+    app.stdin.write("\r");
+    await delay(30);
+    assert.equal(driver.getSessionState().activeConversationPrompt, "");
+    assert.match(app.lastFrame(), /conversation prompt cleared/);
+  } finally {
+    app.unmount();
+  }
 });
 
 test("slash selection cycles and enter action respects requiresInput", async (t) => {

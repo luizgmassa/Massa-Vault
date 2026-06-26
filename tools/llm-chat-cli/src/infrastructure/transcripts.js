@@ -35,7 +35,11 @@ function toFileSafeStamp(date) {
 }
 
 function escapeFrontmatterString(value) {
-  return String(value || "").replace(/"/g, '\\"');
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/"/g, '\\"');
 }
 
 function toPosix(value) {
@@ -49,9 +53,22 @@ function parseFrontmatterValue(value) {
     (text.startsWith('"') && text.endsWith('"')) ||
     (text.startsWith("'") && text.endsWith("'"))
   ) {
+    if (text.startsWith('"')) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text
+          .slice(1, -1)
+          .replace(/\\n/g, "\n")
+          .replace(/\\r/g, "\r")
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, "\\");
+      }
+    }
     return text
       .slice(1, -1)
-      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
       .replace(/\\'/g, "'");
   }
   if (/^-?\d+(\.\d+)?$/.test(text)) {
@@ -255,6 +272,7 @@ export function formatTranscript({
   createdAt,
   gatewayUrl,
   model,
+  conversationPrompt,
   routing,
   usage,
   messages
@@ -266,6 +284,7 @@ export function formatTranscript({
   lines.push(`created_at: "${escapeFrontmatterString(createdAt)}"`);
   lines.push(`gateway_url: "${escapeFrontmatterString(gatewayUrl)}"`);
   lines.push(`model: "${escapeFrontmatterString(model)}"`);
+  lines.push(`conversation_prompt: "${escapeFrontmatterString(conversationPrompt)}"`);
   lines.push(`router_lane: "${escapeFrontmatterString(routingMetadata.router_lane)}"`);
   lines.push(`router_target_model: "${escapeFrontmatterString(routingMetadata.router_target_model)}"`);
   lines.push(`router_confidence: "${escapeFrontmatterString(routingMetadata.router_confidence)}"`);
@@ -309,6 +328,7 @@ export function writeTranscript({
   createdAt,
   gatewayUrl,
   model,
+  conversationPrompt,
   routing,
   usage,
   messages
@@ -326,6 +346,7 @@ export function writeTranscript({
     createdAt: toLocalIso(timestamp),
     gatewayUrl,
     model,
+    conversationPrompt,
     routing,
     usage,
     messages

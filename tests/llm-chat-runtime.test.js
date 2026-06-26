@@ -8,6 +8,7 @@ import { runPrompt } from "../tools/llm-chat-cli/src/services/chat-runtime.js";
 
 test("runPrompt uses session context entries, updates routing, and clears staged context on success", async () => {
   const session = createChatSession({ systemPrompt: "global system" });
+  session.activeConversationPrompt = "answer as a concise analyst";
   session.history.push({ role: "user", content: "earlier question" });
   addContextEntry(session, {
     source: "AI Chats/2026-06-01/demo.md",
@@ -37,6 +38,8 @@ test("runPrompt uses session context entries, updates routing, and clears staged
   assert.ok(capturedBody);
   assert.equal(capturedBody.messages[0].role, "system");
   assert.equal(capturedBody.messages[0].content, "global system");
+  assert.equal(capturedBody.messages[1].role, "system");
+  assert.equal(capturedBody.messages[1].content, "answer as a concise analyst");
   assert.equal(capturedBody.messages.at(-3).content, "extra context from history");
   assert.equal(capturedBody.messages.at(-2).content, "vault context");
   assert.equal(capturedBody.messages.at(-1).content, "new prompt");
@@ -45,7 +48,41 @@ test("runPrompt uses session context entries, updates routing, and clears staged
   assert.equal(session.sessionUsage.total_tokens, 11);
   assert.equal(session.latestRouting?.targetModel, "smart-router-general");
   assert.equal(session.addedContextEntries.length, 0);
+  assert.equal(session.activeConversationPrompt, "answer as a concise analyst");
+  assert.equal(
+    session.history.some((entry) => /concise analyst/i.test(entry.content || "")),
+    false
+  );
   assert.equal(result.routing?.targetModel, "smart-router-general");
+});
+
+test("runPrompt keeps conversation prompt across future model calls", async () => {
+  const session = createChatSession({ systemPrompt: "" });
+  session.activeConversationPrompt = "Stay in persona.";
+  const capturedBodies = [];
+
+  for (const prompt of ["first", "second"]) {
+    await runPrompt(session, {
+      prompt,
+      renderMode: "silent",
+      vaultContextBuilder: async () => null,
+      chatCompletion: async ({ body, onUsage }) => {
+        capturedBodies.push(body);
+        onUsage?.({ prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        return {
+          assistantText: "ok",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          routing: null
+        };
+      }
+    });
+  }
+
+  assert.equal(capturedBodies.length, 2);
+  assert.equal(capturedBodies[0].messages[0].content, "Stay in persona.");
+  assert.equal(capturedBodies[1].messages[0].content, "Stay in persona.");
+  assert.equal(capturedBodies[1].messages.at(-1).content, "second");
+  assert.equal(session.history.length, 4);
 });
 
 test("runPrompt estimates usage when gateway omits usage payload", async () => {

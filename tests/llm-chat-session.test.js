@@ -23,6 +23,7 @@ test("createChatSession initializes mutable chat state and resetChatSession clea
   resetChatSession(session);
 
   assert.equal(session.activeSystemPrompt, "system prompt");
+  assert.equal(session.activeConversationPrompt, "");
   assert.equal(Array.isArray(session.history), true);
   assert.equal(session.history.length, 0);
   assert.equal(session.sessionUsage.total_tokens, 0);
@@ -31,6 +32,21 @@ test("createChatSession initializes mutable chat state and resetChatSession clea
   assert.equal(session.transcriptSavedPath, null);
   assert.equal(session.historyFlowStack.length, 0);
   assert.equal(session.addedContextEntries.length, 0);
+});
+
+test("conversation prompt is transcript-bound session state", () => {
+  const session = createChatSession({
+    systemPrompt: "system prompt",
+    conversationPrompt: "persona prompt"
+  });
+  session.history.push({ role: "user", content: "hello" });
+  session.lastSavedConversationPrompt = "persona prompt";
+
+  resetChatSession(session);
+
+  assert.equal(session.activeSystemPrompt, "system prompt");
+  assert.equal(session.activeConversationPrompt, "");
+  assert.equal(session.lastSavedConversationPrompt, "");
 });
 
 test("loadTranscriptIntoSession hydrates transcript metadata and clears staged context", () => {
@@ -50,7 +66,8 @@ test("loadTranscriptIntoSession hydrates transcript metadata and clears staged c
       id: "history-1",
       created_at: "2026-06-01T12:00:00.000Z",
       gateway_url: "http://127.0.0.1:4100",
-      model: "smart-router-general"
+      model: "smart-router-general",
+      conversation_prompt: "restored prompt"
     },
     fallbackSessionId: "fallback-id",
     fallbackSessionStartedAt: "2026-06-01T00:00:00.000Z",
@@ -67,6 +84,9 @@ test("loadTranscriptIntoSession hydrates transcript metadata and clears staged c
   assert.equal(session.history.length, 2);
   assert.equal(session.activeTranscript?.path, "/tmp/history.md");
   assert.equal(session.activeTranscript?.id, "history-1");
+  assert.equal(session.activeTranscript?.conversationPrompt, "restored prompt");
+  assert.equal(session.activeConversationPrompt, "restored prompt");
+  assert.equal(session.lastSavedConversationPrompt, "restored prompt");
   assert.equal(session.activeTranscript?.routing?.targetModel, "smart-router-general");
   assert.equal(session.latestRouting, null);
   assert.equal(session.transcriptSavedPath, "/tmp/history.md");

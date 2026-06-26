@@ -53,8 +53,8 @@ import {
 } from "./domain/vault-context.js";
 import { buildVaultContext } from "./services/vault-context.js";
 
-function createReplState({ systemPrompt }) {
-  return createChatSession({ systemPrompt });
+function createReplState({ systemPrompt, conversationPrompt = "" }) {
+  return createChatSession({ systemPrompt, conversationPrompt });
 }
 
 function resetConversation(state) {
@@ -77,6 +77,7 @@ async function processPrompt({
   onUsage,
   onRouting,
   onWarning,
+  conversationPrompt = "",
   extraContextMessages = []
 }) {
   const session = {
@@ -85,6 +86,7 @@ async function processPrompt({
     estimatedTokensRef,
     latestRouting: null,
     activeSystemPrompt: systemPrompt,
+    activeConversationPrompt: conversationPrompt,
     addedContextEntries: (Array.isArray(extraContextMessages) ? extraContextMessages : [])
       .map((message, index) => ({
         source: `compat-${index + 1}`,

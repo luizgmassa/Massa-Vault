@@ -74,3 +74,34 @@ export function resolveSlashEnterAction({ inputValue, suggestions, selectedIndex
       : 0;
   return resolveCommandSubmission(visibleSuggestions[nextIndex]);
 }
+
+export function applyPromptEditorInput({ currentValue = "", input = "", key = {} } = {}) {
+  const value = String(currentValue || "");
+  if (key.escape) {
+    return { action: "cancel", value };
+  }
+  if (key.return) {
+    if (key.shift) {
+      return { action: "change", value: `${value}\n` };
+    }
+    return { action: "submit", value };
+  }
+  if (key.backspace || key.delete) {
+    return { action: "change", value: value.slice(0, -1) };
+  }
+  if (
+    key.ctrl ||
+    key.meta ||
+    key.tab ||
+    key.upArrow ||
+    key.downArrow ||
+    key.leftArrow ||
+    key.rightArrow
+  ) {
+    return { action: "noop", value };
+  }
+  if (input) {
+    return { action: "change", value: `${value}${input}` };
+  }
+  return { action: "noop", value };
+}

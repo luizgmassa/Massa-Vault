@@ -12,6 +12,7 @@ import {
   transcriptFilePath,
   writeTranscript
 } from "../tools/llm-chat-cli/src/infrastructure/transcripts.js";
+import { createTranscriptSessionStore } from "../tools/llm-chat-cli/src/services/transcript-store.js";
 
 function pad(value) {
   return String(value).padStart(2, "0");
@@ -112,6 +113,78 @@ test("writeTranscript stores optional concrete routing and MMT metadata", () => 
   assert.match(content, /router_model_manager_tool: "ollama"/);
   const parsed = readTranscript(filePath);
   assert.equal(parsed.metadata.router_model_manager_tool, "ollama");
+});
+
+test("writeTranscript round-trips multiline conversation prompt metadata", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-chat-transcript-prompt-"));
+  const conversationPrompt = "Act as planner.\nKeep answers short.\nQuote \"exactly\" when needed.";
+  const filePath = writeTranscript({
+    vaultPath: tempDir,
+    id: "prompt-id",
+    createdAt: "2026-05-26T12:34:56.789Z",
+    gatewayUrl: "http://127.0.0.1:4100",
+    model: "smart-router",
+    conversationPrompt,
+    routing: null,
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  const content = fs.readFileSync(filePath, "utf8");
+  assert.equal(
+    content.includes('conversation_prompt: "Act as planner.\\nKeep answers short.\\nQuote \\"exactly\\" when needed."'),
+    true
+  );
+
+  const parsed = readTranscript(filePath);
+  assert.equal(parsed.metadata.conversation_prompt, conversationPrompt);
+});
+
+test("transcript session store saves prompt-only changes", async () => {
+  const writes = [];
+  const store = createTranscriptSessionStore({
+    resolveVaultPathFn: () => "/tmp/vault",
+    buildGatewayOptionsFn: () => ({ gatewayUrl: "http://127.0.0.1:4100" }),
+    writeTranscriptImpl: (payload) => {
+      writes.push(payload);
+      return "/tmp/vault/AI Chats/2026-05-26/chat.md";
+    },
+    syncClient: {
+      runNotesAutomationCommand: () => ({ ok: true }),
+      formatSyncFeedback: () => "[chat] sync status=idle conflicts=0"
+    }
+  });
+  const state = {
+    sessionId: "session-id",
+    sessionStartedAt: "2026-05-26T12:00:00.000Z",
+    history: [{ role: "user", content: "hello" }],
+    latestRouting: null,
+    sessionUsage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1 },
+    activeTranscript: null,
+    activeConversationPrompt: "initial prompt",
+    transcriptSavedPath: null,
+    lastSavedHistoryLength: 0,
+    lastSavedConversationPrompt: ""
+  };
+
+  const first = await store.persistSession(state);
+  assert.equal(first.saved, true);
+  assert.equal(writes[0].conversationPrompt, "initial prompt");
+
+  const second = await store.persistSession(state);
+  assert.equal(second.saved, false);
+  assert.equal(writes.length, 1);
+
+  state.activeConversationPrompt = "updated prompt";
+  const third = await store.persistSession(state);
+  assert.equal(third.saved, true);
+  assert.equal(writes[1].conversationPrompt, "updated prompt");
+});
+
+test("parseTranscriptMarkdown defaults missing conversation prompt to empty metadata", () => {
+  const parsed = parseTranscriptMarkdown("---\nid: \"legacy\"\n---\n\n## USER\nhello\n");
+  assert.equal(parsed.metadata.conversation_prompt || "", "");
+  assert.deepEqual(parsed.messages, [{ role: "user", content: "hello" }]);
 });
 
 test("listTranscriptDates and listTranscriptsForDate are newest-first", () => {

@@ -140,6 +140,8 @@ Config is file-first. Environment variables and `.env` remain supported for secr
 - REPL command `/sync` saves transcript if needed and triggers sync.
 - REPL command `/mmt` opens model-manager setup.
 - REPL command `/model` opens active model selection.
+- REPL command `/prompt` opens the TUI conversation prompt editor; `/prompt <prompt>` sets it from either TUI or plain REPL.
+- The conversation prompt is saved with the active transcript and injected after the global system prompt on future turns.
 - Type `/` in REPL input to see inline slash-command suggestions.
 - `/exit`, Ctrl-C, SIGTERM, and SIGHUP perform best-effort save+sync before exit.
 - Idle save+sync runs automatically after assistant responses (default 30 seconds).
