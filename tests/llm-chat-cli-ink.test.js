@@ -235,9 +235,17 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
   );
 
   try {
+    // Let the app mount before writing: ink subscribes to stdin from an effect,
+    // and anything written before that subscription exists is dropped rather
+    // than buffered. Removing this wait cost the typed text entirely on CI.
+    await delay(20);
+
     await driver.submit("/prompt");
     await waitForFrame(app, /Conversation prompt/);
     assert.match(app.lastFrame(), /Empty saves clear/);
+    // `[empty]` renders only once the editor itself is mounted, so it doubles
+    // as the readiness signal for the keystrokes below.
+    await waitForFrame(app, /\[empty\]/);
 
     app.stdin.write("Persona one");
     await waitForFrame(app, /Persona one/);
