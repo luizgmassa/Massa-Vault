@@ -13,18 +13,18 @@ name: Release
 # a tag or release created with GITHUB_TOKEN raises no further workflow event
 # (GitHub's documented recursion guard), so there would be nothing to react to.
 #
-# LOOP SAFETY: the version-bump commit below is also pushed with GITHUB_TOKEN,
-# so by that same recursion guard it raises no push event and nothing
-# re-triggers CI (and therefore this workflow) from it. `[skip ci]` in the
-# commit subject is belt-and-braces here, NOT load-bearing - do not remove it,
-# but do not rely on it either.
+# AUTH: the checkout below authenticates with the `release-bot` deploy key
+# (RELEASE_SSH_KEY), not GITHUB_TOKEN. The `master` ruleset requires the CI and
+# coverage checks, and GitHub Actions cannot be a ruleset bypass actor on a
+# user-owned repository, so a GITHUB_TOKEN push is rejected with GH013. A
+# deploy key can push. Rotating or removing that key breaks releases.
 #
-# IF BRANCH PROTECTION IS EVER ADDED TO master: a ruleset requiring pull
-# requests will reject this GITHUB_TOKEN push with GH013, because on a
-# user-owned repository GitHub Actions cannot be a ruleset bypass actor. At that
-# point, provision a repo-scoped deploy key as a RELEASE_SSH_KEY secret and add
-# `ssh-key: ${{ secrets.RELEASE_SSH_KEY }}` to the checkout step below. A
-# deploy-key push DOES raise events, so `[skip ci]` becomes load-bearing then.
+# LOOP SAFETY: unlike a GITHUB_TOKEN push, a deploy-key push DOES raise events,
+# so `[skip ci]` in the bump commit subject is LOAD-BEARING here - without it,
+# the bump commit runs CI, which re-triggers this workflow. Do not remove it.
+# The second line of defence is that the promoted `[Unreleased]` section is
+# empty, so a re-triggered run derives no version and exits cleanly.
+#
 # See the "Release process" section of CLAUDE.md.
 
 on:
@@ -61,6 +61,8 @@ jobs:
           # head_sha - otherwise the push is rejected whenever master has moved.
           ref: master
           fetch-depth: 0
+          # Pushes past the master ruleset; see the AUTH note in the header.
+          ssh-key: ${{ secrets.RELEASE_SSH_KEY }}
 
       # Tracks the `engines` floor in package.json (>=25.9.0).
       - name: Setup Node

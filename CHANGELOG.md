@@ -13,6 +13,14 @@ automatically.
 
 ## [Unreleased]
 
+### Changed
+
+- `release.yml` now pushes with the `release-bot` deploy key
+  (`RELEASE_SSH_KEY`) instead of `GITHUB_TOKEN`, so releases survive the
+  `master` ruleset that requires the `CI` and `coverage` checks. Because a
+  deploy-key push raises workflow events, the skip-ci marker on the bump commit
+  is now load-bearing rather than defensive.
+
 ## [1.2.0] - 2026-08-01
 
 ### Added
