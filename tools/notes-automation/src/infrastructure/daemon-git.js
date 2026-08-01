@@ -115,7 +115,6 @@ export function commitStagedWithSubject(service, subject, { extraBody = [] } = {
 }
 
 export function commitStagedChanges(service, label) {
-  const staged = gitCachedNames(service.vaultPath);
   const subject = `notes(sync): ${label}`;
   return commitStagedWithSubject(service, subject);
 }

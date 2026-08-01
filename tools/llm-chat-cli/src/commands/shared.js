@@ -25,7 +25,7 @@ export function writeLines(mode, handlers, title, lines) {
   }
 }
 
-export function renderCommands(mode, handlers) {
+export function renderCommands(mode) {
   const commandLines = getCommandPanelLines();
   if (mode === "plain") {
     console.log("Commands:");

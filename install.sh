@@ -278,14 +278,14 @@ ensure_node_version() {
   ensure_command node node nodejs
   local major
   major="$(node -p 'Number(process.versions.node.split(".")[0])')"
-  if [[ "$major" -lt 20 ]]; then
+  if [[ "$major" -lt 25 ]]; then
     if [[ "$CHECK_ONLY" -eq 1 ]]; then
-      warn "node >=20 required, found $(node --version)"
+      warn "node >=25.9.0 required, found $(node --version)"
       return 0
     fi
     install_package node node nodejs
     major="$(node -p 'Number(process.versions.node.split(".")[0])')"
-    [[ "$major" -ge 20 ]] || die "node >=20 required, found $(node --version)"
+    [[ "$major" -ge 25 ]] || die "node >=25.9.0 required, found $(node --version)"
   fi
   log "node: $(node --version)"
 }

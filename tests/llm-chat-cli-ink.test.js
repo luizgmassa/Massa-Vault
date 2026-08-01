@@ -8,6 +8,48 @@ import { executeCommand } from "../tools/llm-chat-cli/src/cli.js";
 
 process.env.MASSA_VAULT_CHAT_RAG = "off";
 
+/**
+ * Poll until `predicate()` holds, or give up after `timeout`.
+ *
+ * Ink processes stdin asynchronously, so a fixed delay after a keystroke races
+ * on a slower or loaded machine. CI hit this twice in the same test: once with
+ * a half-drained editor, once with an Enter that had not been handled yet.
+ * Polling makes the wait proportional to the machine instead of guessing.
+ */
+async function waitFor(predicate, { timeout = 15000, interval = 10 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (predicate()) return true;
+    if (Date.now() >= deadline) return false;
+    await delay(interval);
+  }
+}
+
+/** Wait for the rendered frame to match `pattern`, failing with the last frame. */
+async function waitForFrame(app, pattern) {
+  const matched = await waitFor(() => pattern.test(app.lastFrame()));
+  assert.ok(matched, `frame never matched ${pattern}. Last frame:\n${app.lastFrame()}`);
+}
+
+/** Wait for `read()` to settle on `expected`. */
+async function waitForValue(read, expected) {
+  await waitFor(() => read() === expected);
+  assert.equal(read(), expected);
+}
+
+/**
+ * Send Enter until `settled()` holds, re-sending only while the editor is still
+ * open. Same dropped-write hazard as any other stdin write in these tests.
+ */
+async function pressEnterUntil(app, settled, { attempts = 30 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (settled()) return;
+    if (attempt > 0 && !/Conversation prompt/.test(app.lastFrame())) return;
+    app.stdin.write("\r");
+    await waitFor(settled, { timeout: 500 });
+  }
+}
+
 async function loadInkStack(t) {
   try {
     const React = await import("react");
@@ -206,32 +248,66 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
   );
 
   try {
+    // Let the app mount before writing: ink subscribes to stdin from an effect,
+    // and anything written before that subscription exists is dropped rather
+    // than buffered. Removing this wait cost the typed text entirely on CI.
     await delay(20);
+
     await driver.submit("/prompt");
-    await delay(30);
-    assert.match(app.lastFrame(), /Conversation prompt/);
+    await waitForFrame(app, /Conversation prompt/);
     assert.match(app.lastFrame(), /Empty saves clear/);
+    // `[empty]` renders only once the editor itself is mounted, so it doubles
+    // as the readiness signal for the keystrokes below.
+    await waitForFrame(app, /\[empty\]/);
 
-    app.stdin.write("Persona one");
-    await delay(20);
-    assert.match(app.lastFrame(), /Persona one/);
-    app.stdin.write("\r");
-    await delay(30);
-    assert.equal(driver.getSessionState().activeConversationPrompt, "Persona one");
-    assert.match(app.lastFrame(), /conversation prompt updated/);
+    // Ink subscribes to stdin from an effect, and the mock stdin drops writes
+    // that arrive with no subscriber rather than buffering them. A rendered
+    // frame is not proof the subscription exists: React commits the frame
+    // before running effects, so CI saw this write vanish entirely.
+    //
+    // Re-send, but only while the editor still renders `[empty]` -- an empty
+    // buffer means nothing landed, so a retry cannot type the text twice. The
+    // inner wait gives each attempt a generous window to render before it is
+    // treated as lost.
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (!/\[empty\]/.test(app.lastFrame())) break;
+      app.stdin.write("Persona one");
+      await waitFor(() => !/\[empty\]/.test(app.lastFrame()), { timeout: 500 });
+    }
+    await waitForFrame(app, /Persona one/);
+
+    // Enter can be dropped for the same reason the text was. Re-send while the
+    // save has not landed and the editor is still open; saving the same buffer
+    // twice is idempotent, and stopping once the editor closes avoids
+    // submitting a stray line to the conversation.
+    await pressEnterUntil(
+      app,
+      () => driver.getSessionState().activeConversationPrompt === "Persona one"
+    );
+    await waitForValue(() => driver.getSessionState().activeConversationPrompt, "Persona one");
+    await waitForFrame(app, /conversation prompt updated/);
 
     await driver.submit("/prompt");
-    await delay(30);
-    assert.match(app.lastFrame(), /Persona one/);
+    await waitForFrame(app, /Persona one/);
 
-    for (let index = 0; index < "Persona one".length; index += 1) {
+    // Drain the editor, polling for the rendered `[empty]` marker rather than
+    // assuming a fixed per-keystroke delay. A flat delay(5) per backspace raced
+    // on a loaded CI runner: only 5 of the 11 deletions had been processed
+    // before the assertion ran, leaving "Person". A backspace on an
+    // already-empty buffer is a no-op, so re-sending while waiting is safe.
+    for (let attempt = 0; attempt < 100 && !/\[empty\]/.test(app.lastFrame()); attempt += 1) {
       app.stdin.write("\u007f");
-      await delay(5);
+      await delay(10);
     }
-    app.stdin.write("\r");
-    await delay(30);
-    assert.equal(driver.getSessionState().activeConversationPrompt, "");
-    assert.match(app.lastFrame(), /conversation prompt cleared/);
+    assert.match(app.lastFrame(), /\[empty\]/);
+
+    await pressEnterUntil(
+      app,
+      () => driver.getSessionState().activeConversationPrompt === ""
+        && /conversation prompt cleared/.test(app.lastFrame())
+    );
+    await waitForValue(() => driver.getSessionState().activeConversationPrompt, "");
+    await waitForFrame(app, /conversation prompt cleared/);
   } finally {
     app.unmount();
   }

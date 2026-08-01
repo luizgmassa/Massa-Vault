@@ -7,6 +7,10 @@
 config/*.local.json
 node_modules/
 
+# release.yml scratch file: release notes staged for `gh release create`,
+# produced only by that workflow or by a local rehearsal of it
+/notes.md
+
 # local runtime secrets
 .litellm/litellm.local.env
 .obsidian/plugins/obsidian-local-rest-api/data.json

@@ -1,0 +1,131 @@
+name: Release
+
+# Automatic release on merge to master.
+#
+# Chain: merge PR -> CI -> this workflow -> tag + GitHub Release.
+#
+# There is no registry publish. package.json stays `"private": true`, so the
+# only artifact is a GitHub Release (tag plus the promoted CHANGELOG section).
+#
+# WHY workflow_run RATHER THAN `push` OR `push: tags`: `push` cannot tell
+# "CI already passed for this commit" from "someone force-pushed", and
+# `release: published` never fires for a release this workflow creates itself -
+# a tag or release created with GITHUB_TOKEN raises no further workflow event
+# (GitHub's documented recursion guard), so there would be nothing to react to.
+#
+# LOOP SAFETY: the version-bump commit below is also pushed with GITHUB_TOKEN,
+# so by that same recursion guard it raises no push event and nothing
+# re-triggers CI (and therefore this workflow) from it. `[skip ci]` in the
+# commit subject is belt-and-braces here, NOT load-bearing - do not remove it,
+# but do not rely on it either.
+#
+# IF BRANCH PROTECTION IS EVER ADDED TO master: a ruleset requiring pull
+# requests will reject this GITHUB_TOKEN push with GH013, because on a
+# user-owned repository GitHub Actions cannot be a ruleset bypass actor. At that
+# point, provision a repo-scoped deploy key as a RELEASE_SSH_KEY secret and add
+# `ssh-key: ${{ secrets.RELEASE_SSH_KEY }}` to the checkout step below. A
+# deploy-key push DOES raise events, so `[skip ci]` becomes load-bearing then.
+# See the "Release process" section of CLAUDE.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  # Serialize releases so two merges landing together cannot race on the tag.
+  # Never cancel: an in-flight run may be mid-push.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # A `completed` workflow_run may also have failed or been cancelled.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.push.outputs.released }}
+      version: ${{ steps.derive.outputs.version }}
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          # Commit on top of current master, not the triggering run's historical
+          # head_sha - otherwise the push is rejected whenever master has moved.
+          ref: master
+          fetch-depth: 0
+
+      # Tracks the `engines` floor in package.json (>=25.9.0).
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Derive next version from CHANGELOG
+        id: derive
+        run: |
+          RESULT=$(node scripts/release-version.js)
+          VERSION=$(node -p 'JSON.parse(process.argv[1]).next ?? ""' "$RESULT")
+
+          if [ -z "$VERSION" ]; then
+            echo "[Unreleased] holds no releasable entry - skipping release."
+            exit 0
+          fi
+
+          # Release notes go through a file, never a shell variable: changelog
+          # bodies are full of backticks, dollar signs and newlines.
+          node -p 'JSON.parse(process.argv[1]).notes' "$RESULT" > notes.md
+
+          {
+            echo "version=$VERSION"
+            echo "bump=$(node -p 'JSON.parse(process.argv[1]).bump' "$RESULT")"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Derived v$VERSION from $(node -p 'JSON.parse(process.argv[1]).current' "$RESULT")"
+
+      - name: Commit, tag and push
+        id: push
+        if: steps.derive.outputs.version != ''
+        env:
+          VERSION: ${{ steps.derive.outputs.version }}
+        run: |
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::tag v$VERSION already exists - refusing to overwrite a release"
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add package.json CHANGELOG.md
+          git commit -m "chore(release): v$VERSION [skip ci]"
+          git tag -a "v$VERSION" -m "v$VERSION"
+
+          # --atomic: the commit and the tag land together or not at all.
+          git push --atomic origin master "v$VERSION"
+
+          # Only now is the release real; the publish step gates on this.
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: steps.push.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.derive.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file notes.md \
+            --verify-tag

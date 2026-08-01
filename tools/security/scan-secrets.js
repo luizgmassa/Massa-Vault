@@ -9,7 +9,7 @@ const SECRET_PATTERNS = [
   { name: "private_key_block", regex: /-----BEGIN (RSA )?PRIVATE KEY-----/g },
   { name: "google_refresh_token", regex: /"refreshToken"\s*:\s*"[^"]{20,}"/g },
   { name: "api_key_field", regex: /"apiKey"\s*:\s*"[A-Za-z0-9\-_]{24,}"/g },
-  { name: "bearer_token", regex: /Bearer\s+[A-Za-z0-9\-_\.]{20,}/g }
+  { name: "bearer_token", regex: /Bearer\s+[A-Za-z0-9\-_.]{20,}/g }
 ];
 
 function listFiles() {

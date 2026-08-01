@@ -36,7 +36,7 @@ export function loadPolicy(policyPath) {
     ...parsed,
     lanes: {
       ...DEFAULT_POLICY.lanes,
-      ...(parsed.lanes || {})
+      ...parsed.lanes
     }
   };
 }

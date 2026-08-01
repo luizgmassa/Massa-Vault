@@ -125,7 +125,7 @@ export function loadServerConfig({
   const document = readConfigDocument(resolvedConfigPath);
   const startupTimeoutMs = toPositiveNumber(document.startup_timeout_ms, 30_000);
   const shutdownTimeoutMs = toPositiveNumber(document.shutdown_timeout_ms, 5_000);
-  const rawServices = { ...DEFAULT_SERVICES, ...(document.services || {}) };
+  const rawServices = { ...DEFAULT_SERVICES, ...document.services };
   const orderedNames = [
     ...DEFAULT_SERVICE_ORDER,
     ...Object.keys(rawServices).filter((name) => !DEFAULT_SERVICE_ORDER.includes(name))
