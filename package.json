@@ -11,7 +11,7 @@
     "node": ">=25.9.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "ink": "^6.2.3",
     "ink-text-input": "^6.0.0",
     "react": "^19.1.0",
