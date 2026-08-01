@@ -224,10 +224,17 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     await delay(30);
     assert.match(app.lastFrame(), /Persona one/);
 
-    for (let index = 0; index < "Persona one".length; index += 1) {
+    // Drain the editor, polling for the rendered `[empty]` marker rather than
+    // assuming a fixed per-keystroke delay. A flat delay(5) per backspace raced
+    // on a loaded CI runner: only 5 of the 11 deletions had been processed
+    // before the assertion ran, leaving "Person". A backspace on an
+    // already-empty buffer is a no-op, so re-sending while waiting is safe.
+    for (let attempt = 0; attempt < 100 && !/\[empty\]/.test(app.lastFrame()); attempt += 1) {
       app.stdin.write("\u007f");
-      await delay(5);
+      await delay(10);
     }
+    assert.match(app.lastFrame(), /\[empty\]/);
+
     app.stdin.write("\r");
     await delay(30);
     assert.equal(driver.getSessionState().activeConversationPrompt, "");
