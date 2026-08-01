@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-01
+
 ### Fixed
 
 - The `no-changelog` label now works when applied after a PR is opened. The
