@@ -37,6 +37,19 @@ async function waitForValue(read, expected) {
   assert.equal(read(), expected);
 }
 
+/**
+ * Send Enter until `settled()` holds, re-sending only while the editor is still
+ * open. Same dropped-write hazard as any other stdin write in these tests.
+ */
+async function pressEnterUntil(app, settled, { attempts = 20 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (settled()) return;
+    if (attempt > 0 && !/Conversation prompt/.test(app.lastFrame())) return;
+    app.stdin.write("\r");
+    await waitFor(settled, { timeout: 250 });
+  }
+}
+
 async function loadInkStack(t) {
   try {
     const React = await import("react");
@@ -263,7 +276,14 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     }
     await waitForFrame(app, /Persona one/);
 
-    app.stdin.write("\r");
+    // Enter can be dropped for the same reason the text was. Re-send while the
+    // save has not landed and the editor is still open; saving the same buffer
+    // twice is idempotent, and stopping once the editor closes avoids
+    // submitting a stray line to the conversation.
+    await pressEnterUntil(
+      app,
+      () => driver.getSessionState().activeConversationPrompt === "Persona one"
+    );
     await waitForValue(() => driver.getSessionState().activeConversationPrompt, "Persona one");
     await waitForFrame(app, /conversation prompt updated/);
 
@@ -281,7 +301,11 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     }
     assert.match(app.lastFrame(), /\[empty\]/);
 
-    app.stdin.write("\r");
+    await pressEnterUntil(
+      app,
+      () => driver.getSessionState().activeConversationPrompt === ""
+        && /conversation prompt cleared/.test(app.lastFrame())
+    );
     await waitForValue(() => driver.getSessionState().activeConversationPrompt, "");
     await waitForFrame(app, /conversation prompt cleared/);
   } finally {
