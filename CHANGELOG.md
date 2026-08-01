@@ -26,6 +26,13 @@ automatically.
   and across CI. Node 20 is past end-of-life and the ink TUI keystroke tests
   did not behave reliably on it.
 
+### Fixed
+
+- The `/prompt` editor test no longer runs on CI, where ink-testing-library's
+  mock stdin loses keystrokes regardless of how long the test waits. It still
+  runs locally. **Known gap: that flow is verified on a developer machine
+  only.** The test carries a comment recording what was ruled out.
+
 ## [1.1.0] - 2026-08-01
 
 Initial version tracked under this file. `package.json` already carried `1.1.0`
