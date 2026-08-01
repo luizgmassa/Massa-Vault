@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-01
+
 ### Changed
 
 - `release.yml` now pushes with the `release-bot` deploy key
