@@ -1,0 +1,106 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this repo is
+
+Tooling-only repo for a personal Obsidian vault automation system. It contains **no notes** — the vault lives at an external `vault_path` configured via CLI. Node >= 20, ESM, zero build step (`npm run build` is an alias for `npm test`).
+
+## Commands
+
+```bash
+npm test                       # node --test, discovers tests/*.test.js
+node --test tests/foo.test.js  # single file
+node --test --test-name-pattern="partial name" tests/foo.test.js  # single test
+
+npm run setup                  # full bootstrap (install.sh)
+npm run server:start           # daemonize supervisor (litellm, router-gateway, mcp-server, notes-automation)
+npm run server:status          # --json status
+npm run server:stop
+npm run vault:chat             # Ink TUI chat REPL
+npm run vault -- chat "text"   # one-shot
+npm run vault:sync             # manual sync run
+npm run vault -- sync conflicts / sync resolve --done
+npm run security:scan          # staged secret scan (also a pre-commit hook)
+npm run security:scan:all
+```
+
+Single-service runs go through the supervisor: `npm run litellm`, `npm run router-gateway`, `npm run mcp-server` are wrappers over `node tools/server/src/cli.js run --only <name>`.
+
+**Always run npm scripts from the repo root.** Nearly every default path is `path.resolve("relative/path")` — resolved against `process.cwd()`, not the module. Running a tool's `cli.js` from a subdirectory silently creates stray `config/` and `.automation/` lookups in the wrong place. The one deliberate exception is `tools/server/src/services/supervisor.js`, which resolves its own CLI path via `import.meta.url` so it can re-exec detached.
+
+## Architecture
+
+Five cooperating processes plus a client CLI. `tools/server` supervises the long-running ones.
+
+```
+llm-chat-cli (Ink TUI) ──HTTP──▶ router-gateway :4100 ──▶ LiteLLM :4000 ──▶ Ollama / LM Studio
+                                       ▲
+notes-automation (watcher/daemon) ──▶ git + rclone bisync ──▶ external vault
+mcp-server :4200 ──▶ grounded-source MCP over the vault
+```
+
+- `tools/cli.js` — `massa-vault` client entrypoint (install/configure/chat/sync/gdrive). `start|stop|status|restart` are thin proxies to `massa-vault-server`.
+- `tools/server` — supervisor. Probes each service's `health_url` **before spawning**; if already healthy it marks the service `external: true` and never spawns or kills it. Starts in config order, rolls back (`stopAllServices`) on any startup failure, stops in reverse order.
+- `tools/router-gateway` — classifies a request into `code`/`multimodal`/`general` lanes by phrase matching against `config/router-gateway.json`, falls back to `general` below `confidenceFloor` (0.55). Then `domain/model-resolution.js` picks a concrete model by complexity tier (token estimate = chars/4) from the generated LiteLLM YAML, unless a pinned model overrides it. Rewrites `body.model` and proxies to LiteLLM.
+- `tools/notes-automation` — file watcher + sync orchestrator. `services/sync-run.js` is the whole pipeline; `runQueuedSync` is the concurrency guard (a second sync request while one is in flight is coalesced into `queuedSyncReason`, not run concurrently).
+- `tools/mcp-server` — local-only MCP server exposing vault Markdown as grounded sources. Tracked plaintext admin/admin creds in `config/mcp-server.config.json`; localhost-bound, no OAuth. Answer sessions are in-memory only (`services/answer-sessions.js`) — everything else in the repo persists to JSON files.
+
+### Layering
+
+Each tool uses `domain/ → infrastructure/ → services/ → commands/ → cli/`:
+
+- **domain/** — pure transforms. No network, no process spawn. Where a domain file does read a file (`router-gateway/src/domain/classifier.js`, `model-resolution.js`) the fs read is isolated in a thin `loadX(path)` wrapper so the real logic stays a pure function over already-parsed data. Keep it that way; the unit tests call those pure functions with in-memory fixtures.
+- **infrastructure/** — all I/O: fs, `child_process`, http, `fetch`, config/env loading.
+- **services/** — orchestration; factory functions (`createXClient`) or classes for stateful daemons (`NotesAutomationService`, `ServerSupervisor`).
+- **commands/** — wiring. In `llm-chat-cli` this is inverted: `commands/families/*.js` receive every side-effecting operation through an injected `deps` bag built by `commands/runtime.js::createCommandRuntime`, and never import `services/*` directly. `services/command-executor.js` dynamically imports `commands/runtime.js` and acts as the composition root.
+- **cli/** — entrypoints, guarded by `import.meta.url === pathToFileURL(process.argv[1]).href`.
+
+Tools are **not** independent packages — there is one root `package.json` and cross-tool imports are normal (e.g. `mcp-server` and `llm-chat-cli` both import `notes-automation/src/infrastructure/config.js` via long relative paths). Changing that module's export shape affects three tools at once.
+
+### `tools/shared/` is the cross-package contract layer
+
+- `env.js` — the only `.env` parser in the repo. `loadLocalEnv()` **never overwrites an already-set `process.env` key** unless `override: true`. Multiple tools call it independently, some at module import time — first writer wins for the whole process.
+- `model-managers.js` — owns the MMT state file (`.automation/llm-chat-cli/model-managers.json`) and the generated LiteLLM config (`.automation/llm-chat-cli/litellm-config.generated.yaml`).
+- `routing-metadata.js` — HTTP header ⇄ transcript-metadata codec. Gateway encodes routing decisions into response headers; chat CLI decodes them and persists them into transcripts.
+- `sync-status-contract.js` / `sync-status-model.js` — the JSON status schema that lets notes-automation (producer) and llm-chat-cli (consumer) agree without a shared server.
+
+### Load-bearing string contracts
+
+`"smart-router"` is duplicated, unenforced, across four places. Renaming one breaks routing silently at runtime:
+
+1. `router-gateway/src/infrastructure/constants.js` — `ROUTER_GATEWAY_REQUIRED_MODEL`; the gateway **400s any request whose `body.model` isn't exactly this** (default on).
+2. `llm-chat-cli/src/infrastructure/vault-cli-config.js` — `DEFAULT_CHAT_MODEL`, what the client sends.
+3. `config/router-gateway.json` — lane aliases `smart-router-code|multimodal|general`.
+4. `tools/shared/model-managers.js` — writes those same alias strings into the generated LiteLLM YAML.
+
+External clients must keep sending `smart-router`; `/model` pins are resolved server-side inside the gateway.
+
+## Conventions
+
+- Named exports only — there is not a single `export default` in `tools/`.
+- `node:` prefix is mandatory on builtins; explicit `.js` extensions on every relative import.
+- Error idiom, used ~28x verbatim: `error instanceof Error ? error.message : String(error)`. Catch blocks stringify before logging. Custom Error classes are rare (`SmokeValidationSkip`, `AuthError`).
+- `Object.freeze` marks fixed vocabularies (enums, constant maps), not runtime state objects.
+- Side-effecting collaborators are injected with named defaults rather than module-mocked: `{ fetchImpl = fetch }`, `ServerSupervisor({ spawnImpl, healthProbe, waitImpl })`, `createNotesAutomationAdapters(overrides)`. Follow this for anything new that touches fs/network/spawn.
+- Config loading is deliberately per-tool and not uniform. Note that `llm-chat-cli/src/infrastructure/chat-config.js` freezes `DEFAULT_GATEWAY_URL`/`DEFAULT_GATEWAY_MODEL` at **import time** — changing env after first import won't affect them; only `buildGatewayOptions()` re-reads config per call.
+
+## Tests
+
+Flat `tests/*.test.js` at repo root, imported via relative paths into `tools/`. Uniform style: `import test from "node:test"` + `import assert from "node:assert/strict"`, flat `test()` calls — no `describe`/`it` anywhere.
+
+Isolation patterns to reuse:
+- `withTempDir` via `fs.mkdtempSync(os.tmpdir(), ...)` + `fs.rmSync` in `finally`.
+- Fake `spawn` returning an `EventEmitter` with `PassThrough` streams, injected as `spawnImpl`.
+- `globalThis.fetch` swapped and restored in `finally` for network stubs; or real servers bound to `127.0.0.1:0`.
+- Real git plumbing in temp repos (`tests/notes-automation-git.test.js` does not stub git).
+- A fake `rclone` written as a temp `.mjs` script, pointed at via `gdrive_binary` + `FAKE_RCLONE_STATE`.
+- Ink TUI: `tests/llm-chat-cli-ink.test.js` uses `ink-testing-library`, `loadInkStack(t)` dynamically imports and calls `t.skip()` if deps are missing. Assert against `app.lastFrame()`; drive via `app.stdin.write()` or the injected `driver`.
+
+## Runtime state
+
+`.automation/` and `.logs/` are gitignored runtime state — `model-managers.json`, `litellm-config.generated.yaml`, `search-index.json`, `usage.json`, notes-automation `state.json`/`service.pid`, server `state.json`/`supervisor.pid`, per-service logs. No in-memory cache layer: durable state is re-read from JSON on every access, and concurrent processes coordinate purely through the filesystem (see the `runId`/`pid` optimistic lock in `notes-automation/src/services/daemon-service.js`).
+
+`.notebook/` is **tracked** design documentation, not runtime state — `INDEX.md` links per-feature notes (MMT model control, chat harness + Vault RAG, improvements). Read the relevant entry before changing those subsystems.
+
+`config/*.local.json` and `.env` are gitignored; `config/notes-automation.local.json` overrides the committed config, and `process.env` overrides both.
