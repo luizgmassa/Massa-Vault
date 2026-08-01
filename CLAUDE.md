@@ -109,8 +109,8 @@ Isolation patterns to reuse:
 
 Three workflows, all on `master`. Run the same gates locally before pushing: `npm run lint`, `npm test`, `npm run security:scan:all`, `bash install.sh --check-only`.
 
-- **`CI`** (`.github/workflows/ci.yml`) — Node 20/22/24 matrix. Cheapest gate first: lint → secret scan → `install.sh --check-only` → CHANGELOG gate → tests. **The workflow name `CI` is load-bearing** — `release.yml` triggers on `workflow_run: workflows: [CI]`.
-- **`Coverage`** (`.github/workflows/coverage.yml`) — `node --test --experimental-test-coverage` with a threshold floor (lines 78 / branches 62 / functions 79, against a measured 80.57/66.15/81.28 baseline). Pinned to Node 22 because `--test-coverage-*` requires ≥22.5. It is **deliberately a separate workflow** and must never be folded into `ci.yml` or renamed to `CI`: anything inside the `CI` workflow extends the chain that cuts a release, and coverage must be able to fail a merge without being able to misfire one.
+- **`CI`** (`.github/workflows/ci.yml`) — Node 25 (the `engines` floor). Cheapest gate first: lint → secret scan → `install.sh --check-only` → CHANGELOG gate → tests. **The workflow name `CI` is load-bearing** — `release.yml` triggers on `workflow_run: workflows: [CI]`.
+- **`Coverage`** (`.github/workflows/coverage.yml`) — `node --test --experimental-test-coverage` with a threshold floor (lines 78 / branches 62 / functions 79, against 87.10/70.62/84.23 measured on the CI runner). `--test-coverage-*` requires Node ≥22.5, so this must never be pinned below that. It is **deliberately a separate workflow** and must never be folded into `ci.yml` or renamed to `CI`: anything inside the `CI` workflow extends the chain that cuts a release, and coverage must be able to fail a merge without being able to misfire one.
 - **`Release`** (`.github/workflows/release.yml`) — see below.
 
 Lint is `oxlint` with correctness rules only (`.oxlintrc.json`), pinned to an exact version — a minor bump can add rules to `correctness` and turn CI red for an unrelated reason. Bump it deliberately and land any new findings in the same PR.

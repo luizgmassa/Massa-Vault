@@ -48,14 +48,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Pinned to a single Node version rather than matrixed: there is nothing
-      # to learn from computing identical coverage numbers three times. It must
-      # be >= 22.5 - the --test-coverage-* threshold flags do not exist before
-      # that, and older Node silently ignores unknown flags rather than failing.
+      # Tracks the `engines` floor in package.json (>=25.9.0). Note the
+      # --test-coverage-* threshold flags below require Node >= 22.5 and are
+      # silently ignored by anything older, so this must never be pinned below
+      # that even if the floor is one day lowered.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '25'
           cache: npm
 
       - name: Install dependencies

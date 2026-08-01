@@ -15,10 +15,16 @@ automatically.
 
 ### Added
 
-- GitHub Actions CI/CD: a test matrix (Node 20/22/24), a CHANGELOG merge gate,
-  `oxlint` (correctness rules only), a separate coverage-floor workflow, and
+- GitHub Actions CI/CD: a test workflow, a CHANGELOG merge gate, `oxlint`
+  (correctness rules only), a separate coverage-floor workflow, and
   CHANGELOG-driven release automation that tags and publishes a GitHub Release
   on merge to `master`.
+
+### Changed
+
+- Raised the supported Node floor to `>=25.9.0` in `engines`, in `install.sh`,
+  and across CI. Node 20 is past end-of-life and the ink TUI keystroke tests
+  did not behave reliably on it.
 
 ## [1.1.0] - 2026-08-01
 

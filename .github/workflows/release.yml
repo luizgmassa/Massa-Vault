@@ -62,10 +62,11 @@ jobs:
           ref: master
           fetch-depth: 0
 
+      # Tracks the `engines` floor in package.json (>=25.9.0).
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '25'
           cache: npm
 
       - name: Install dependencies

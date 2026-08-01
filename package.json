@@ -8,7 +8,7 @@
     "massa-vault-server": "./tools/server/src/cli.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=25.9.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

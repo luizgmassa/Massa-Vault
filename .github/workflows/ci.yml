@@ -31,11 +31,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
-      # One Node major failing should not hide the result on the others.
       fail-fast: false
       matrix:
-        # 20 is the `engines` floor; 22 and 24 are the active LTS lines.
-        node-version: ['20', '22', '24']
+        # Matches the `engines` floor in package.json (>=25.9.0), so CI tests
+        # exactly what the repo claims to support. Keep the two in sync: a
+        # matrix leg below the floor tests an unsupported version, and a floor
+        # above the matrix ships an unverified claim.
+        node-version: ['25']
 
     steps:
       # No `fetch-depth: 0`: nothing here reads history. The CHANGELOG filter
