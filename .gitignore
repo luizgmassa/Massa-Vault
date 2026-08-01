@@ -13,7 +13,10 @@ node_modules/
 
 # local runtime secrets
 .litellm/litellm.local.env
-.obsidian/plugins/obsidian-local-rest-api/data.json
+# Whole Obsidian workspace, not just one plugin: any plugin's data.json can hold
+# OAuth tokens or API keys, and a Google Drive refresh token leaked from
+# .obsidian/plugins/google-drive-sync/data.json in the initial commit.
+.obsidian/
 
 # OS files
 .DS_Store

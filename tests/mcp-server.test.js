@@ -9,6 +9,7 @@ import { ensureSearchIndex, searchIndex } from "../tools/llm-chat-cli/src/infras
 import { createMcpServices } from "../tools/mcp-server/src/mcp.js";
 import { createMcpHttpServer } from "../tools/mcp-server/src/server.js";
 import { createAuthService } from "../tools/mcp-server/src/services/auth.js";
+import { extractBearerToken, isAllowedOrigin } from "../tools/mcp-server/src/infrastructure/http.js";
 import { createAnswerSessionStore } from "../tools/mcp-server/src/services/answer-sessions.js";
 import { createGroundedAnswerService } from "../tools/mcp-server/src/services/grounded-answer.js";
 import {
@@ -371,6 +372,148 @@ test("MCP HTTP server protects /mcp and exposes source tools/resources", async (
       } finally {
         await client.close();
       }
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+test("extractBearerToken parses the scheme without catastrophic backtracking", () => {
+  assert.equal(extractBearerToken("Bearer abc"), "abc");
+  assert.equal(extractBearerToken("bearer abc"), "abc");
+  assert.equal(extractBearerToken("BeArEr abc"), "abc");
+  assert.equal(extractBearerToken("Bearer   abc  "), "abc");
+  assert.equal(extractBearerToken("Bearer\tabc"), "abc");
+  assert.equal(extractBearerToken("Bearer \n abc"), "abc");
+  assert.equal(extractBearerToken("Bearer a b"), "a b");
+  assert.equal(extractBearerToken("Bearer"), "");
+  assert.equal(extractBearerToken("Bearer   "), "");
+  assert.equal(extractBearerToken("Bearerabc"), "");
+  assert.equal(extractBearerToken("Basic abc"), "");
+  assert.equal(extractBearerToken(""), "");
+  assert.equal(extractBearerToken(undefined), "");
+  assert.equal(extractBearerToken(null), "");
+  // A token spanning a line break was rejected by the original `.` match and
+  // must stay rejected.
+  assert.equal(extractBearerToken("Bearer a\nb"), "");
+
+  // CodeQL js/polynomial-redos repro: "bearer " plus many repetitions of "  ".
+  const attack = `bearer ${" ".repeat(200_000)}`;
+  const started = process.hrtime.bigint();
+  assert.equal(extractBearerToken(attack), "");
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 1000, `bearer parse took ${elapsedMs}ms`);
+});
+
+test("isAllowedOrigin normalizes trailing slashes without catastrophic backtracking", () => {
+  const allowed = ["http://127.0.0.1"];
+  assert.equal(isAllowedOrigin("", allowed), true);
+  assert.equal(isAllowedOrigin("http://127.0.0.1", allowed), true);
+  assert.equal(isAllowedOrigin("http://127.0.0.1///", allowed), true);
+  assert.equal(isAllowedOrigin("http://localhost:8080", allowed), true);
+  assert.equal(isAllowedOrigin("https://evil.example", allowed), false);
+
+  // CodeQL js/polynomial-redos repro: an Origin header of many repeated "/".
+  const attack = `http://evil.example${"/".repeat(200_000)}`;
+  const started = process.hrtime.bigint();
+  assert.equal(isAllowedOrigin(attack, allowed), false);
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 1000, `origin check took ${elapsedMs}ms`);
+});
+
+test("HTTP error responses expose fixed text, never internal error detail", async () => {
+  await withTempDir(async (tempDir) => {
+    const runtime = createRuntime(tempDir);
+    const marker = "INTERNAL-DETAIL-/secret/path/at/line/42";
+    const originalError = console.error;
+    const consoleErrors = [];
+    console.error = (...args) => consoleErrors.push(args.join(" "));
+
+    const server = createMcpHttpServer({
+      runtime,
+      services: {
+        auth: {
+          login() {
+            throw new Error(marker);
+          },
+          authenticate() {
+            throw new Error(marker);
+          },
+          refresh() {
+            throw new Error(marker);
+          },
+          logout() {
+            throw new Error(marker);
+          }
+        }
+      }
+    });
+    const port = await listen(server);
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      const thrown = await fetch(`${baseUrl}/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "admin" })
+      });
+      assert.equal(thrown.status, 400);
+      const thrownBody = await thrown.text();
+      assert.equal(thrownBody.includes(marker), false);
+      assert.equal(JSON.parse(thrownBody).error.message, "Invalid request");
+
+      const malformed = await fetch(`${baseUrl}/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not json"
+      });
+      assert.equal(malformed.status, 400);
+      assert.equal((await malformed.json()).error.message, "Invalid JSON body");
+
+      const unauthorized = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}"
+      });
+      assert.equal(unauthorized.status, 401);
+      const unauthorizedBody = await unauthorized.text();
+      assert.equal(unauthorizedBody.includes(marker), false);
+      assert.equal(JSON.parse(unauthorizedBody).error.message, "Unauthorized");
+    } finally {
+      console.error = originalError;
+      await closeServer(server);
+    }
+
+    assert.equal(consoleErrors.some((entry) => entry.includes(marker)), false);
+  });
+});
+
+test("auth failures keep their specific client-facing message", async () => {
+  await withTempDir(async (tempDir) => {
+    const runtime = createRuntime(tempDir);
+    const server = createMcpHttpServer({
+      runtime,
+      services: { auth: createAuthService(runtime.auth) }
+    });
+    const port = await listen(server);
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      const badPassword = await fetch(`${baseUrl}/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "wrong" })
+      });
+      assert.equal(badPassword.status, 401);
+      assert.equal((await badPassword.json()).error.message, "Invalid username or password");
+
+      const badRefresh = await fetch(`${baseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refresh_token: "nope" })
+      });
+      assert.equal(badRefresh.status, 401);
+      assert.equal((await badRefresh.json()).error.message, "Missing or invalid refresh token");
     } finally {
       await closeServer(server);
     }

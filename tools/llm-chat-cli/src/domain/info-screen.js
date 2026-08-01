@@ -1,5 +1,9 @@
 function escapeMarkdownTableCell(value) {
+  // Backslashes must be escaped before pipes: escaping `|` first would let an
+  // input like `a\|b` render as `a\\|b`, where the trailing pipe is no longer
+  // escaped and silently opens a new table column.
   return String(value ?? "")
+    .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
     .replace(/\r?\n/g, " ")
     .trim();

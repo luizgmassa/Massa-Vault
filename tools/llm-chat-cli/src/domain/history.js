@@ -1,5 +1,6 @@
 import path from "node:path";
 import { routingFromTranscriptMetadata } from "../../../shared/routing-metadata.js";
+import { buildMarkdownTable } from "./info-screen.js";
 import {
   DEFAULT_RAG_MAX_CHARS,
   normalizeSourcePath
@@ -91,28 +92,6 @@ export function createHistoryRowsFromSearchResults(results, vaultPath) {
     });
 }
 
-function escapeHistoryTableCell(value) {
-  return String(value ?? "")
-    .replace(/\|/g, "\\|")
-    .replace(/\r?\n/g, " ")
-    .trim();
-}
-
-function buildHistoryMarkdownTable(headers, rows) {
-  const safeHeaders = (Array.isArray(headers) ? headers : []).map((header) =>
-    escapeHistoryTableCell(header)
-  );
-  const safeRows = (Array.isArray(rows) ? rows : []).map((row) =>
-    (Array.isArray(row) ? row : []).map((cell) => escapeHistoryTableCell(cell))
-  );
-
-  return [
-    `| ${safeHeaders.join(" | ")} |`,
-    `| ${safeHeaders.map(() => "---").join(" | ")} |`,
-    ...safeRows.map((row) => `| ${row.join(" | ")} |`)
-  ];
-}
-
 function spacingForHistorySentences(text) {
   const source = String(text || "").trim();
   if (!source) return [];
@@ -137,7 +116,7 @@ export function formatHistoryDateLines({ rows }) {
   }
 
   lines.push(
-    ...buildHistoryMarkdownTable(
+    ...buildMarkdownTable(
       ["#", "Date", "Conversations"],
       list.map((row) => [String(row.number), row.date, String(row.count)])
     )
@@ -166,7 +145,7 @@ export function formatHistoryConversationLines({ rows, title, includeScore = fal
     ? ["#", "Time", "Date", "Score", "Transcript", "Snippet"]
     : ["#", "Time", "Date", "Transcript", "Snippet"];
   lines.push(
-    ...buildHistoryMarkdownTable(
+    ...buildMarkdownTable(
       headers,
       list.map((row) => {
         const transcriptLabel = truncateText(`${row.fileName}`, 54);
@@ -200,7 +179,7 @@ export function formatHistorySummaryLines({ row, summary }) {
   const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
   const lines = [];
   lines.push(
-    ...buildHistoryMarkdownTable(
+    ...buildMarkdownTable(
       ["Field", "Value"],
       [
         ["Conversation", title],
@@ -223,7 +202,7 @@ export function formatHistoryPreviewLines({ row, transcriptMarkdown }) {
   const title = formatRelativeTranscriptLabel(row?.relativePath) || row?.fileName || "unknown";
   const lines = [];
   lines.push(
-    ...buildHistoryMarkdownTable(
+    ...buildMarkdownTable(
       ["Field", "Value"],
       [
         ["Conversation", title],
