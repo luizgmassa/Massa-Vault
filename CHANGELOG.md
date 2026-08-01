@@ -13,6 +13,14 @@ automatically.
 
 ## [Unreleased]
 
+### Fixed
+
+- The `no-changelog` label now works when applied after a PR is opened. The
+  CHANGELOG gate reads labels from the event payload captured at trigger time,
+  and `ci.yml` did not run on `labeled`, so the escape hatch previously only
+  worked if the label existed before the PR did — and re-running did not help,
+  since a re-run replays the original payload.
+
 ## [1.3.0] - 2026-08-01
 
 ### Changed
