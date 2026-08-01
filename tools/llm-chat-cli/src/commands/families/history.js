@@ -18,7 +18,7 @@ export function createHistoryCommandSpecs(deps) {
     {
       match: (line) => line === "/",
       parse: () => ({}),
-      run: ({ mode, handlers }) => renderCommands(mode, handlers)
+      run: ({ mode }) => renderCommands(mode)
     },
     createCommandSpec("/conv", async ({ mode, state }) => {
       deps.clearHistoryFlowStack(state);

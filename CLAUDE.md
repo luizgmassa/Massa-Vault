@@ -104,3 +104,35 @@ Isolation patterns to reuse:
 `.notebook/` is **tracked** design documentation, not runtime state — `INDEX.md` links per-feature notes (MMT model control, chat harness + Vault RAG, improvements). Read the relevant entry before changing those subsystems.
 
 `config/*.local.json` and `.env` are gitignored; `config/notes-automation.local.json` overrides the committed config, and `process.env` overrides both.
+
+## CI
+
+Three workflows, all on `master`. Run the same gates locally before pushing: `npm run lint`, `npm test`, `npm run security:scan:all`, `bash install.sh --check-only`.
+
+- **`CI`** (`.github/workflows/ci.yml`) — Node 20/22/24 matrix. Cheapest gate first: lint → secret scan → `install.sh --check-only` → CHANGELOG gate → tests. **The workflow name `CI` is load-bearing** — `release.yml` triggers on `workflow_run: workflows: [CI]`.
+- **`Coverage`** (`.github/workflows/coverage.yml`) — `node --test --experimental-test-coverage` with a threshold floor (lines 78 / branches 62 / functions 79, against a measured 80.57/66.15/81.28 baseline). Pinned to Node 22 because `--test-coverage-*` requires ≥22.5. It is **deliberately a separate workflow** and must never be folded into `ci.yml` or renamed to `CI`: anything inside the `CI` workflow extends the chain that cuts a release, and coverage must be able to fail a merge without being able to misfire one.
+- **`Release`** (`.github/workflows/release.yml`) — see below.
+
+Lint is `oxlint` with correctness rules only (`.oxlintrc.json`), pinned to an exact version — a minor bump can add rules to `correctness` and turn CI red for an unrelated reason. Bump it deliberately and land any new findings in the same PR.
+
+## Release process
+
+Releases are automatic and CHANGELOG-driven — merging to `master` with a green CI run is the only way a version is cut. There is no `npm publish`; `package.json` stays `"private": true` and the only artifact is a GitHub Release (tag + notes).
+
+**Authoring rule** — entries go under `## [Unreleased]` in `CHANGELOG.md`. The heading you file under picks the bump:
+
+| Heading | Bump |
+|---|---|
+| `### Added` / `### Changed` / `### Removed` / `### Deprecated` | minor |
+| `### Fixed` / `### Security` | patch |
+| nothing with content, or PR labeled `no-changelog` | no release |
+
+Minor wins when both classes have content. A heading with no bullets under it is ignored — don't rely on that, file a real entry. **Major versions are never bumped automatically**; cutting a `2.0.0` is a deliberate manual `package.json` edit. Never hand-edit a dated `## [X.Y.Z] - DATE` section or bump `version` yourself for routine work — `scripts/release-version.js` and `release.yml` own both.
+
+**The CI merge gate** fails any PR that doesn't modify `CHANGELOG.md`, unless it carries the `no-changelog` label or is bot-authored. Use the label for docs/chore-only work that shouldn't cut a release.
+
+**Never write the literal skip-ci marker in a commit message, commit body, or PR body.** GitHub scans the entire message, not just the subject, and a squash merge folds every commit body into it — so writing it, even while explaining it, skips CI on the merge commit, and no CI run means no release. Refer to it as "the skip-ci marker" in prose. `release.yml`'s own bump commit uses it intentionally.
+
+**Mechanics** — `CI` passes on `master` → `release.yml` fires via `workflow_run` → `scripts/release-version.js` derives the next version from `[Unreleased]`, rewrites `package.json`, and promotes the section under a dated heading → commit `chore(release): vX.Y.Z`, annotated tag, `git push --atomic origin master vX.Y.Z` → `gh release create --notes-file notes.md --verify-tag`. It exits cleanly, releasing nothing, when `[Unreleased]` has no qualifying heading. Rehearse locally with `node scripts/release-version.js --dry-run` (writes nothing).
+
+**Auth** — the push uses `GITHUB_TOKEN` with `permissions: contents: write`, which works because `master` currently has no ruleset or branch protection. A `GITHUB_TOKEN` push raises no workflow event (GitHub's recursion guard), so there is no release loop by construction — which is also why the skip-ci marker is belt-and-braces here rather than load-bearing. **If a ruleset requiring PRs is ever added to `master`**, this push starts failing with `GH013`, because Actions cannot be a bypass actor on a user-owned repo; provision a repo-scoped deploy key as a `RELEASE_SSH_KEY` secret and add `ssh-key: ${{ secrets.RELEASE_SSH_KEY }}` to the checkout step **before** enabling that ruleset.

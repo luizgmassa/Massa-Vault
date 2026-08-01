@@ -79,7 +79,7 @@ export class ServerSupervisor {
     const next = {
       ...state,
       services: {
-        ...(state.services || {}),
+        ...state.services,
         [serviceName]: {
           ...current,
           ...patch,
@@ -257,7 +257,7 @@ export class ServerSupervisor {
     this.writeState({
       ...state,
       supervisor: {
-        ...(state.supervisor || {}),
+        ...state.supervisor,
         running: false,
         pid: null,
         stoppedAt: new Date().toISOString(),
@@ -273,12 +273,12 @@ export class ServerSupervisor {
     const nextState = {
       ...state,
       supervisor: {
-        ...(state.supervisor || {}),
+        ...state.supervisor,
         running: supervisorRunning,
         pid: supervisorRunning ? state.supervisor?.pid || null : null,
         updatedAt: new Date().toISOString()
       },
-      services: { ...(state.services || {}) }
+      services: { ...state.services }
     };
 
     for (const service of this.config.services) {

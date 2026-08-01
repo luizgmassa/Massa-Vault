@@ -1,0 +1,98 @@
+name: CI
+
+# The workflow NAME is load-bearing: release.yml triggers on
+# `workflow_run: workflows: [CI]`. Renaming this workflow silently breaks
+# release automation with no diff anywhere in release.yml.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Least-privilege GITHUB_TOKEN: nothing here writes to the repository.
+# `pull-requests: read` is what dorny/paths-filter needs to diff the PR head
+# against its base through the API.
+permissions:
+  contents: read
+  pull-requests: read
+
+# A superseded PR revision's run has no value, so cancel it. Push runs on
+# master are never cancelled: release.yml gates on
+# `github.event.workflow_run.conclusion == 'success'`, and a cancelled run
+# reports `cancelled`, so cancelling a master run would silently swallow a
+# release. The expression below restricts cancellation to pull_request events
+# for exactly that reason.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # One Node major failing should not hide the result on the others.
+      fail-fast: false
+      matrix:
+        # 20 is the `engines` floor; 22 and 24 are the active LTS lines.
+        node-version: ['20', '22', '24']
+
+    steps:
+      # No `fetch-depth: 0`: nothing here reads history. The CHANGELOG filter
+      # below only runs on pull_request, where paths-filter uses the API
+      # rather than local git.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cheapest gate first. `build` is an alias for `test` in this repo (there
+      # is no compile step), so there is deliberately no separate build gate.
+      - name: Lint (oxlint, correctness rules)
+        run: npm run lint
+
+      - name: Secret scan (tracked files)
+        run: npm run security:scan:all
+
+      # install.sh --check-only writes, installs and starts nothing: every
+      # mutating function is guarded by `[[ "$CHECK_ONLY" -eq 0 ]] || return 0`,
+      # and both resolve_config() and ensure_env_file() return before any
+      # interactive prompt is reachable, so it cannot hang a headless runner.
+      # Run across the whole matrix so a bootstrap regression against any
+      # supported Node major surfaces here rather than on a fresh clone.
+      - name: Verify install.sh bootstrap (check-only)
+        run: bash install.sh --check-only
+
+      - name: Detect CHANGELOG changes
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changelog:
+              - 'CHANGELOG.md'
+
+      # The heading an entry is filed under picks the next version, so a PR that
+      # changes behaviour without a CHANGELOG entry would release nothing.
+      # Bot-authored PRs and PRs labelled `no-changelog` are exempt.
+      # See the "Release process" section of CLAUDE.md for the authoring rules.
+      - name: CHANGELOG merge gate
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.filter.outputs.changelog == 'false' &&
+          !contains(github.event.pull_request.labels.*.name, 'no-changelog') &&
+          github.event.pull_request.user.type != 'Bot'
+        run: |
+          echo "::error::CHANGELOG.md was not modified."
+          echo "Add an entry under [Unreleased], or apply the 'no-changelog' label for docs/chore-only work."
+          exit 1
+
+      - name: Test
+        run: npm test

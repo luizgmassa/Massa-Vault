@@ -1,0 +1,79 @@
+name: Coverage
+
+# Coverage floor gate.
+#
+# WHY THIS IS A SEPARATE WORKFLOW FROM ci.yml: release.yml triggers on
+# `workflow_run: workflows: [CI]`, so anything added to the `CI` workflow
+# extends the chain that cuts and publishes a release. Coverage must be able to
+# fail a merge without being able to hold up or misfire a release, and `CI` must
+# remain the sole release trigger. Keeping this workflow separate - and never
+# renaming it to `CI`, nor folding these steps into ci.yml - is what guarantees
+# both.
+#
+# There is deliberately no `continue-on-error`: a gate that reports but never
+# enforces is worse than no gate. Merge enforcement itself, however, is a
+# repository ruleset setting (`required_status_checks`) that is invisible from
+# this file and is not versioned with it. Until that ruleset lists this job's
+# id, this workflow reports without blocking. Verify the live setting with:
+#
+#   gh api repos/{owner}/{repo}/rules/branches/master \
+#     --jq '[.[] | select(.type=="required_status_checks")
+#            | .parameters.required_status_checks[].context]'
+#
+# The context string is the JOB ID below (`coverage`), not the workflow `name:`
+# (`Coverage`). Renaming either, or editing the ruleset, silently un-blocks this
+# gate with no diff anywhere in this repository.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel a superseded PR revision's run. Never cancel on master, where the run
+  # is the post-merge coverage record for that commit.
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Pinned to a single Node version rather than matrixed: there is nothing
+      # to learn from computing identical coverage numbers three times. It must
+      # be >= 22.5 - the --test-coverage-* threshold flags do not exist before
+      # that, and older Node silently ignores unknown flags rather than failing.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Thresholds sit a few points below the measured baseline
+      # (lines 80.57 / branches 66.15 / functions 81.28). This is a ratchet
+      # FLOOR, not a target: raise it deliberately in its own PR once real
+      # coverage grows, and never lower it to turn a red run green.
+      #
+      # The margin is generous on purpose - repeat runs drift by a few
+      # hundredths, and the baseline above was measured on macOS while this job
+      # runs on ubuntu-latest, where platform-conditional paths may shift the
+      # numbers. Re-check the real figures from the first run on this runner
+      # before treating these values as final.
+      - name: Coverage gate
+        run: >-
+          node --test --experimental-test-coverage
+          --test-coverage-lines=78
+          --test-coverage-branches=62
+          --test-coverage-functions=79

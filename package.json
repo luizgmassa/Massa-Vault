@@ -18,7 +18,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "ink-testing-library": "^4.0.0"
+    "ink-testing-library": "^4.0.0",
+    "oxlint": "1.76.0"
   },
   "scripts": {
     "build": "npm test",
@@ -50,6 +51,9 @@
     "notes-automation:flush-push": "node tools/notes-automation/src/cli.js flush-push",
     "notes-automation:flush-sync": "node tools/notes-automation/src/cli.js flush-sync",
     "notes-automation:resume": "node tools/notes-automation/src/cli.js resume",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "release:version": "node scripts/release-version.js",
     "security:scan": "node tools/security/scan-secrets.js --staged",
     "security:scan:all": "node tools/security/scan-secrets.js --all",
     "hooks:install": "bash tools/security/install-hooks.sh",

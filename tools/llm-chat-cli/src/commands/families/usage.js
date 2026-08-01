@@ -7,7 +7,7 @@ import { writeMessage } from "../shared.js";
 
 export function createUsageCommandSpecs(deps) {
   return [
-    createCommandSpec("/usage", async ({ mode, handlers, state, limitsByModel }) => {
+    createCommandSpec("/usage", async ({ mode, state, limitsByModel }) => {
       if (mode === "plain") {
         deps.printUsageSummary({
           sessionUsage: state.sessionUsage,

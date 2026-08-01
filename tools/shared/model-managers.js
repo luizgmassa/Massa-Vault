@@ -95,15 +95,18 @@ export function createDefaultModelManagerState() {
   };
 }
 
-export function sanitizeModelAlias(value, fallback = "model") {
-  const normalized = String(value || "")
+function normalizeAlias(value) {
+  return String(value || "")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
-  const safe = normalized || sanitizeModelAlias(fallback, "model");
+}
+
+export function sanitizeModelAlias(value, fallback = "model") {
+  const safe = normalizeAlias(value) || normalizeAlias(fallback) || normalizeAlias("model");
   return /^[a-z]/.test(safe) ? safe : `m_${safe}`;
 }
 
@@ -729,9 +732,10 @@ export async function fetchLiteLLMActiveAliases({
   fetchImpl = fetch
 } = {}) {
   const headers = liteLLMAuthHeaders(apiKey);
-  const response = await fetchImpl(joinUrl(baseUrl, "/v1/models"), {
-    ...(Object.keys(headers).length ? { headers } : {})
-  });
+  const response = await fetchImpl(
+    joinUrl(baseUrl, "/v1/models"),
+    Object.keys(headers).length ? { headers } : {}
+  );
   if (!response.ok) {
     throw new Error(`LiteLLM /v1/models failed (${response.status})`);
   }
