@@ -9,6 +9,13 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+    # `labeled`/`unlabeled` are here for the CHANGELOG gate below: it reads the
+    # labels off the event payload captured when the run was triggered, so a
+    # `no-changelog` label applied after the PR was opened would otherwise never
+    # be seen. Re-running does not help either - a re-run replays the original
+    # payload. Without these types the escape hatch only works if the label is
+    # applied before the PR exists.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # Least-privilege GITHUB_TOKEN: nothing here writes to the repository.
 # `pull-requests: read` is what dorny/paths-filter needs to diff the PR head

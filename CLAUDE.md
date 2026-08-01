@@ -115,6 +115,8 @@ Three workflows, all on `master`. Run the same gates locally before pushing: `np
 
 Lint is `oxlint` with correctness rules only (`.oxlintrc.json`), pinned to an exact version — a minor bump can add rules to `correctness` and turn CI red for an unrelated reason. Bump it deliberately and land any new findings in the same PR.
 
+**Required status checks are `coverage` and `test (25)`** — job ids, not workflow names, and `test (25)` embeds the matrix Node version. Bumping the matrix to another major renames that context, and the ruleset then waits forever on a check that never reports, leaving every PR stuck on "Expected — waiting for status". **Change the matrix and the ruleset in the same step.** The ruleset also sets `strict`, so a branch must be up to date with `master` to merge — and since each release pushes a bump commit, any other open PR goes stale as soon as a release lands.
+
 ## Release process
 
 Releases are automatic and CHANGELOG-driven — merging to `master` with a green CI run is the only way a version is cut. There is no `npm publish`; `package.json` stays `"private": true` and the only artifact is a GitHub Release (tag + notes).
@@ -135,6 +137,6 @@ Minor wins when both classes have content. A heading with no bullets under it is
 
 **Mechanics** — `CI` passes on `master` → `release.yml` fires via `workflow_run` → `scripts/release-version.js` derives the next version from `[Unreleased]`, rewrites `package.json`, and promotes the section under a dated heading → commit `chore(release): vX.Y.Z`, annotated tag, `git push --atomic origin master vX.Y.Z` → `gh release create --notes-file notes.md --verify-tag`. It exits cleanly, releasing nothing, when `[Unreleased]` has no qualifying heading. Rehearse locally with `node scripts/release-version.js --dry-run` (writes nothing).
 
-**Auth** — the release push authenticates with the `release-bot` deploy key (`RELEASE_SSH_KEY` secret), not `GITHUB_TOKEN`. `master` carries a ruleset requiring the `CI` and `coverage` checks, and Actions cannot be a ruleset bypass actor on a user-owned repo, so a `GITHUB_TOKEN` push is rejected with `GH013`. **Rotating or deleting that deploy key breaks releases** — replace the key and the secret together.
+**Auth** — the release push authenticates with the `release-bot` deploy key (`RELEASE_SSH_KEY` secret), not `GITHUB_TOKEN`. The `Main - Restrictions` ruleset on `master` requires status checks, and Actions cannot be a ruleset bypass actor on a user-owned repo, so a `GITHUB_TOKEN` push is rejected with `GH013`. The ruleset grants `DeployKey` an `always` bypass, which is the only reason the release push lands. **Rotating or deleting that deploy key, or dropping that bypass, breaks releases** — replace the key and the secret together.
 
 Because a deploy-key push *does* raise workflow events (unlike `GITHUB_TOKEN`), the skip-ci marker in the bump commit is **load-bearing**: without it the bump commit runs CI, which re-triggers `release.yml`. The second line of defence is that the freshly promoted `[Unreleased]` is empty, so a re-triggered run derives no version and exits cleanly.
