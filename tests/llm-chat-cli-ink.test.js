@@ -8,6 +8,35 @@ import { executeCommand } from "../tools/llm-chat-cli/src/cli.js";
 
 process.env.MASSA_VAULT_CHAT_RAG = "off";
 
+/**
+ * Poll until `predicate()` holds, or give up after `timeout`.
+ *
+ * Ink processes stdin asynchronously, so a fixed delay after a keystroke races
+ * on a slower or loaded machine. CI hit this twice in the same test: once with
+ * a half-drained editor, once with an Enter that had not been handled yet.
+ * Polling makes the wait proportional to the machine instead of guessing.
+ */
+async function waitFor(predicate, { timeout = 3000, interval = 10 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (predicate()) return true;
+    if (Date.now() >= deadline) return false;
+    await delay(interval);
+  }
+}
+
+/** Wait for the rendered frame to match `pattern`, failing with the last frame. */
+async function waitForFrame(app, pattern) {
+  const matched = await waitFor(() => pattern.test(app.lastFrame()));
+  assert.ok(matched, `frame never matched ${pattern}. Last frame:\n${app.lastFrame()}`);
+}
+
+/** Wait for `read()` to settle on `expected`. */
+async function waitForValue(read, expected) {
+  await waitFor(() => read() === expected);
+  assert.equal(read(), expected);
+}
+
 async function loadInkStack(t) {
   try {
     const React = await import("react");
@@ -206,23 +235,19 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
   );
 
   try {
-    await delay(20);
     await driver.submit("/prompt");
-    await delay(30);
-    assert.match(app.lastFrame(), /Conversation prompt/);
+    await waitForFrame(app, /Conversation prompt/);
     assert.match(app.lastFrame(), /Empty saves clear/);
 
     app.stdin.write("Persona one");
-    await delay(20);
-    assert.match(app.lastFrame(), /Persona one/);
+    await waitForFrame(app, /Persona one/);
+
     app.stdin.write("\r");
-    await delay(30);
-    assert.equal(driver.getSessionState().activeConversationPrompt, "Persona one");
-    assert.match(app.lastFrame(), /conversation prompt updated/);
+    await waitForValue(() => driver.getSessionState().activeConversationPrompt, "Persona one");
+    await waitForFrame(app, /conversation prompt updated/);
 
     await driver.submit("/prompt");
-    await delay(30);
-    assert.match(app.lastFrame(), /Persona one/);
+    await waitForFrame(app, /Persona one/);
 
     // Drain the editor, polling for the rendered `[empty]` marker rather than
     // assuming a fixed per-keystroke delay. A flat delay(5) per backspace raced
@@ -236,9 +261,8 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     assert.match(app.lastFrame(), /\[empty\]/);
 
     app.stdin.write("\r");
-    await delay(30);
-    assert.equal(driver.getSessionState().activeConversationPrompt, "");
-    assert.match(app.lastFrame(), /conversation prompt cleared/);
+    await waitForValue(() => driver.getSessionState().activeConversationPrompt, "");
+    await waitForFrame(app, /conversation prompt cleared/);
   } finally {
     app.unmount();
   }
