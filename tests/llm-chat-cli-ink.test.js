@@ -247,7 +247,20 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     // as the readiness signal for the keystrokes below.
     await waitForFrame(app, /\[empty\]/);
 
-    app.stdin.write("Persona one");
+    // Ink subscribes to stdin from an effect, and the mock stdin drops writes
+    // that arrive with no subscriber rather than buffering them. A rendered
+    // frame is not proof the subscription exists: React commits the frame
+    // before running effects, so CI saw this write vanish entirely.
+    //
+    // Re-send, but only while the editor still renders `[empty]` -- an empty
+    // buffer means nothing landed, so a retry cannot type the text twice. The
+    // inner wait gives each attempt a generous window to render before it is
+    // treated as lost.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (!/\[empty\]/.test(app.lastFrame())) break;
+      app.stdin.write("Persona one");
+      await waitFor(() => !/\[empty\]/.test(app.lastFrame()), { timeout: 250 });
+    }
     await waitForFrame(app, /Persona one/);
 
     app.stdin.write("\r");
