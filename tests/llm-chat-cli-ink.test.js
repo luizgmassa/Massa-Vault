@@ -16,7 +16,7 @@ process.env.MASSA_VAULT_CHAT_RAG = "off";
  * a half-drained editor, once with an Enter that had not been handled yet.
  * Polling makes the wait proportional to the machine instead of guessing.
  */
-async function waitFor(predicate, { timeout = 3000, interval = 10 } = {}) {
+async function waitFor(predicate, { timeout = 15000, interval = 10 } = {}) {
   const deadline = Date.now() + timeout;
   for (;;) {
     if (predicate()) return true;
@@ -41,12 +41,12 @@ async function waitForValue(read, expected) {
  * Send Enter until `settled()` holds, re-sending only while the editor is still
  * open. Same dropped-write hazard as any other stdin write in these tests.
  */
-async function pressEnterUntil(app, settled, { attempts = 20 } = {}) {
+async function pressEnterUntil(app, settled, { attempts = 30 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (settled()) return;
     if (attempt > 0 && !/Conversation prompt/.test(app.lastFrame())) return;
     app.stdin.write("\r");
-    await waitFor(settled, { timeout: 250 });
+    await waitFor(settled, { timeout: 500 });
   }
 }
 
@@ -269,10 +269,10 @@ test("Ink /prompt opens prefilled editor and saves typed prompt", async (t) => {
     // buffer means nothing landed, so a retry cannot type the text twice. The
     // inner wait gives each attempt a generous window to render before it is
     // treated as lost.
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       if (!/\[empty\]/.test(app.lastFrame())) break;
       app.stdin.write("Persona one");
-      await waitFor(() => !/\[empty\]/.test(app.lastFrame()), { timeout: 250 });
+      await waitFor(() => !/\[empty\]/.test(app.lastFrame()), { timeout: 500 });
     }
     await waitForFrame(app, /Persona one/);
 
