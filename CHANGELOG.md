@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-08-01
+
 ### Security
 
 - `mcp-server` no longer returns internal error text to clients. `server.js` now
