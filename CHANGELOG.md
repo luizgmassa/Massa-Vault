@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-01
+
 ### Added
 
 - GitHub Actions CI/CD: a test workflow, a CHANGELOG merge gate, `oxlint`
