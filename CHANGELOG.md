@@ -13,6 +13,31 @@ automatically.
 
 ## [Unreleased]
 
+### Security
+
+- `mcp-server` no longer returns internal error text to clients. `server.js` now
+  maps a frozen vocabulary of `AuthError`/request-body codes to fixed
+  client-facing strings instead of reading `error.message` off a caught
+  exception, so an unexpected failure cannot leak file paths or stack frames.
+  The detail is logged server-side. Existing auth messages are unchanged.
+- `extractBearerToken` and `normalizeOrigin` in `mcp-server` parse the
+  `Authorization` and `Origin` headers with string slicing rather than
+  `/^Bearer\s+(.+)$/i` and `/\/+$/`, which backtracked quadratically on
+  attacker-supplied headers built from many repeated spaces or slashes.
+- Markdown table cells in `llm-chat-cli` escape backslashes before pipes.
+  Escaping `|` first left an input like `a\|b` rendered as `a\\|b`, where the
+  pipe was no longer escaped and silently opened a new column.
+- `.gitignore` now excludes all of `.obsidian/` rather than a single plugin's
+  `data.json`. Any plugin's `data.json` can hold OAuth tokens or API keys.
+
+### Fixed
+
+- Bumped the transitive `@hono/node-server` to 2.0.12, clearing a path-traversal
+  advisory in `serve-static` on Windows via an encoded backslash. The MCP SDK
+  already declared `^1.19.9 || ^2.0.5`, so this stays within its supported range.
+- `history.js` reuses the shared `buildMarkdownTable` from `info-screen.js`
+  instead of a byte-identical private copy that had to be patched separately.
+
 ## [1.3.1] - 2026-08-01
 
 ### Fixed

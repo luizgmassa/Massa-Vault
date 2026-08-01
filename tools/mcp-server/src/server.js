@@ -2,17 +2,36 @@ import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer, createMcpServices } from "./mcp.js";
-import { AuthError } from "./services/auth.js";
-import { extractBearerToken, isAllowedOrigin, jsonRpcError, readJsonBody, writeJson, writeNoContent } from "./infrastructure/http.js";
+import { AUTH_ERROR_CODES, AuthError } from "./services/auth.js";
+import { REQUEST_ERROR_CODES, extractBearerToken, isAllowedOrigin, jsonRpcError, readJsonBody, writeJson, writeNoContent } from "./infrastructure/http.js";
 import { loadMcpRuntimeConfig } from "./infrastructure/runtime-config.js";
+
+// Every client-facing error string is a literal in this map, keyed by a code the
+// throw site chose. Nothing reads `error.message` or `error.stack` on the
+// response path, so an unexpected internal failure cannot leak file paths or
+// stack frames to a caller.
+const PUBLIC_ERROR_MESSAGES = Object.freeze({
+  [AUTH_ERROR_CODES.INVALID_CREDENTIALS]: "Invalid username or password",
+  [AUTH_ERROR_CODES.MISSING_ACCESS_TOKEN]: "Missing or invalid access token",
+  [AUTH_ERROR_CODES.INVALID_ACCESS_TOKEN]: "Access token expired or invalid",
+  [AUTH_ERROR_CODES.MISSING_REFRESH_TOKEN]: "Missing or invalid refresh token",
+  [AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN]: "Refresh token expired or invalid",
+  [AUTH_ERROR_CODES.MISSING_TOKEN]: "Missing or invalid token",
+  [REQUEST_ERROR_CODES.PAYLOAD_TOO_LARGE]: "Payload too large",
+  [REQUEST_ERROR_CODES.INVALID_JSON_BODY]: "Invalid JSON body"
+});
 
 function errorStatus(error, fallback = 500) {
   const status = Number(error?.statusCode || fallback);
   return Number.isFinite(status) ? status : fallback;
 }
 
-function authErrorMessage(error) {
-  return error instanceof Error ? error.message : "Unauthorized";
+function publicErrorMessage(error, fallback) {
+  const code = error?.code;
+  if (typeof code === "string" && Object.hasOwn(PUBLIC_ERROR_MESSAGES, code)) {
+    return PUBLIC_ERROR_MESSAGES[code];
+  }
+  return fallback;
 }
 
 async function handleAuthRoute(req, res, auth, route) {
@@ -38,10 +57,12 @@ async function handleAuthRoute(req, res, auth, route) {
     return writeJson(res, 404, { error: { message: "Not found" } });
   } catch (error) {
     if (error instanceof AuthError) {
-      return writeJson(res, errorStatus(error, 401), { error: { message: authErrorMessage(error) } });
+      return writeJson(res, errorStatus(error, 401), {
+        error: { message: publicErrorMessage(error, "Unauthorized") }
+      });
     }
     return writeJson(res, errorStatus(error, 400), {
-      error: { message: error instanceof Error ? error.message : String(error) }
+      error: { message: publicErrorMessage(error, "Invalid request") }
     });
   }
 }
@@ -58,7 +79,7 @@ function requireAuth(req, res, auth) {
     return true;
   } catch (error) {
     writeJson(res, errorStatus(error, 401), {
-      error: { message: authErrorMessage(error) }
+      error: { message: publicErrorMessage(error, "Unauthorized") }
     });
     return false;
   }
@@ -90,12 +111,10 @@ async function handleMcpRequest(req, res, { runtime, services }) {
       mcpServer.close().catch(() => {});
     });
   } catch (error) {
+    // Detail stays server-side; the caller only ever sees the constant.
+    console.error(`[mcp-server] request failed: ${error instanceof Error ? error.message : String(error)}`);
     if (!res.headersSent) {
-      writeJson(
-        res,
-        500,
-        jsonRpcError(-32603, error instanceof Error ? error.message : "Internal server error")
-      );
+      writeJson(res, 500, jsonRpcError(-32603, "Internal server error"));
     }
   }
 }

@@ -1,10 +1,22 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
+// Fixed vocabulary of auth failures. `server.js` maps these to client-facing
+// text so it never has to read `error.message` off a caught exception.
+export const AUTH_ERROR_CODES = Object.freeze({
+  INVALID_CREDENTIALS: "invalid_credentials",
+  MISSING_ACCESS_TOKEN: "missing_access_token",
+  INVALID_ACCESS_TOKEN: "invalid_access_token",
+  MISSING_REFRESH_TOKEN: "missing_refresh_token",
+  INVALID_REFRESH_TOKEN: "invalid_refresh_token",
+  MISSING_TOKEN: "missing_token"
+});
+
 export class AuthError extends Error {
-  constructor(message, statusCode = 401) {
+  constructor(message, statusCode = 401, code = AUTH_ERROR_CODES.MISSING_TOKEN) {
     super(message);
     this.name = "AuthError";
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -83,7 +95,7 @@ export function createAuthService({
   function login({ username: candidateUsername, password: candidatePassword } = {}) {
     cleanupExpired();
     if (!safeEqual(candidateUsername, username) || !safeEqual(candidatePassword, password)) {
-      throw new AuthError("Invalid username or password", 401);
+      throw new AuthError("Invalid username or password", 401, AUTH_ERROR_CODES.INVALID_CREDENTIALS);
     }
     return publicSessionPayload(createSession());
   }
@@ -92,12 +104,12 @@ export function createAuthService({
     cleanupExpired();
     const sessionId = accessTokens.get(String(accessToken || ""));
     if (!sessionId) {
-      throw new AuthError("Missing or invalid access token", 401);
+      throw new AuthError("Missing or invalid access token", 401, AUTH_ERROR_CODES.MISSING_ACCESS_TOKEN);
     }
     const session = sessions.get(sessionId);
     if (!session || session.accessToken !== accessToken || session.accessExpiresAt <= now()) {
       if (session) accessTokens.delete(session.accessToken);
-      throw new AuthError("Access token expired or invalid", 401);
+      throw new AuthError("Access token expired or invalid", 401, AUTH_ERROR_CODES.INVALID_ACCESS_TOKEN);
     }
     return session;
   }
@@ -116,7 +128,7 @@ export function createAuthService({
     const token = String(refreshToken || "").trim();
     const sessionId = refreshTokens.get(token);
     if (!sessionId) {
-      throw new AuthError("Missing or invalid refresh token", 401);
+      throw new AuthError("Missing or invalid refresh token", 401, AUTH_ERROR_CODES.MISSING_REFRESH_TOKEN);
     }
     const session = sessions.get(sessionId);
     if (!session || session.refreshToken !== token || session.refreshExpiresAt <= now()) {
@@ -125,7 +137,7 @@ export function createAuthService({
         refreshTokens.delete(session.refreshToken);
         sessions.delete(session.id);
       }
-      throw new AuthError("Refresh token expired or invalid", 401);
+      throw new AuthError("Refresh token expired or invalid", 401, AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN);
     }
     accessTokens.delete(session.accessToken);
     session.accessToken = newToken();
@@ -141,7 +153,7 @@ export function createAuthService({
     if (accessToken && accessTokens.has(accessToken)) sessionIds.add(accessTokens.get(accessToken));
     if (refreshToken && refreshTokens.has(refreshToken)) sessionIds.add(refreshTokens.get(refreshToken));
     if (!sessionIds.size) {
-      throw new AuthError("Missing or invalid token", 401);
+      throw new AuthError("Missing or invalid token", 401, AUTH_ERROR_CODES.MISSING_TOKEN);
     }
     for (const sessionId of sessionIds) {
       const session = sessions.get(sessionId);
