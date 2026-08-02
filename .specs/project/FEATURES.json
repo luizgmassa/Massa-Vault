@@ -4,7 +4,7 @@
     {
       "slug": "home-config-store",
       "title": "Home config store at ~/.config/massa-ai-vault/config.json",
-      "status": "planned",
+      "status": "complete",
       "workflow": "spec-driven",
       "size": "large",
       "sessionId": "spec-home-config-store",
@@ -12,7 +12,7 @@
         "spec": ".specs/features/home-config-store/spec.md",
         "design": ".specs/features/home-config-store/design.md",
         "tasks": ".specs/features/home-config-store/tasks.md",
-        "validation": null
+        "validation": ".specs/features/home-config-store/validation.md"
       },
       "requirements": 15,
       "tasks": 10,
