@@ -37,7 +37,29 @@ process.chdir(ROOT);
 const { main } = await import("../tools/notes-automation/src/commands/runtime.js");
 process.chdir(ORIGINAL_CWD);
 
+// The oneshot `sync` path runs the real sync pipeline, which `git init`s the
+// fixture vault and commits into it. `gitCommit` invokes a bare `git commit`,
+// so it inherits whatever identity the environment provides - and a bare CI
+// runner has none, making the commit fail and the whole sync report ok:false.
+// A developer machine has a global identity and so passes, which is exactly how
+// this reached CI green locally and red on ubuntu. Git reads these env vars
+// ahead of any config file, so they work regardless of the runner's setup.
+const GIT_IDENTITY_ENV = Object.freeze({
+  GIT_AUTHOR_NAME: "Test User",
+  GIT_AUTHOR_EMAIL: "test@example.com",
+  GIT_COMMITTER_NAME: "Test User",
+  GIT_COMMITTER_EMAIL: "test@example.com"
+});
+const PREVIOUS_GIT_IDENTITY_ENV = Object.fromEntries(
+  Object.keys(GIT_IDENTITY_ENV).map((key) => [key, process.env[key]])
+);
+Object.assign(process.env, GIT_IDENTITY_ENV);
+
 after(() => {
+  for (const [key, value] of Object.entries(PREVIOUS_GIT_IDENTITY_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   fs.rmSync(ROOT, { recursive: true, force: true });
 });
 
