@@ -190,8 +190,9 @@ test("startup failure stops previously started owned services", async () => {
       createService("litellm"),
       createService("router-gateway", { healthUrl: "http://router/health", startupTimeoutMs: 1 })
     ]);
+    const stateStore = new ServerStateStore(config);
     const supervisor = new ServerSupervisor(config, {
-      stateStore: new ServerStateStore(config),
+      stateStore,
       spawnImpl: createFakeSpawn({ runningPids, spawnCalls, killCalls }),
       healthProbe: async () => ({ ok: false }),
       isProcessRunningImpl: (pid) => runningPids.has(pid),
@@ -199,6 +200,14 @@ test("startup failure stops previously started owned services", async () => {
     });
 
     await assert.rejects(() => supervisor.startAllServices(), /router-gateway failed to start/);
-    assert.ok(killCalls.length >= 1);
+    // Rollback must stop every previously-started owned service, in reverse
+    // order - not just "at least one". litellm started successfully and
+    // router-gateway's process was live even though its readiness check
+    // failed, so both must be killed, in reverse start order.
+    assert.deepEqual(
+      killCalls.map((call) => call.pid),
+      spawnCalls.map((call) => call.pid).reverse()
+    );
+    assert.equal(stateStore.read().services.litellm.running, false);
   });
 });
