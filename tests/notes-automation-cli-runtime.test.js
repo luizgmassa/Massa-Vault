@@ -576,7 +576,12 @@ test("sync in daemon mode exits 1 and reports ok:false when the settled sync car
 
 test("gdrive-check reports skipped:true and exits 1 when gdrive sync is disabled by sync_strategy", async () => {
   resetStateDir();
-  writeFixtureConfig({ sync_strategy: "git" });
+  // Explicit vault_path outside the repo root: the default "." would resolve
+  // to the tooling repo root here (this file's fixture cwd is the real repo
+  // root, not ROOT), which now trips the vault-root guard (R15) before this
+  // test ever reaches the gdrive skip check it's actually exercising.
+  const vaultDir = fs.mkdtempSync(path.join(ROOT, "gdrive-check-vault-"));
+  writeFixtureConfig({ vault_path: vaultDir, sync_strategy: "git" });
 
   const { exitCode, logs, errors } = await runMain(["gdrive-check"]);
 
@@ -590,7 +595,8 @@ test("gdrive-check reports skipped:true and exits 1 when gdrive sync is disabled
 
 test("gdrive-dry-run reports skipped:true and exits 1 when gdrive sync is disabled by sync_strategy", async () => {
   resetStateDir();
-  writeFixtureConfig({ sync_strategy: "git" });
+  const vaultDir = fs.mkdtempSync(path.join(ROOT, "gdrive-dry-run-vault-"));
+  writeFixtureConfig({ vault_path: vaultDir, sync_strategy: "git" });
 
   const { exitCode, logs, errors } = await runMain(["gdrive-dry-run"]);
 
