@@ -147,6 +147,29 @@ test("vault cli config migrate builds and writes the home config from .env and .
   });
 });
 
+test("vault cli config migrate tightens a pre-existing home config directory to 0700", async () => {
+  await withTempDir(async (tempDir) => {
+    const targetDir = path.join(tempDir, "massa-ai-vault");
+    const targetPath = path.join(targetDir, "config.json");
+    const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
+
+    // The directory already exists and is world-readable, so mkdirSync's mode
+    // never applies. It holds litellm.master_key, so migrate must tighten it.
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.chmodSync(targetDir, 0o755);
+    assert.equal(fs.statSync(targetDir).mode & 0o777, 0o755);
+
+    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+      const { cli } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
+      cli.configCommand("migrate", []);
+
+      assert.equal(fs.statSync(targetDir).mode & 0o777, 0o700);
+      assert.equal(fs.statSync(targetPath).mode & 0o777, 0o600);
+    });
+  });
+});
+
 test("vault cli config migrate refuses to clobber an existing home config without --force", async () => {
   await withTempDir(async (tempDir) => {
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");

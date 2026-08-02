@@ -390,7 +390,11 @@ export function createVaultCli({
       return;
     }
 
-    fsImpl.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+    const targetDir = path.dirname(targetPath);
+    fsImpl.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+    // mkdirSync's mode only applies to directories it actually creates. This one
+    // holds litellm.master_key, so tighten it unconditionally.
+    fsImpl.chmodSync(targetDir, 0o700);
     if (exists) {
       fsImpl.rmSync(targetPath, { force: true });
     }

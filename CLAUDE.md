@@ -93,6 +93,8 @@ External clients must keep sending `smart-router`; `/model` pins are resolved se
 
 Flat `tests/*.test.js` at repo root, imported via relative paths into `tools/`. Uniform style: `import test from "node:test"` + `import assert from "node:assert/strict"`, flat `test()` calls — no `describe`/`it` anywhere.
 
+The one non-test file under `tests/` is `tests/helpers/neutralize-home-config.js`. It must be the **first** import of any test that transitively reaches a module calling `loadRuntimeEnv()` at import time, because it has to set `MASSA_VAULT_HOME_CONFIG=off` before that module's own static import evaluates — otherwise a developer's real `~/.config/massa-ai-vault/config.json` leaks into the run and the suite stops being machine-independent. It sits in a subdirectory precisely so it never matches the `*.test.js` discovery pattern.
+
 Isolation patterns to reuse:
 - `withTempDir` via `fs.mkdtempSync(os.tmpdir(), ...)` + `fs.rmSync` in `finally`.
 - Fake `spawn` returning an `EventEmitter` with `PassThrough` streams, injected as `spawnImpl`.
