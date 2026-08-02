@@ -22,6 +22,8 @@ import {
 import { GDRIVE_REMOTE_PATH_EXAMPLE } from "./notes-automation/src/infrastructure/gdrive-constants.js";
 import { createConfigDocument } from "./notes-automation/src/infrastructure/config-definition.js";
 import { loadRuntimeEnv } from "./shared/runtime-env.js";
+import { buildHomeConfigDocument, resolveHomeConfigPath } from "./shared/home-config.js";
+import { parseEnvContent } from "./shared/env.js";
 
 loadRuntimeEnv();
 
@@ -29,6 +31,8 @@ const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");
 const CHAT_CLI = path.resolve("tools/llm-chat-cli/src/cli.js");
 const SERVER_CLI = path.resolve("tools/server/src/cli.js");
+const ENV_PATH = path.resolve(".env");
+const LOCAL_NOTES_CONFIG_PATH = path.resolve("config/notes-automation.local.json");
 const TRUE_LIKE = new Set(["y", "yes", "true", "1"]);
 const FALSE_LIKE = new Set(["n", "no", "false", "0"]);
 const GDRIVE_COMMANDS = new Map([
@@ -40,6 +44,10 @@ const SYNC_COMMANDS = new Map([
   ["resolve", ["sync-resolve"]],
   ["status", ["status"]]
 ]);
+const CONFIG_COMMANDS = new Map([
+  ["path", "config-path"],
+  ["migrate", "config-migrate"]
+]);
 const SERVER_PROXY_COMMANDS = new Set(["start", "stop", "status", "restart"]);
 const NOTES_PROXY_COMMANDS = new Set(["resume", "flush-sync", "flush-push"]);
 const USAGE_LINES = Object.freeze([
@@ -50,9 +58,10 @@ const USAGE_LINES = Object.freeze([
   "  npm run vault:sync",
   "  npm run server:start|server:stop|server:status",
   "  npm run vault -- gdrive check|dry-run",
+  "  npm run vault -- config path|migrate [--force] [--dry-run]",
   "  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync",
   "  # or",
-  "  npm run vault -- install|configure|chat|gdrive|sync|start|stop|status|restart|resume|flush-sync"
+  "  npm run vault -- install|configure|chat|gdrive|sync|config|start|stop|status|restart|resume|flush-sync"
 ]);
 
 function runTool(command, args = []) {
@@ -153,6 +162,8 @@ export function createVaultCli({
   notesCliPath = NOTES_CLI,
   chatCliPath = CHAT_CLI,
   serverCliPath = SERVER_CLI,
+  envPath = ENV_PATH,
+  localNotesConfigPath = LOCAL_NOTES_CONFIG_PATH,
   stdin = input,
   stdout = output
 } = {}) {
@@ -319,6 +330,82 @@ export function createVaultCli({
     exit(1);
   }
 
+  function readEnvFileValues() {
+    if (!fsImpl.existsSync(envPath)) return {};
+    return parseEnvContent(fsImpl.readFileSync(envPath, "utf8"));
+  }
+
+  function readLocalNotesDocument() {
+    if (!fsImpl.existsSync(localNotesConfigPath)) return {};
+    try {
+      return JSON.parse(fsImpl.readFileSync(localNotesConfigPath, "utf8"));
+    } catch {
+      return {};
+    }
+  }
+
+  function configPathCommand() {
+    const resolved = resolveHomeConfigPath({ homedir });
+    log(resolved || "");
+  }
+
+  function configMigrate(args = []) {
+    const force = args.includes("--force");
+    const dryRun = args.includes("--dry-run");
+
+    const targetPath = resolveHomeConfigPath({ homedir });
+    if (!targetPath) {
+      logError(
+        "[vault-cli] home config is disabled (MASSA_VAULT_HOME_CONFIG=off); nothing to migrate."
+      );
+      exit(1);
+      return;
+    }
+
+    const document = buildHomeConfigDocument({
+      envValues: readEnvFileValues(),
+      localNotesDocument: readLocalNotesDocument()
+    });
+
+    const vaultPath = document.notes && document.notes.vault_path;
+    if (!vaultPath) {
+      logError(
+        "[vault-cli] refusing to migrate: notes.vault_path is missing or empty. Run `massa-vault configure` first."
+      );
+      exit(1);
+      return;
+    }
+
+    if (dryRun) {
+      log(JSON.stringify(document, null, 2));
+      return;
+    }
+
+    const exists = fsImpl.existsSync(targetPath);
+    if (exists && !force) {
+      logError(
+        `[vault-cli] refusing to overwrite existing home config at ${targetPath}. Use --force to overwrite.`
+      );
+      exit(1);
+      return;
+    }
+
+    fsImpl.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+    if (exists) {
+      fsImpl.rmSync(targetPath, { force: true });
+    }
+    fsImpl.writeFileSync(targetPath, JSON.stringify(document, null, 2), { mode: 0o600 });
+    log(`[vault-cli] wrote ${targetPath}`);
+  }
+
+  function configCommand(sub, args) {
+    const resolved = CONFIG_COMMANDS.get(sub);
+    if (resolved === "config-path") return configPathCommand();
+    if (resolved === "config-migrate") return configMigrate(args);
+    logError("Usage: npm run vault -- config <path|migrate> [--force] [--dry-run]");
+    exit(1);
+  }
+
   function printUsage() {
     for (const line of USAGE_LINES) {
       log(line);
@@ -334,6 +421,9 @@ export function createVaultCli({
     }
     if (cmd === "gdrive") {
       return proxyGDrive((argv[3] || "check").toLowerCase());
+    }
+    if (cmd === "config") {
+      return configCommand((argv[3] || "").toLowerCase(), argv.slice(4));
     }
     if (cmd === "gdrive-check") {
       return proxyNotes("gdrive-check");
@@ -363,6 +453,9 @@ export function createVaultCli({
   }
 
   return {
+    configCommand,
+    configMigrate,
+    configPathCommand,
     configure,
     install,
     listRcloneRemotesSafe,
@@ -380,6 +473,7 @@ export async function main(options) {
 }
 
 export {
+  CONFIG_COMMANDS,
   GDRIVE_COMMANDS,
   NOTES_PROXY_COMMANDS,
   SERVER_PROXY_COMMANDS,
