@@ -13,6 +13,37 @@ automatically.
 
 ## [Unreleased]
 
+### Fixed
+
+- Closed the 32 findings from the 2026-08-01 test audit. The suite grew from 227
+  to 542 tests and now covers guards that previously shipped green when deleted:
+  the secret-scan gate (`scan-secrets.js` was absent from the coverage report
+  entirely — no test had ever loaded it), the MCP localhost-bind enforcement,
+  the gateway's wrong-model rejection, the concurrent-daemon lock, the GDrive
+  dangerous-import thresholds, the nested `.DS_Store` protection, the daemon's
+  `requestedAction: "sync"` branch, and the plain-REPL signal handlers that save
+  a transcript on Ctrl-C. Each is pinned by a mutation that previously survived
+  a fully green suite and now fails.
+- Pinned the client side of the `smart-router` contract. `DEFAULT_CHAT_MODEL`
+  could be renamed with zero test failures, after which the gateway would 400
+  every chat request at runtime; all four sides of that string contract are now
+  asserted against each other rather than against their own hardcoded literals.
+- Reconciled the coverage baseline, which was documented three inconsistent ways
+  (`CLAUDE.md` claimed 87.10/70.62/84.23, `coverage.yml` claimed
+  80.57/66.15/81.28, reality was 80.87/66.91/81.34). Both documents now quote one
+  measured triple, and `tests/repo-gates.test.js` fails if they drift apart, if a
+  floor is set above the stated baseline, if the `CI` workflow is renamed, or if
+  the Node matrix stops producing the `test (25)` required check.
+- Raised the coverage ratchet floor from lines 78 / branches 62 / functions 79 to
+  lines 88 / branches 72 / functions 86, against a measured
+  90.93 / 75.46 / 89.14 (up from 80.87 / 66.91 / 81.34).
+- `tools/cli.js` now exports `createVaultCli` and guards its entrypoint with the
+  `import.meta.url === pathToFileURL(process.argv[1]).href` idiom already used by
+  the other five entrypoints, so its command dispatch, usage fallbacks, and
+  exit-code propagation are testable in-process instead of only through a
+  subprocess that coverage cannot observe. Command behavior is unchanged —
+  stdout, stderr, and exit codes are byte-identical for every dispatch arm.
+
 ## [1.3.2] - 2026-08-01
 
 ### Security

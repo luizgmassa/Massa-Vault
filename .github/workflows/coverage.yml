@@ -62,18 +62,30 @@ jobs:
         run: npm ci
 
       # Thresholds sit a few points below the measured baseline
-      # (lines 80.57 / branches 66.15 / functions 81.28). This is a ratchet
+      # (lines 90.93 / branches 75.46 / functions 89.14). This is a ratchet
       # FLOOR, not a target: raise it deliberately in its own PR once real
       # coverage grows, and never lower it to turn a red run green.
+      #
+      # This baseline and these floors are quoted identically in CLAUDE.md's CI
+      # section; `tests/repo-gates.test.js` fails if the two documents drift
+      # apart or if a floor is ever set above the stated baseline.
       #
       # The margin is generous on purpose - repeat runs drift by a few
       # hundredths, and the baseline above was measured on macOS while this job
       # runs on ubuntu-latest, where platform-conditional paths may shift the
       # numbers. Re-check the real figures from the first run on this runner
       # before treating these values as final.
+      #
+      # LOCAL VS CI: `tests/llm-chat-cli-ink.test.js` skips one test when CI is
+      # set (the ink stdin harness is unreliable on runners), so this job runs
+      # 541 tests with 1 skipped where a developer machine runs 542 with 0.
+      # That skip costs about 0.33 lines / 0.46 branches / 0.09 functions, so a
+      # bare local run reads 91.26/75.92/89.23 - higher than anything this gate
+      # will ever see. Always reproduce with `CI=1` before touching these
+      # numbers, or you will ratchet the floor against a figure CI cannot hit.
       - name: Coverage gate
         run: >-
           node --test --experimental-test-coverage
-          --test-coverage-lines=78
-          --test-coverage-branches=62
-          --test-coverage-functions=79
+          --test-coverage-lines=88
+          --test-coverage-branches=72
+          --test-coverage-functions=86
