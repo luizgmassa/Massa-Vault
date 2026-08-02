@@ -32,9 +32,14 @@ function withTempDir(run) {
 }
 
 function runVaultCli(args, env) {
+  // This spawns a real subprocess that loads its own runtime env (R2/T9):
+  // without forcing MASSA_VAULT_HOME_CONFIG=off, a developer machine with a
+  // real, populated ~/.config/massa-ai-vault/config.json would leak that
+  // file's settings into the child, making this test's outcome depend on
+  // whether the file exists.
   const result = spawnSync(process.execPath, [VAULT_CLI, ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ...env },
+    env: { ...process.env, MASSA_VAULT_HOME_CONFIG: "off", ...env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });

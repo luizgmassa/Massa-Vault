@@ -1,3 +1,4 @@
+import "./helpers/neutralize-home-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadGatewayRuntimeConfig } from "../tools/router-gateway/src/infrastructure/runtime-config.js";

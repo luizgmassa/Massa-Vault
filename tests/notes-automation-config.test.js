@@ -50,6 +50,13 @@ function withConfigEnv(overrides, callback) {
     original[key] = process.env[key];
     delete process.env[key];
   }
+  // Default to disabled (R2) rather than merely unset: an unset override
+  // falls through resolveHomeConfigPath() to the real default
+  // homedir()/.config/massa-ai-vault/config.json, which would read a real,
+  // populated home config on a developer machine. Tests that intentionally
+  // exercise the home-config layer (below) set MASSA_VAULT_HOME_CONFIG to an
+  // explicit fixture path inside their own callback, after this default runs.
+  process.env.MASSA_VAULT_HOME_CONFIG = "off";
   Object.assign(process.env, overrides);
 
   try {

@@ -1,3 +1,4 @@
+import "./helpers/neutralize-home-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { summarizeHistoryTranscript } from "../tools/llm-chat-cli/src/services/history.js";
