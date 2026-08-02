@@ -113,7 +113,7 @@ test("CLAUDE.md and coverage.yml quote the same coverage baseline", () => {
   const claude = fs.readFileSync(path.resolve("CLAUDE.md"), "utf8");
   const coverage = readWorkflow("coverage.yml");
 
-  const claudeBaseline = claude.match(/against ([\d.]+)\/([\d.]+)\/([\d.]+)\)/);
+  const claudeBaseline = claude.match(/against ([\d.]+)\/([\d.]+)\/([\d.]+)/);
   assert.ok(claudeBaseline, "CLAUDE.md must quote the measured coverage baseline");
 
   const coverageBaseline = coverage.match(

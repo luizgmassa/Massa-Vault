@@ -36,7 +36,7 @@ automatically.
   the Node matrix stops producing the `test (25)` required check.
 - Raised the coverage ratchet floor from lines 78 / branches 62 / functions 79 to
   lines 88 / branches 72 / functions 86, against a measured
-  90.93 / 75.46 / 89.14 (up from 80.87 / 66.91 / 81.34).
+  90.92 / 75.20 / 89.14 (up from 80.87 / 66.91 / 81.34).
 - `tools/cli.js` now exports `createVaultCli` and guards its entrypoint with the
   `import.meta.url === pathToFileURL(process.argv[1]).href` idiom already used by
   the other five entrypoints, so its command dispatch, usage fallbacks, and
