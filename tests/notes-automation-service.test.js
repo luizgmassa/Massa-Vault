@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { NotesAutomationService } from "../tools/notes-automation/src/services/daemon-service.js";
-import { readState } from "../tools/notes-automation/src/infrastructure/state.js";
+import { readState, writeState } from "../tools/notes-automation/src/infrastructure/state.js";
 
 function createConfig(tempDir, vaultPath, overrides = {}) {
   const configPath = path.join(tempDir, "notes.config.json");
@@ -155,8 +155,8 @@ process.exit(2);
 test("falls back to polling mode when fs.watch throws EMFILE", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
   const vaultPath = path.join(tempDir, "vault");
-  fs.mkdirSync(vaultPath, { recursive: true });
-  fs.writeFileSync(path.join(vaultPath, "note.md"), "hello", "utf8");
+  fs.mkdirSync(path.join(vaultPath, "notes"), { recursive: true });
+  fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello", "utf8");
   const configPath = createConfig(tempDir, vaultPath);
 
   const originalWatch = fs.watch;
@@ -174,6 +174,12 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
     assert.ok(service.pollTimer);
     const state = readState();
     assert.equal(Number.isInteger(state.pid), true);
+
+    // TST-24: prove the polling fallback actually detects a change, not just that it starts.
+    assert.equal(service.changedFiles.has("notes/today.md"), false);
+    fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello, this content is longer now", "utf8");
+    service.pollForChanges();
+    assert.equal(service.changedFiles.has("notes/today.md"), true);
   } finally {
     await service.shutdown();
     fs.watch = originalWatch;
@@ -628,6 +634,22 @@ test("pullGitInbound conflict failure pauses and records conflicted files", () =
     assert.equal((state.sync?.conflicts || []).length > 0, true);
     assert.match(String(state.sync?.conflicts?.[0]?.filePath || ""), /note\.md$/);
     assert.match(String(state.alert || ""), /Git conflict detected/i);
+
+    // TST-13: pin the quarantine stage mapping so a refactor that swaps git conflict
+    // stages 2/3 is caught. NOTE (found while writing this test, not fixed per scope):
+    // pullGitInbound reconciles via `git rebase`, and under rebase git's ours/theirs
+    // are inverted relative to a merge -- stage 2 ("ours") is HEAD, which during a
+    // rebase is the upstream/remote tip, and stage 3 ("theirs") is the commit being
+    // replayed, i.e. the local edit. So quarantineGitConflicts' oursPath actually holds
+    // the remote content and theirsPath actually holds the local content -- the reverse
+    // of what the field names suggest to a user resolving conflicts by hand. This assertion
+    // pins today's verified, real behavior.
+    // (gitReadStageFile trims trailing whitespace from `git show`, so these have no
+    // trailing newline even though the working files were written with one.)
+    const conflict = state.sync.conflicts[0];
+    assert.equal(fs.readFileSync(conflict.oursPath, "utf8"), "remote-change");
+    assert.equal(fs.readFileSync(conflict.theirsPath, "utf8"), "local-change");
+    assert.equal(fs.readFileSync(conflict.basePath, "utf8"), "base");
   });
 });
 
@@ -700,5 +722,147 @@ test("enforceProtectedArtifacts removes tracked automation artifacts and .DS_Sto
     assert.doesNotMatch(tracked, /\.DS_Store/);
     assert.match(gitignore, /\.automation\//);
     assert.match(gitignore, /\.DS_Store/);
+  });
+});
+
+// TST-12: a running daemon must act on requestedAction: "sync", not just "resume".
+test("pollControl handles requested sync action by invoking runSync and clearing requestedAction", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+
+    const runSyncCalls = [];
+    service.runSync = (options) => {
+      runSyncCalls.push(options);
+      return Promise.resolve({ ok: true });
+    };
+
+    service.updateState(
+      {
+        running: true,
+        pid: process.pid,
+        paused: false,
+        requestedAction: "sync",
+        sync: { status: "idle", conflictCount: 0, conflicts: [] }
+      },
+      { force: true }
+    );
+
+    const handled = service.pollControl();
+    const state = readState();
+
+    assert.equal(handled, true);
+    assert.deepEqual(runSyncCalls, [{ reason: "sync" }]);
+    assert.equal(state.requestedAction, null);
+  });
+});
+
+// TST-2: the concurrent-daemon lock is the sole guard preventing two daemons from
+// writing to the same vault. Exercise it directly against injected process.kill
+// behavior, matching the pattern already used in tests/notes-automation-process.test.js.
+test("assertNoRunningOwner: stale runId with a dead owner pid does not throw", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+
+    writeState({ runId: "stale-run-id", pid: 999999, vaultPath: service.vaultPath });
+
+    const originalKill = process.kill;
+    process.kill = () => {
+      const error = new Error("no such process");
+      error.code = "ESRCH";
+      throw error;
+    };
+
+    try {
+      assert.doesNotThrow(() => service.assertNoRunningOwner());
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+});
+
+test("assertNoRunningOwner: a live foreign owner on the same vault throws", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+
+    writeState({ runId: "other-run-id", pid: 999999, vaultPath: service.vaultPath });
+
+    const originalKill = process.kill;
+    process.kill = () => {}; // simulate a live process: process.kill(pid, 0) does not throw
+
+    try {
+      assert.throws(
+        () => service.assertNoRunningOwner(),
+        /another notes-automation instance is already running with pid 999999/
+      );
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+});
+
+test("assertNoRunningOwner: a live foreign owner on a different vault does not throw", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(vaultPath, { recursive: true });
+    const otherVaultPath = path.join(tempDir, "other-vault");
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+
+    writeState({ runId: "other-run-id", pid: 999999, vaultPath: otherVaultPath });
+
+    const originalKill = process.kill;
+    process.kill = () => {}; // simulate a live process on the *other* vault's owner
+
+    try {
+      assert.doesNotThrow(() => service.assertNoRunningOwner());
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+});
+
+// TST-32: commitQueuedChanges is normally stubbed to a no-op in the sync-flow tests
+// above; prove its real composition against a real temp git repo.
+test("commitQueuedChanges stages tracked note edits and filters protected artifact paths in a real repo", () => {
+  withTempCwd((tempDir) => {
+    const vaultPath = path.join(tempDir, "vault");
+    fs.mkdirSync(path.join(vaultPath, ".automation"), { recursive: true });
+    fs.writeFileSync(path.join(vaultPath, "note.md"), "hello\n", "utf8");
+    fs.writeFileSync(path.join(vaultPath, ".automation", "state.json"), "{}", "utf8");
+
+    runGit(["init"], vaultPath);
+    configureGitUser(vaultPath);
+    runGit(["checkout", "-b", "master"], vaultPath);
+    runGit(["add", "note.md"], vaultPath);
+    runGit(["commit", "-m", "seed"], vaultPath);
+
+    const configPath = createConfig(tempDir, vaultPath);
+    const service = new NotesAutomationService(configPath);
+
+    fs.writeFileSync(path.join(vaultPath, "note.md"), "hello, updated\n", "utf8");
+    service.changedFiles.add("note.md");
+    service.changedFiles.add(".automation/state.json");
+
+    const result = service.commitQueuedChanges("test");
+
+    assert.equal(service.changedFiles.size, 0);
+    assert.equal(result.committed, true);
+    assert.deepEqual(result.staged, ["note.md"]);
+
+    const lastCommitFiles = spawnSync("git", ["show", "--name-only", "--pretty=format:", "HEAD"], {
+      cwd: vaultPath,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).stdout.trim();
+    assert.equal(lastCommitFiles, "note.md");
   });
 });

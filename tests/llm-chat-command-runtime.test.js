@@ -1,11 +1,104 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCommandRuntime } from "../tools/llm-chat-cli/src/commands.js";
+import {
+  createCommandRuntime,
+  executeChatCommand
+} from "../tools/llm-chat-cli/src/commands.js";
 import { createDefaultCommandRuntime } from "../tools/llm-chat-cli/src/services/command-executor.js";
 import {
   createChatSession,
   resetChatSession
 } from "../tools/llm-chat-cli/src/services/chat-session.js";
+import * as HistoryDomain from "../tools/llm-chat-cli/src/domain/history.js";
+
+async function withCapturedConsoleLog(run) {
+  const originalLog = console.log;
+  const lines = [];
+  console.log = (...args) => {
+    lines.push(args.map((value) => String(value)).join(" "));
+  };
+  try {
+    const result = await run();
+    return { result, lines };
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+// Builds the flat deps bag `executeChatCommand` expects (as opposed to the
+// grouped `syncClient`/`historyClient`/... shape `createCommandRuntime`
+// takes). Reuses the real domain/history.js pure functions wherever the
+// runtime dereferences them unconditionally before any command dispatch, so
+// the assembled runtime behaves like production rather than a stub tower.
+function buildExecuteChatCommandDeps(overrides = {}) {
+  return {
+    HISTORY_FLOW_PREVIEW: HistoryDomain.HISTORY_FLOW_PREVIEW,
+    HISTORY_FLOW_SUMMARY: HistoryDomain.HISTORY_FLOW_SUMMARY,
+    DEFAULT_GATEWAY_MODEL: "smart-router",
+    DEFAULT_RAG_MAX_CHARS: 6000,
+    VAULT_CONTEXT_MODES: ["semantic", "manifest"],
+    isVaultContextEnabled: () => true,
+    addUsageToLedger: () => {},
+    accumulateSessionUsage: (target, usage) => {
+      target.total_tokens = (target.total_tokens || 0) + (usage?.total_tokens || 0);
+    },
+    asUsage: (usage) =>
+      usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    buildGatewayOptions: () => ({ gatewayUrl: "http://127.0.0.1:4100", apiKey: "" }),
+    buildHistoryContextText: HistoryDomain.buildHistoryContextText,
+    captureRoutingFromTranscriptMetadata: HistoryDomain.captureRoutingFromTranscriptMetadata,
+    clearHistoryFlowStack: HistoryDomain.clearHistoryFlowStack,
+    createHistoryConversationsOnlyMessage: HistoryDomain.createHistoryConversationsOnlyMessage,
+    createHistoryDateRows: () => [],
+    createHistoryPanelState: HistoryDomain.createHistoryPanelState,
+    createHistoryRowsFromDateEntries: HistoryDomain.createHistoryRowsFromDateEntries,
+    createHistoryRowsFromSearchResults: HistoryDomain.createHistoryRowsFromSearchResults,
+    createHistoryScreenAction: HistoryDomain.createHistoryScreenAction,
+    createUsageSummary: ({ sessionUsage }) => ({
+      allTimeTotalTokens: 1,
+      sessionTotalTokens: sessionUsage.total_tokens,
+      sessionEstimatedTokens: sessionUsage.total_tokens,
+      model: "smart-router",
+      remainingTpm: 999,
+      remainingRpm: 9,
+      quotaRefresh: "30s"
+    }),
+    formatHistoryConversationLines: HistoryDomain.formatHistoryConversationLines,
+    formatHistoryDateLines: HistoryDomain.formatHistoryDateLines,
+    formatHistoryPreviewLines: HistoryDomain.formatHistoryPreviewLines,
+    formatHistorySummaryLines: HistoryDomain.formatHistorySummaryLines,
+    formatRelativeTranscriptLabel: HistoryDomain.formatRelativeTranscriptLabel,
+    formatSearchPanel: () => [],
+    formatSearchScreenLines: () => ["Search ready."],
+    formatSyncFeedback: (result) => result?.summary || "[chat] sync status=idle conflicts=0",
+    formatUsagePanel: (summary) => [`session_total_tokens: ${summary.sessionTotalTokens}`],
+    formatUsageScreenLines: (summary) => [
+      `session=${summary.sessionTotalTokens}`,
+      `model=${summary.model}`
+    ],
+    getHistoryRowFromSelection: HistoryDomain.getHistoryRowFromSelection,
+    historyBackStep: HistoryDomain.historyBackStep,
+    isHistoryConversationsScreen: HistoryDomain.isHistoryConversationsScreen,
+    listTranscriptsForDate: () => [],
+    normalizeHistoryDateInput: HistoryDomain.normalizeHistoryDateInput,
+    normalizeHistoryInputShortcut: HistoryDomain.normalizeHistoryInputShortcut,
+    parseHistoryConversationAlias: HistoryDomain.parseHistoryConversationAlias,
+    parsePositiveIndex: HistoryDomain.parsePositiveIndex,
+    printSearchPlain: () => {},
+    printUsageSummary: () => {},
+    pushHistoryFlowDetail: HistoryDomain.pushHistoryFlowDetail,
+    readLocalSyncStatusModel: () => ({ status: "idle" }),
+    resolveVaultPath: () => "/tmp/vault",
+    runNotesAutomationCommand: () => ({ ok: true, output: "{}", payload: {} }),
+    setHistoryFlowConversations: HistoryDomain.setHistoryFlowConversations,
+    setHistoryFlowDatesRoot: HistoryDomain.setHistoryFlowDatesRoot,
+    syncStatusModelFromResult: (result) => result?.syntheticModel || { status: "idle" },
+    usageFromTranscriptMetadata: HistoryDomain.usageFromTranscriptMetadata,
+    loadTranscriptIntoSession: () => {},
+    resetConversation: resetChatSession,
+    ...overrides
+  };
+}
 
 function createRuntime(overrides = {}) {
   const defaultSyncStatus = {
@@ -416,4 +509,207 @@ test("createDefaultCommandRuntime wires default saveAndSync for /sync", async ()
   assert.match(messages.join("\n"), /default-sync\.md/);
   assert.match(messages.join("\n"), /sync status=idle/i);
   assert.equal(result.action?.type, "refresh-sync-status");
+});
+
+test("createCommandRuntime redirects history-only shortcuts to the conversations-only message outside that screen", async () => {
+  const runtime = createRuntime({
+    historyClient: {
+      parseHistoryConversationAlias: HistoryDomain.parseHistoryConversationAlias,
+      createHistoryConversationsOnlyMessage: HistoryDomain.createHistoryConversationsOnlyMessage,
+      isHistoryConversationsScreen: () => false
+    }
+  });
+  const session = createChatSession({ systemPrompt: "" });
+  const messages = [];
+
+  const result = await runtime.execute({
+    line: "/switch 3",
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: { message: (text) => messages.push(text) }
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.equal(
+    messages.join("\n"),
+    "[History] /switch available only in History conversations screen."
+  );
+});
+
+test("createCommandRuntime lets history-only shortcuts through once the conversations screen is active", async () => {
+  const runtime = createRuntime({
+    historyClient: {
+      parseHistoryConversationAlias: HistoryDomain.parseHistoryConversationAlias,
+      normalizeHistoryInputShortcut: HistoryDomain.normalizeHistoryInputShortcut,
+      isHistoryConversationsScreen: HistoryDomain.isHistoryConversationsScreen,
+      getHistoryRowFromSelection: () => null
+    }
+  });
+  const session = createChatSession({ systemPrompt: "" });
+  HistoryDomain.setHistoryFlowConversations(session, {
+    datePanel: HistoryDomain.createHistoryPanelState({ title: "History", lines: [] }),
+    conversationsPanel: HistoryDomain.createHistoryPanelState({ title: "History", lines: [] })
+  });
+  const messages = [];
+
+  const result = await runtime.execute({
+    line: "/switch 3",
+    session,
+    limitsByModel: {},
+    mode: "tui",
+    io: { message: (text) => messages.push(text) }
+  });
+
+  // Because the session is already on the conversations screen, the
+  // redirect message is never emitted; normalizeHistoryInputShortcut
+  // instead expands "/switch 3" to "/history switch 3", which reaches the
+  // real "/history switch" handler and reports "no row selected" since
+  // getHistoryRowFromSelection returns null.
+  assert.equal(result.handled, true);
+  assert.match(messages.join("\n"), /Usage : \/history switch <number>/);
+});
+
+test("createCommandRuntime reports /sync usage for unrecognized /sync subcommands in plain mode", async () => {
+  const runtime = createRuntime();
+  const session = createChatSession({ systemPrompt: "" });
+
+  const { result, lines } = await withCapturedConsoleLog(() =>
+    runtime.execute({
+      line: "/sync bogus",
+      session,
+      limitsByModel: {},
+      mode: "plain"
+    })
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.equal(result.action, undefined);
+  assert.deepEqual(lines, ["usage: /sync | /sync status | /sync conflicts"]);
+});
+
+test("createCommandRuntime returns an info screen for unrecognized /sync subcommands in tui mode", async () => {
+  const runtime = createRuntime();
+  const session = createChatSession({ systemPrompt: "" });
+
+  const result = await runtime.execute({
+    line: "/sync bogus",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.equal(result.action?.screen, "panel");
+  assert.equal(result.action?.panelScreen?.id, "sync");
+  assert.equal(result.action?.panelScreen?.commandHint, "/sync commands");
+  assert.deepEqual(result.action?.panelScreen?.lines, [
+    "Usage : `/sync` | `/sync status` | `/sync conflicts` | `/back` | `/conv`"
+  ]);
+});
+
+test("createCommandRuntime reports unhandled for plain chat text that is not a slash command", async () => {
+  const runtime = createRuntime();
+  const session = createChatSession({ systemPrompt: "" });
+
+  const result = await runtime.execute({
+    line: "hello, how are you today?",
+    session,
+    limitsByModel: {},
+    mode: "tui"
+  });
+
+  assert.deepEqual(result, { handled: false, exit: false });
+});
+
+test("createCommandRuntime prints /system usage in plain mode", async () => {
+  const runtime = createRuntime();
+  const session = createChatSession({ systemPrompt: "" });
+
+  const { result, lines } = await withCapturedConsoleLog(() =>
+    runtime.execute({
+      line: "/system",
+      session,
+      limitsByModel: {},
+      mode: "plain"
+    })
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.deepEqual(lines, ["usage: /system show|set <prompt>|clear"]);
+});
+
+test("executeChatCommand assembles createCommandRuntime from the flat legacy deps bag and wires /usage correctly", async () => {
+  const session = createChatSession({ systemPrompt: "" });
+  session.sessionUsage.total_tokens = 42;
+  const deps = buildExecuteChatCommandDeps();
+
+  const result = await executeChatCommand(
+    {
+      line: "/usage",
+      state: session,
+      limitsByModel: {},
+      mode: "tui",
+      handlers: {}
+    },
+    deps
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.equal(result.action?.screen, "panel");
+  assert.deepEqual(result.action?.panelScreen?.lines, ["session=42", "model=smart-router"]);
+});
+
+test("executeChatCommand assembles createCommandRuntime from the flat legacy deps bag and wires /sync correctly", async () => {
+  const session = createChatSession({ systemPrompt: "" });
+  const messages = [];
+  const deps = buildExecuteChatCommandDeps();
+
+  const result = await executeChatCommand(
+    {
+      line: "/sync",
+      state: session,
+      limitsByModel: {},
+      mode: "tui",
+      handlers: { message: (text) => messages.push(text) },
+      onSaveAndSync: async () => ({
+        saveResult: { path: "/tmp/exec-sync.md", saved: true },
+        syncResult: { syntheticModel: { status: "idle", backends: {} } },
+        summary: "[chat] sync status=idle conflicts=0"
+      })
+    },
+    deps
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.exit, false);
+  assert.match(messages.join("\n"), /exec-sync\.md/);
+  assert.match(messages.join("\n"), /sync status=idle/i);
+  assert.equal(result.action?.type, "refresh-sync-status");
+  assert.equal(result.action?.syncStatus?.status, "idle");
+});
+
+test("executeChatCommand falls through unknown commands the same way createCommandRuntime does directly", async () => {
+  const session = createChatSession({ systemPrompt: "" });
+  const messages = [];
+  const deps = buildExecuteChatCommandDeps();
+
+  const result = await executeChatCommand(
+    {
+      line: "/nonexistent",
+      state: session,
+      limitsByModel: {},
+      mode: "tui",
+      handlers: { message: (text) => messages.push(text) }
+    },
+    deps
+  );
+
+  assert.equal(result.handled, true);
+  assert.match(messages[0], /unknown command: \/nonexistent/i);
 });

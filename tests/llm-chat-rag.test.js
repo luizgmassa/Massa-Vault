@@ -19,6 +19,11 @@ import {
   parseLiteLLMModelConfig,
   resolveModelRoute
 } from "../tools/router-gateway/src/domain/model-resolution.js";
+import {
+  buildVaultContextPayload,
+  buildVaultManifestPayload,
+  combineVaultPayloads
+} from "../tools/llm-chat-cli/src/domain/vault-context.js";
 
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TESTS_DIR, "..");
@@ -1696,4 +1701,112 @@ test("executeCommand allows aliases and full selectors in history search convers
       });
     });
   });
+});
+
+// --- TST-20: vault-context truncation (small injected maxChars) ------------
+
+test("buildVaultManifestPayload truncates when the file list exceeds maxChars", () => {
+  const paths = Array.from({ length: 20 }, (_, i) => `note-${i}.md`);
+  const maxChars = 80;
+
+  const payload = buildVaultManifestPayload(paths, { maxChars });
+
+  assert.equal(payload.metadata.truncated, true);
+  assert.ok(payload.message.length <= maxChars);
+  assert.equal(payload.metadata.total_files, 20);
+  assert.ok(payload.metadata.retrieved_files < 20);
+  assert.equal(payload.metadata.sources.length, payload.metadata.retrieved_files);
+});
+
+test("buildVaultManifestPayload does not truncate when everything fits", () => {
+  const payload = buildVaultManifestPayload(["a.md", "b.md"], { maxChars: 6000 });
+  assert.equal(payload.metadata.truncated, false);
+  assert.equal(payload.metadata.retrieved_files, 2);
+  assert.equal(payload.metadata.total_files, 2);
+});
+
+test("buildVaultContextPayload truncates a chunk that partially fits (remainingChars >= 32) and stays under maxChars", () => {
+  const maxChars = 120;
+  const items = [
+    { filePath: "a.md", text: "x".repeat(30), chunkIndex: 0, score: 0.9 },
+    { filePath: "b.md", text: "y".repeat(200), chunkIndex: 0, score: 0.8 }
+  ];
+
+  const payload = buildVaultContextPayload(items, { maxChars });
+
+  assert.equal(payload.metadata.truncated, true);
+  assert.ok(payload.message.length <= maxChars);
+  assert.equal(payload.metadata.retrieved_chunks, 2);
+  assert.match(payload.message, /y+$/);
+});
+
+test("buildVaultContextPayload's remainingChars < 32 guard drops the next chunk without truncating on the boundary" , () => {
+  // Regression-locking test for the guard at vault-context.js:171. With one
+  // chunk already appended, the second chunk leaves only a few characters of
+  // budget (< 32), so the loop performs a bare `break` instead of slicing the
+  // chunk in. Message stays within maxChars either way, but note that this
+  // exact branch does NOT set `truncated = true` before breaking -- unlike
+  // its sibling branch a few lines above (remainingChars <= 0) and unlike the
+  // partial-slice branch just below it. That means content genuinely gets
+  // dropped here while `truncated` can still read `false`. This is existing
+  // production behavior (tools/llm-chat-cli/src/domain/vault-context.js:171)
+  // and is pinned here as a known gap, not asserted as "correct" -- see the
+  // audit finding TST-20 and the builder report for this slice.
+  const maxChars = 70;
+  const items = [
+    { filePath: "a.md", text: "x".repeat(10), chunkIndex: 0, score: 0.9 },
+    { filePath: "b.md", text: "y".repeat(200), chunkIndex: 0, score: 0.8 }
+  ];
+
+  const payload = buildVaultContextPayload(items, { maxChars });
+
+  assert.ok(payload.message.length <= maxChars);
+  assert.equal(payload.metadata.retrieved_chunks, 1);
+  assert.equal(payload.metadata.sources[0].path, "a.md");
+  // Pinned current (buggy) behavior: the dropped second chunk is not
+  // reflected in `truncated`. If this guard starts setting `truncated = true`
+  // (a legitimate fix), this assertion is the one to flip.
+  assert.equal(payload.metadata.truncated, false);
+});
+
+test("buildVaultContextPayload returns the empty-context default when nothing fits", () => {
+  const payload = buildVaultContextPayload([], { maxChars: 6000 });
+  assert.equal(payload.metadata.truncated, false);
+  assert.equal(payload.metadata.retrieved_chunks, 0);
+  assert.match(payload.message, /No relevant Obsidian vault chunks/);
+});
+
+test("combineVaultPayloads slices the joined message down to maxChars and marks it truncated", () => {
+  const manifestPayload = buildVaultManifestPayload(["a.md", "b.md"], { maxChars: 1000 });
+  const semanticPayload = buildVaultContextPayload(
+    [{ filePath: "c.md", text: "z".repeat(50), chunkIndex: 0, score: 0.5 }],
+    { maxChars: 1000 }
+  );
+  assert.equal(manifestPayload.metadata.truncated, false);
+  assert.equal(semanticPayload.metadata.truncated, false);
+
+  const maxChars = 40;
+  const combined = combineVaultPayloads(manifestPayload, semanticPayload, { maxChars });
+
+  assert.equal(combined.metadata.truncated, true);
+  assert.equal(combined.message.length, maxChars);
+  assert.equal(combined.metadata.mode, "hybrid");
+  assert.equal(
+    combined.metadata.sources.length,
+    manifestPayload.metadata.sources.length + semanticPayload.metadata.sources.length
+  );
+});
+
+test("combineVaultPayloads preserves truncated=true inherited from either input even when the join fits", () => {
+  const manifestPayload = buildVaultManifestPayload(
+    Array.from({ length: 20 }, (_, i) => `note-${i}.md`),
+    { maxChars: 80 }
+  );
+  assert.equal(manifestPayload.metadata.truncated, true);
+
+  const semanticPayload = buildVaultContextPayload([], { maxChars: 6000 });
+  const combined = combineVaultPayloads(manifestPayload, semanticPayload, { maxChars: 6000 });
+
+  assert.equal(combined.metadata.truncated, true);
+  assert.ok(combined.message.length <= 6000);
 });
