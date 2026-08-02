@@ -4,10 +4,32 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig, VaultPathError } from "../tools/notes-automation/src/infrastructure/config.js";
-import { createConfigDocument } from "../tools/notes-automation/src/infrastructure/config-definition.js";
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
+
+// T5 needs to exercise the DEFAULT_CONFIG_PATH/DEFAULT_LOCAL_CONFIG_PATH
+// gated branch (R9), but those constants are `path.resolve("config/...")`
+// against cwd *at import time* in config-constants.js, and that path is this
+// repo's real tracked config/notes-automation.config.json. Chdir into a
+// scratch root before the first (dynamic) import of config.js / its
+// constants freezes them to scratch-root paths instead, so default-path
+// tests never read or write the real file. Mirrors the precedent in
+// tests/notes-automation-cli-runtime.test.js.
+const SCRATCH_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-scratch-"));
+const ORIGINAL_CWD = process.cwd();
+fs.mkdirSync(path.join(SCRATCH_ROOT, "config"), { recursive: true });
+
+process.chdir(SCRATCH_ROOT);
+const { loadConfig, VaultPathError } = await import(
+  "../tools/notes-automation/src/infrastructure/config.js"
+);
+const { DEFAULT_CONFIG_PATH, DEFAULT_LOCAL_CONFIG_PATH } = await import(
+  "../tools/notes-automation/src/infrastructure/config-constants.js"
+);
+const { createConfigDocument } = await import(
+  "../tools/notes-automation/src/infrastructure/config-definition.js"
+);
+process.chdir(ORIGINAL_CWD);
 
 const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_ENABLED",
@@ -18,7 +40,8 @@ const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_BRANCH",
   "NOTES_AUTOMATION_GDRIVE_BIN",
   "NOTES_AUTOMATION_GDRIVE_REMOTE_PATH",
-  "VAULT_PATH"
+  "VAULT_PATH",
+  "MASSA_VAULT_HOME_CONFIG"
 ];
 
 function withConfigEnv(overrides, callback) {
@@ -335,5 +358,116 @@ test("configure defaults and loadConfig defaults stay aligned", () => {
     assert.deepEqual(config.gdrive.args, document.gdrive_args);
     assert.equal(config.pushIntervalMin, document.push_interval_min);
     assert.equal(config.debounceMs, document.debounce_ms);
+  });
+});
+
+// --- T5: home config `notes` section as the local-override layer (R7, R9) ---
+
+function writeDefaultTrackedConfig(overrides = {}) {
+  fs.writeFileSync(
+    DEFAULT_CONFIG_PATH,
+    JSON.stringify({
+      enabled: true,
+      vault_path: path.join(SCRATCH_ROOT, "base-vault"),
+      sync_strategy: "git",
+      git_mode: "remote",
+      branch: "main",
+      ...overrides
+    }),
+    "utf8"
+  );
+}
+
+function writeDefaultLocalConfig(document) {
+  fs.mkdirSync(path.dirname(DEFAULT_LOCAL_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(DEFAULT_LOCAL_CONFIG_PATH, JSON.stringify(document), "utf8");
+}
+
+function removeDefaultLocalConfig() {
+  fs.rmSync(DEFAULT_LOCAL_CONFIG_PATH, { force: true });
+}
+
+function writeHomeConfig(homeConfigPath, document) {
+  fs.mkdirSync(path.dirname(homeConfigPath), { recursive: true });
+  fs.writeFileSync(homeConfigPath, JSON.stringify(document), "utf8");
+}
+
+test("home config's notes section beats the deprecated .local.json for the default config path", () => {
+  withConfigEnv({}, () => {
+    writeDefaultTrackedConfig();
+    writeDefaultLocalConfig({ vault_path: path.join(SCRATCH_ROOT, "local-vault"), branch: "local" });
+    const homeConfigPath = path.join(SCRATCH_ROOT, "home-config.json");
+    writeHomeConfig(homeConfigPath, {
+      notes: { vault_path: path.join(SCRATCH_ROOT, "home-vault"), branch: "home" }
+    });
+    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+
+    try {
+      const config = loadConfig(DEFAULT_CONFIG_PATH);
+      assert.equal(config.vaultPath, path.join(SCRATCH_ROOT, "home-vault"));
+      assert.equal(config.git.branch, "home");
+    } finally {
+      removeDefaultLocalConfig();
+    }
+  });
+});
+
+test("environment values still override the home config's notes section", () => {
+  withConfigEnv(
+    {
+      VAULT_PATH: path.join(SCRATCH_ROOT, "env-vault"),
+      NOTES_AUTOMATION_BRANCH: "env-branch"
+    },
+    () => {
+      writeDefaultTrackedConfig();
+      const homeConfigPath = path.join(SCRATCH_ROOT, "home-config.json");
+      writeHomeConfig(homeConfigPath, {
+        notes: { vault_path: path.join(SCRATCH_ROOT, "home-vault"), branch: "home" }
+      });
+      process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+
+      const config = loadConfig(DEFAULT_CONFIG_PATH);
+      assert.equal(config.vaultPath, path.join(SCRATCH_ROOT, "env-vault"));
+      assert.equal(config.git.branch, "env-branch");
+    }
+  );
+});
+
+test("a non-default configPath gets no home-config injection", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: path.join(tempDir, "temp-base-vault"),
+        sync_strategy: "git",
+        branch: "tracked"
+      }),
+      "utf8"
+    );
+    const homeConfigPath = path.join(SCRATCH_ROOT, "home-config.json");
+    writeHomeConfig(homeConfigPath, {
+      notes: { vault_path: "/should-not-apply", branch: "should-not-apply" }
+    });
+    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+
+    const config = loadConfig(configPath);
+    assert.equal(config.vaultPath, path.join(tempDir, "temp-base-vault"));
+    assert.equal(config.git.branch, "tracked");
+  });
+});
+
+test("the T1 vault-root guard still fires through the home config notes layer", () => {
+  withConfigEnv({}, () => {
+    writeDefaultTrackedConfig();
+    const homeConfigPath = path.join(SCRATCH_ROOT, "home-config.json");
+    writeHomeConfig(homeConfigPath, {
+      notes: { vault_path: REPO_ROOT, sync_strategy: "both" }
+    });
+    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+
+    assert.throws(() => loadConfig(DEFAULT_CONFIG_PATH), VaultPathError);
   });
 });

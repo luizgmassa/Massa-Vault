@@ -21,6 +21,7 @@ import {
 } from "./config-constants.js";
 import { createDefaultConfigDocument } from "./config-definition.js";
 import { PROTECTED_ARTIFACT_GLOBS } from "../domain/protected-artifacts.js";
+import { readHomeConfigSection } from "../../../shared/home-config.js";
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../..");
 
@@ -57,7 +58,12 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
   const baseConfig = readJsonFile(configPath);
   const localPath = getLocalConfigPath(configPath, localConfigPath);
   const localConfig = localPath && fs.existsSync(localPath) ? readJsonFile(localPath) : {};
-  const parsed = { ...defaults, ...baseConfig, ...localConfig };
+  // Home config's `notes` section only attaches for the default config path
+  // (R9) -- an explicit non-default configPath (e.g. a temp-dir test) gets
+  // no home-config injection, keeping those tests isolated.
+  const isDefaultConfigPath = localConfigPath === undefined && path.resolve(configPath) === DEFAULT_CONFIG_PATH;
+  const homeNotes = isDefaultConfigPath ? readHomeConfigSection("notes") : {};
+  const parsed = { ...defaults, ...baseConfig, ...localConfig, ...homeNotes };
   const syncStrategy = String(parsed.sync_strategy || DEFAULT_SYNC_STRATEGY).toLowerCase();
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";
