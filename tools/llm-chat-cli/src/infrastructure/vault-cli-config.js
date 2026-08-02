@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
+import { readHomeConfigSection } from "../../../shared/home-config.js";
 
 export const DEFAULT_VAULT_CLI_CONFIG_PATH = path.resolve("config/vault-cli.config.json");
 export const DEFAULT_NOTES_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
@@ -50,6 +51,12 @@ export function loadVaultCliRuntimeConfig({
   );
   const document = readConfigDocument(resolvedConfigPath);
   const chat = document.chat && typeof document.chat === "object" ? document.chat : {};
+  // Home config's `chat` section only attaches for the default config path
+  // (R9) -- an explicit non-default configPath (e.g. a temp-dir test) gets
+  // no home-config injection, keeping those tests isolated.
+  const isDefaultConfigPath = resolvedConfigPath === DEFAULT_VAULT_CLI_CONFIG_PATH;
+  const homeChat = isDefaultConfigPath ? readHomeConfigSection("chat", { env }) : {};
+  const mergedChat = { ...chat, ...homeChat };
 
   return {
     configPath: resolvedConfigPath,
@@ -60,12 +67,15 @@ export function loadVaultCliRuntimeConfig({
     ),
     chat: {
       gatewayUrl: String(
-        env.MASSA_VAULT_CHAT_GATEWAY_URL || chat.gateway_url || DEFAULT_CHAT_GATEWAY_URL
+        env.MASSA_VAULT_CHAT_GATEWAY_URL || mergedChat.gateway_url || DEFAULT_CHAT_GATEWAY_URL
       ),
-      model: String(env.MASSA_VAULT_CHAT_MODEL || chat.model || DEFAULT_CHAT_MODEL),
-      ragEnabled: toBoolean(env.MASSA_VAULT_CHAT_RAG, chat.rag_enabled ?? DEFAULT_CHAT_RAG_ENABLED),
+      model: String(env.MASSA_VAULT_CHAT_MODEL || mergedChat.model || DEFAULT_CHAT_MODEL),
+      ragEnabled: toBoolean(
+        env.MASSA_VAULT_CHAT_RAG,
+        mergedChat.rag_enabled ?? DEFAULT_CHAT_RAG_ENABLED
+      ),
       idleSyncMs: toPositiveNumber(
-        env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || chat.idle_sync_ms,
+        env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || mergedChat.idle_sync_ms,
         DEFAULT_CHAT_IDLE_SYNC_MS
       )
     }
