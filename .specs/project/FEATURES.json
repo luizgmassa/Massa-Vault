@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "features": [
+    {
+      "slug": "home-config-store",
+      "title": "Home config store at ~/.config/massa-ai-vault/config.json",
+      "status": "planned",
+      "workflow": "spec-driven",
+      "size": "large",
+      "sessionId": "spec-home-config-store",
+      "artifacts": {
+        "spec": ".specs/features/home-config-store/spec.md",
+        "design": ".specs/features/home-config-store/design.md",
+        "tasks": ".specs/features/home-config-store/tasks.md",
+        "validation": null
+      },
+      "requirements": 15,
+      "tasks": 10,
+      "planChallenge": {
+        "gate": "full",
+        "mode": "pre_mortem",
+        "outcome": "revised",
+        "criticalFindings": 1,
+        "highFindings": 1
+      }
+    }
+  ]
+}
