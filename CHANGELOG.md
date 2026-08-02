@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-02
+
 ### Fixed
 
 - Closed the 32 findings from the 2026-08-01 test audit. The suite grew from 227
