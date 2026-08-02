@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "../tools/notes-automation/src/infrastructure/config.js";
+import { fileURLToPath } from "node:url";
+import { loadConfig, VaultPathError } from "../tools/notes-automation/src/infrastructure/config.js";
 import { createConfigDocument } from "../tools/notes-automation/src/infrastructure/config-definition.js";
+
+const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 
 const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_ENABLED",
@@ -211,6 +214,103 @@ test("environment values override local config", () => {
       assert.equal(config.git.branch, "env-branch");
     }
   );
+});
+
+test("vault-root guard throws when sync_strategy is both and vaultPath resolves to the repo root", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: REPO_ROOT,
+        sync_strategy: "both"
+      }),
+      "utf8"
+    );
+
+    assert.throws(() => loadConfig(configPath), VaultPathError);
+  });
+});
+
+test("vault-root guard throws when sync_strategy is git and vaultPath resolves to the repo root", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: REPO_ROOT,
+        sync_strategy: "git"
+      }),
+      "utf8"
+    );
+
+    assert.throws(() => loadConfig(configPath), VaultPathError);
+  });
+});
+
+test("vault-root guard throws when sync_strategy is gdrive and vaultPath resolves to the repo root", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: REPO_ROOT,
+        sync_strategy: "gdrive",
+        gdrive_remote_path: "gdrive:massa-vault"
+      }),
+      "utf8"
+    );
+
+    assert.throws(() => loadConfig(configPath), VaultPathError);
+  });
+});
+
+test("vault-root guard does not throw when sync is disabled even at the repo root", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: REPO_ROOT,
+        sync_strategy: "none"
+      }),
+      "utf8"
+    );
+
+    const config = loadConfig(configPath);
+    assert.equal(config.git.enabled, false);
+    assert.equal(config.gdrive.enabled, false);
+    assert.equal(config.vaultPath, REPO_ROOT);
+  });
+});
+
+test("vault-root guard does not throw for a temp absolute path with sync enabled", () => {
+  withConfigEnv({}, () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-config-"));
+    const configPath = path.join(tempDir, "notes.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        enabled: true,
+        vault_path: "/tmp/some-other-vault",
+        sync_strategy: "both"
+      }),
+      "utf8"
+    );
+
+    const config = loadConfig(configPath);
+    assert.equal(config.git.enabled, true);
+    assert.equal(config.gdrive.enabled, true);
+    assert.equal(config.vaultPath, "/tmp/some-other-vault");
+  });
 });
 
 test("configure defaults and loadConfig defaults stay aligned", () => {

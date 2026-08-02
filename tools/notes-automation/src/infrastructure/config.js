@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ALLOWED_GDRIVE_RESYNC_MODE_SET,
   DEFAULT_CONFIG_PATH,
@@ -20,6 +21,15 @@ import {
 } from "./config-constants.js";
 import { createDefaultConfigDocument } from "./config-definition.js";
 import { PROTECTED_ARTIFACT_GLOBS } from "../domain/protected-artifacts.js";
+
+const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../..");
+
+export class VaultPathError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "VaultPathError";
+  }
+}
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
@@ -71,6 +81,13 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
     }
   }
 
+  const vaultPath = path.resolve(process.env.VAULT_PATH || parsed.vault_path || DEFAULT_VAULT_PATH);
+  if ((gitEnabled || gdriveEnabled) && vaultPath === REPO_ROOT) {
+    throw new VaultPathError(
+      `Refusing to load notes-automation config: vaultPath resolves to the tooling repo root (${REPO_ROOT}) with sync enabled. Set an explicit vault_path outside this repo.`
+    );
+  }
+
   return {
     enabled:
       String(
@@ -79,7 +96,7 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
           DEFAULT_NOTES_AUTOMATION_ENABLED
       ).toLowerCase() ===
       "true",
-    vaultPath: path.resolve(process.env.VAULT_PATH || parsed.vault_path || DEFAULT_VAULT_PATH),
+    vaultPath,
     watchPaths: parsed.watch_paths || ["."],
     includeGlobs: parsed.include_globs || ["**/*.md"],
     ignoreGlobs,
