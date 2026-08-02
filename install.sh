@@ -431,9 +431,32 @@ fs.writeFileSync(filePath, `${lines.filter((entry, index) => entry || index < li
 NODE
 }
 
+report_home_config() {
+  local home_config_path
+  home_config_path="$(node tools/cli.js config path 2>/dev/null || true)"
+  if [[ -n "$home_config_path" && -f "$home_config_path" ]]; then
+    log "home config: present ($home_config_path)"
+  else
+    warn "home config is missing (will be created via 'massa-vault config migrate')"
+  fi
+}
+
+migrate_home_config() {
+  [[ "$CHECK_ONLY" -eq 0 ]] || return 0
+  local home_config_path
+  home_config_path="$(node tools/cli.js config path 2>/dev/null || true)"
+  if [[ -n "$home_config_path" && -f "$home_config_path" ]]; then
+    log "home config: present ($home_config_path)"
+    return 0
+  fi
+  log "migrating configuration to the home config"
+  node tools/cli.js config migrate
+}
+
 ensure_env_file() {
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
     [[ -f "$ENV_FILE" ]] && log ".env: present" || warn ".env is missing"
+    report_home_config
     return 0
   fi
 
@@ -741,6 +764,7 @@ main() {
   ensure_optional_tools
 
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    ensure_env_file
     install_litellm
     log "check-only complete"
     return 0
@@ -749,6 +773,7 @@ main() {
   ensure_env_file
   install_litellm
   write_local_config
+  migrate_home_config
   configure_vault_git
   npm run hooks:install
   pull_ollama_models
