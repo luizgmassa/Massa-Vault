@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadLocalEnv } from "../../../shared/env.js";
+import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 
 export const DEFAULT_VAULT_CLI_CONFIG_PATH = path.resolve("config/vault-cli.config.json");
 export const DEFAULT_NOTES_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
@@ -44,7 +44,7 @@ export function loadVaultCliRuntimeConfig({
   configPath,
   env = process.env
 } = {}) {
-  loadLocalEnv({ envFile: ".env" });
+  loadRuntimeEnv({ envFile: ".env" });
   const resolvedConfigPath = path.resolve(
     configPath || env.MASSA_VAULT_CLI_CONFIG_PATH || DEFAULT_VAULT_CLI_CONFIG_PATH
   );

@@ -6,6 +6,21 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const VAULT_CLI = path.resolve("tools/cli.js");
+const ENV_DEPRECATION_NOTICE =
+  "massa-vault: loading configuration from .env is deprecated; run `massa-vault config migrate` to move it to the home config.";
+
+// This spawns real subprocesses (tools/cli.js proxying to tools/server/src/cli.js)
+// inheriting this repo's actual cwd and env. When a developer has a real .env
+// checked out locally, each process that loads it now emits one deprecation
+// line (R5) -- expected, not an error. Assert every stderr line is that exact
+// notice rather than requiring empty stderr, so the test passes identically
+// whether or not a local .env is present.
+function assertOnlyExpectedStderr(stderr) {
+  const lines = stderr.split("\n").filter(Boolean);
+  for (const line of lines) {
+    assert.equal(line, ENV_DEPRECATION_NOTICE);
+  }
+}
 
 function withTempDir(run) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vault-cli-exec-"));
@@ -53,7 +68,7 @@ test("vault status delegates to massa-vault-server status JSON", () => {
       MASSA_VAULT_SERVER_CONFIG_PATH: configPath
     });
     assert.equal(result.status, 0);
-    assert.equal(result.stderr, "");
+    assertOnlyExpectedStderr(result.stderr);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.running, false);
     assert.equal(payload.statePath, statePath);

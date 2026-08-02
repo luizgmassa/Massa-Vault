@@ -1,6 +1,6 @@
 import path from "node:path";
 import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
-import { loadLocalEnv } from "../../../shared/env.js";
+import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 import {
   loadVaultCliRuntimeConfig,
   DEFAULT_CHAT_GATEWAY_URL,
@@ -14,7 +14,7 @@ import {
   runNotesAutomationCommand
 } from "./sync-client.js";
 
-loadLocalEnv();
+loadRuntimeEnv();
 
 const vaultCliConfig = loadVaultCliRuntimeConfig();
 

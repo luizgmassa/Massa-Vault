@@ -21,9 +21,9 @@ import {
 } from "./notes-automation/src/infrastructure/gdrive.js";
 import { GDRIVE_REMOTE_PATH_EXAMPLE } from "./notes-automation/src/infrastructure/gdrive-constants.js";
 import { createConfigDocument } from "./notes-automation/src/infrastructure/config-definition.js";
-import { loadLocalEnv } from "./shared/env.js";
+import { loadRuntimeEnv } from "./shared/runtime-env.js";
 
-loadLocalEnv();
+loadRuntimeEnv();
 
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");

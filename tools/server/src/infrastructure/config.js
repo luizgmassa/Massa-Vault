@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadLocalEnv } from "../../../shared/env.js";
+import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 
 export const DEFAULT_SERVER_CONFIG_PATH = path.resolve("config/server.config.json");
 export const DEFAULT_SERVER_STATE_PATH = path.resolve(".automation/server/state.json");
@@ -118,7 +118,7 @@ export function loadServerConfig({
   configPath,
   env = process.env
 } = {}) {
-  loadLocalEnv({ envFile: ".env" });
+  loadRuntimeEnv({ envFile: ".env" });
   const resolvedConfigPath = path.resolve(
     configPath || env.MASSA_VAULT_SERVER_CONFIG_PATH || DEFAULT_SERVER_CONFIG_PATH
   );
