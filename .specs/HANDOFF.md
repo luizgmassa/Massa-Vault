@@ -14,8 +14,10 @@
 
 ## Next
 
-1. Independent verification-agent (author ≠ verifier) → `.specs/features/arch3-runtime-env-loading/validation.md`.
-2. Push branch, open PR to `master`, watch CI (`test (25)` + `coverage`), stop for merge approval (merge = release 1.5.0).
+Verification PASS (validation.md committed, `eb346039`; M2 gap closed by
+`1e415d90`). **PR #11 open with CI fully green** (`test (25)`, `coverage`,
+CodeQL): https://github.com/luizgmassa/massa-ai-vault/pull/11 — awaiting the
+user's merge approval. Merging releases **v1.5.0** automatically.
 
 ## Care points
 
