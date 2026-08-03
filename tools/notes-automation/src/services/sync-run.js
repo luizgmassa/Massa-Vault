@@ -84,8 +84,8 @@ export function quarantineGitConflicts(service, errorOutput = "") {
   for (const filePath of conflicts) {
     const safePath = normalizeRelativePath(filePath).replace(/\//g, "__");
     const worktreePath = path.join(root, `${safePath}.worktree.txt`);
-    const oursPath = path.join(root, `${safePath}.ours.txt`);
-    const theirsPath = path.join(root, `${safePath}.theirs.txt`);
+    const localPath = path.join(root, `${safePath}.local.txt`);
+    const remotePath = path.join(root, `${safePath}.remote.txt`);
     const basePath = path.join(root, `${safePath}.base.txt`);
 
     const absolute = path.join(service.vaultPath, filePath);
@@ -96,15 +96,20 @@ export function quarantineGitConflicts(service, errorOutput = "") {
 
     ensureParentDir(fileSystem, worktreePath);
     fileSystem.writeFileSync(worktreePath, worktree, "utf8");
-    fileSystem.writeFileSync(oursPath, git.readStageFile(2, filePath, service.vaultPath), "utf8");
-    fileSystem.writeFileSync(theirsPath, git.readStageFile(3, filePath, service.vaultPath), "utf8");
+    // Reconciliation always runs `git rebase` (pullGitInbound), and under rebase the
+    // stage roles invert relative to a merge: stage 2 ("ours") is the upstream/remote
+    // tip and stage 3 ("theirs") is the local commit being replayed. Neutral
+    // local/remote snapshot names keep hand-resolvers from restoring the wrong side.
+    // Test: node --test tests/notes-automation-service.test.js (TST-13 pin)
+    fileSystem.writeFileSync(remotePath, git.readStageFile(2, filePath, service.vaultPath), "utf8");
+    fileSystem.writeFileSync(localPath, git.readStageFile(3, filePath, service.vaultPath), "utf8");
     fileSystem.writeFileSync(basePath, git.readStageFile(1, filePath, service.vaultPath), "utf8");
 
     captured.push({
       filePath,
       worktreePath,
-      oursPath,
-      theirsPath,
+      localPath,
+      remotePath,
       basePath
     });
   }

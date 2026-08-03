@@ -13,6 +13,15 @@ automatically.
 
 ## [Unreleased]
 
+### Fixed
+
+- Conflict quarantine snapshots now use neutral `<file>.local.txt` /
+  `<file>.remote.txt` names with the correct rebase stage mapping. The previous
+  `.ours.txt` / `.theirs.txt` names were inverted under `git rebase`
+  reconciliation (stage 2 holds the remote tip, stage 3 the local commit), so a
+  user trusting the filenames while resolving a quarantined conflict kept the
+  wrong side's content.
+
 ## [1.4.0] - 2026-08-03
 
 ### Added

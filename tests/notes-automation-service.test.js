@@ -636,19 +636,19 @@ test("pullGitInbound conflict failure pauses and records conflicted files", () =
     assert.match(String(state.alert || ""), /Git conflict detected/i);
 
     // TST-13: pin the quarantine stage mapping so a refactor that swaps git conflict
-    // stages 2/3 is caught. NOTE (found while writing this test, not fixed per scope):
-    // pullGitInbound reconciles via `git rebase`, and under rebase git's ours/theirs
-    // are inverted relative to a merge -- stage 2 ("ours") is HEAD, which during a
-    // rebase is the upstream/remote tip, and stage 3 ("theirs") is the commit being
-    // replayed, i.e. the local edit. So quarantineGitConflicts' oursPath actually holds
-    // the remote content and theirsPath actually holds the local content -- the reverse
-    // of what the field names suggest to a user resolving conflicts by hand. This assertion
-    // pins today's verified, real behavior.
+    // stages 2/3 is caught. pullGitInbound reconciles via `git rebase`, and under
+    // rebase git's stage roles invert relative to a merge -- stage 2 ("ours") is the
+    // upstream/remote tip and stage 3 ("theirs") is the commit being replayed, i.e.
+    // the local edit. quarantineGitConflicts therefore snapshots stage 3 as
+    // `<file>.local.txt` and stage 2 as `<file>.remote.txt`, so the names match what
+    // a user resolving conflicts by hand expects.
     // (gitReadStageFile trims trailing whitespace from `git show`, so these have no
     // trailing newline even though the working files were written with one.)
     const conflict = state.sync.conflicts[0];
-    assert.equal(fs.readFileSync(conflict.oursPath, "utf8"), "remote-change");
-    assert.equal(fs.readFileSync(conflict.theirsPath, "utf8"), "local-change");
+    assert.match(String(conflict.localPath || ""), /\.local\.txt$/);
+    assert.match(String(conflict.remotePath || ""), /\.remote\.txt$/);
+    assert.equal(fs.readFileSync(conflict.localPath, "utf8"), "local-change");
+    assert.equal(fs.readFileSync(conflict.remotePath, "utf8"), "remote-change");
     assert.equal(fs.readFileSync(conflict.basePath, "utf8"), "base");
   });
 });
