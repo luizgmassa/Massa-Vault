@@ -6,7 +6,7 @@ import path from "node:path";
 import { loadRuntimeEnv, resetRuntimeEnvWarningForTests } from "../tools/shared/runtime-env.js";
 
 const TEST_KEY = "MASSA_VAULT_CHAT_MODEL";
-const ENV_KEYS = [TEST_KEY, "MASSA_VAULT_HOME_CONFIG"];
+const ENV_KEYS = [TEST_KEY, "MASSA_VAULT_HOME_CONFIG", "MASSA_VAULT_ENV_FILE"];
 
 function withTempDir(callback) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-runtime-env-"));
@@ -103,6 +103,23 @@ test("loading a present .env emits exactly one deprecation warning per process",
       loadRuntimeEnv({ cwd: tempDir, stderr });
 
       assert.equal(writes, 1);
+    });
+  });
+});
+
+test("MASSA_VAULT_ENV_FILE=off leaves a present .env unread and emits no warning", () => {
+  withTempDir((tempDir) => {
+    withEnv({ MASSA_VAULT_HOME_CONFIG: "off", MASSA_VAULT_ENV_FILE: "off" }, () => {
+      fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
+
+      let writes = 0;
+      const stderr = { write: () => { writes += 1; } };
+
+      const { local } = loadRuntimeEnv({ cwd: tempDir, stderr });
+
+      assert.equal(local.loaded, false);
+      assert.equal(process.env[TEST_KEY], undefined);
+      assert.equal(writes, 0);
     });
   });
 });
