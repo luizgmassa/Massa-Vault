@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-03
+
 ### Added
 
 - A single user-owned home config at `~/.config/massa-ai-vault/config.json`,
