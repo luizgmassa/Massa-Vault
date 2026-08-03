@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 // Fixed vocabulary of auth failures. `server.js` maps these to client-facing
 // text so it never has to read `error.message` off a caught exception.
@@ -25,13 +25,23 @@ function newToken() {
   return randomBytes(32).toString("base64url");
 }
 
+// Fixed-size buffer used to normalize credential length before a
+// constant-time compare (see `safeEqual`). Generous for any realistic
+// username/password/token while keeping the padding cost trivial.
+const CREDENTIAL_COMPARISON_BYTES = 1024;
+
 function safeEqual(left, right) {
-  // Hash both sides to a fixed length before comparing: a raw length
-  // short-circuit would leak the credential's length through timing, which
-  // matters once credentials are rotated away from the public defaults.
-  const leftDigest = createHash("sha256").update(String(left || "")).digest();
-  const rightDigest = createHash("sha256").update(String(right || "")).digest();
-  return timingSafeEqual(leftDigest, rightDigest);
+  // Pad both sides into a fixed-size, zero-filled buffer before comparing:
+  // `timingSafeEqual` throws on a length mismatch, and checking lengths
+  // first would leak the credential's length through timing, which matters
+  // once credentials are rotated away from the public defaults. Padding
+  // (instead of hashing) keeps the compare fixed-length without ever
+  // passing credential material into a hash function.
+  const leftBuffer = Buffer.alloc(CREDENTIAL_COMPARISON_BYTES);
+  const rightBuffer = Buffer.alloc(CREDENTIAL_COMPARISON_BYTES);
+  leftBuffer.write(String(left || ""), "utf8");
+  rightBuffer.write(String(right || ""), "utf8");
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function expiresAt(now, ttlMs) {

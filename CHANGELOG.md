@@ -30,8 +30,10 @@ automatically.
   `MCP_SERVER_USERNAME` / `MCP_SERVER_PASSWORD` env vars (and the matching
   `mcp.auth.*` home-config keys, which project into them) now override it, so
   the repo copy can stay a non-secret default. The credential comparison also
-  hashes both sides to a fixed length before the constant-time check, closing
-  a credential-length timing leak.
+  pads both sides into a fixed-size buffer before the constant-time check,
+  closing a credential-length timing leak without ever hashing credential
+  material (the prior SHA-256 pre-hash tripped CodeQL's
+  insufficient-password-hash check).
 - The router gateway now refuses to start on a non-loopback bind host
   (`ROUTER_GATEWAY_HOST=0.0.0.0` and similar), mirroring the MCP server's
   existing guard. The gateway performs no authentication and forwards
