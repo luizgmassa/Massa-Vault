@@ -7,6 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
+| `arch3-runtime-env-loading` | In progress | Specify + Design + Tasks written (spec R1-R10, 7 tasks); Plan Challenge gate next | Fool critique → Execute T1 (off-switch prerequisite) on `refactor/arch3-runtime-env-loading` |
 | `home-config-store` | Shipped | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | None — PR #9 merged 2026-08-03, released in v1.4.0 |
 
 ## Completion evidence — `home-config-store`
