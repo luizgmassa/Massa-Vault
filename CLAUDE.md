@@ -84,7 +84,7 @@ External clients must keep sending `smart-router`; `/model` pins are resolved se
 
 - Named exports only — there is not a single `export default` in `tools/`.
 - `node:` prefix is mandatory on builtins; explicit `.js` extensions on every relative import.
-- Error idiom, used ~28x verbatim: `error instanceof Error ? error.message : String(error)`. Catch blocks stringify before logging. Custom Error classes are rare (`SmokeValidationSkip`, `AuthError`).
+- Error idiom, used ~28x verbatim: `error instanceof Error ? error.message : String(error)`. Catch blocks stringify before logging. Custom Error classes are rare (`SmokeValidationSkip`, `AuthError`). For child-process failures (git, rclone), notes-automation uses the deliberate sibling `formatProcessError(error)` (`tools/notes-automation/src/domain/process-error.js`), which prefers `error.stderr` — use it instead of inlining that chain.
 - `Object.freeze` marks fixed vocabularies (enums, constant maps), not runtime state objects.
 - Side-effecting collaborators are injected with named defaults rather than module-mocked: `{ fetchImpl = fetch }`, `ServerSupervisor({ spawnImpl, healthProbe, waitImpl })`, `createNotesAutomationAdapters(overrides)`. Follow this for anything new that touches fs/network/spawn.
 - Config loading is deliberately per-tool and not uniform. Note that `llm-chat-cli/src/infrastructure/chat-config.js` freezes `DEFAULT_GATEWAY_URL`/`DEFAULT_GATEWAY_MODEL` at **import time** — changing env after first import won't affect them; only `buildGatewayOptions()` re-reads config per call.

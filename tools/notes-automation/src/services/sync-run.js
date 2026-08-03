@@ -20,6 +20,7 @@ import {
   resolveGDriveImportCommitSubject
 } from "../domain/gdrive-import.js";
 import { normalizeRelativePath } from "../domain/protected-artifacts.js";
+import { formatProcessError } from "../domain/process-error.js";
 import { readState } from "../infrastructure/state.js";
 
 export { classifyGDriveImport } from "../domain/gdrive-import.js";
@@ -147,7 +148,7 @@ export function pullGitInbound(service) {
   } catch (error) {
     return {
       ok: false,
-      error: `git fetch failure: ${String(error?.stderr || error?.message || error)}`
+      error: `git fetch failure: ${formatProcessError(error)}`
     };
   }
 

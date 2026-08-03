@@ -153,3 +153,11 @@ test("rebase conflict classifier ignores non-conflict fatal errors", () => {
     true
   );
 });
+
+test("formatProcessError prefers stderr, then message, then the raw error, trimmed", async () => {
+  const { formatProcessError } = await import("../tools/notes-automation/src/domain/process-error.js");
+  assert.equal(formatProcessError({ stderr: "  fatal: boom \n", message: "ignored" }), "fatal: boom");
+  assert.equal(formatProcessError(new Error("plain failure")), "plain failure");
+  assert.equal(formatProcessError("string error"), "string error");
+  assert.equal(formatProcessError(null), "");
+});
