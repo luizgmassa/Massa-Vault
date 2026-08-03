@@ -23,8 +23,7 @@ const REPO_ROOT = path.resolve(".");
 // T6 llm-chat-cli chat-config. Must reach [] by the end of the feature.
 const IMPORT_TIME_LOAD_ALLOWLIST = [
   "tools/cli.js",
-  "tools/llm-chat-cli/src/infrastructure/chat-config.js",
-  "tools/notes-automation/src/commands/runtime.js"
+  "tools/llm-chat-cli/src/infrastructure/chat-config.js"
 ];
 
 // Modules whose import must be side-effect-free with respect to env loading.
@@ -36,7 +35,9 @@ const IMPORT_SAFE_MODULES = [
   "tools/router-gateway/src/infrastructure/runtime-config.js",
   "tools/router-gateway/src/server.js",
   "tools/mcp-server/src/infrastructure/runtime-config.js",
-  "tools/mcp-server/src/server.js"
+  "tools/mcp-server/src/server.js",
+  "tools/notes-automation/src/commands/runtime.js",
+  "tools/notes-automation/src/cli.js"
 ];
 
 function listJsFiles(dir) {

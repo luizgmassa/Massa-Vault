@@ -8,11 +8,8 @@ import { loadConfig } from "../infrastructure/config.js";
 import { checkGoogleDriveRemote, syncToGoogleDrive } from "../infrastructure/gdrive.js";
 import { readPid, removePid, writePid, readState, writeState } from "../infrastructure/state.js";
 import { runSyncOnce, startService, isProcessRunning } from "../services/daemon-service.js";
-import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 import { deriveSyncStatusModel } from "../../../shared/sync-status-model.js";
 import { SYNC_STATUS } from "../../../shared/sync-status-contract.js";
-
-loadRuntimeEnv();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
