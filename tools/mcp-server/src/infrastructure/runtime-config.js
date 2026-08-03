@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadLocalEnv } from "../../../shared/env.js";
+import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 
-loadLocalEnv();
+loadRuntimeEnv();
 
 export const DEFAULT_MCP_CONFIG_PATH = path.resolve("config/mcp-server.config.json");
 export const DEFAULT_MCP_SERVER_PORT = 4200;

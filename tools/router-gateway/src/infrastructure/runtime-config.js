@@ -1,4 +1,4 @@
-import { loadLocalEnv } from "../../../shared/env.js";
+import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 import {
   ROUTER_GATEWAY_DEFAULT_HOST,
   ROUTER_GATEWAY_DEFAULT_LITELLM_BASE_URL,
@@ -7,7 +7,7 @@ import {
 } from "./constants.js";
 import { resolveLiteLLMConfigPath } from "../../../shared/model-managers.js";
 
-loadLocalEnv();
+loadRuntimeEnv();
 
 export function loadGatewayRuntimeConfig() {
   return {

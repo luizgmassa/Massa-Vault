@@ -13,6 +13,30 @@ automatically.
 
 ## [Unreleased]
 
+### Added
+
+- A single user-owned home config at `~/.config/massa-ai-vault/config.json`,
+  outside any checkout, holding every mapped `.env` setting plus the `notes`
+  section that replaces `config/notes-automation.local.json`. Precedence is
+  `process.env` > home config > repo `config/*.json` > hardcoded defaults, so
+  the ~35 existing sites that set env vars directly to drive tests and CI are
+  unaffected. `massa-vault config path` prints the resolved path; `massa-vault
+  config migrate [--force] [--dry-run]` builds it from the existing `.env` and
+  `config/notes-automation.local.json` without deleting either, refuses to
+  clobber an existing home config without `--force`, and refuses to write a
+  document whose `notes.vault_path` is missing or empty. The file is written
+  with `0600` permissions in a `0700` directory since `litellm.master_key` is a
+  secret. `install.sh --check-only` reports home-config presence, and the
+  setup path runs the migration automatically when it's absent. Loading a
+  present `.env` now prints a one-time deprecation notice per process
+  pointing at `massa-vault config migrate`; `.env` and
+  `config/notes-automation.local.json` are deprecated but keep working.
+- A vault-root guard: `loadConfig()` now throws when Git or Google Drive sync
+  is enabled and the resolved `vaultPath` equals this repo's own root,
+  closing a latent data-loss path that `config/notes-automation.local.json`
+  had been masking (its repo-tracked default vault path is `"."`, which
+  resolves to the tooling repo itself).
+
 ## [1.3.3] - 2026-08-02
 
 ### Fixed

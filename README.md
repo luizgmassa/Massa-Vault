@@ -89,13 +89,24 @@ Noninteractive example:
 
 Common flags:
 
-- `--check-only` checks tools without writing files.
+- `--check-only` checks tools without writing files, including reporting home-config presence.
 - `--start` starts `massa-vault-server` after validation.
 - `--no-start` installs and validates only.
 - `--vault-path`, `--sync-strategy`, `--git-mode`, `--git-repo-url`, `--gdrive-remote-path` configure local sync.
 
-Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`. Both are ignored by git.
-Repository Node entrypoints auto-load `.env` without overriding already-exported shell variables.
+Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`, then migrates both into a single user-owned config file at `~/.config/massa-ai-vault/config.json` (outside any checkout). All three are gitignored/external; `.env` and `config/notes-automation.local.json` are deprecated in favor of the home config but still work and are left in place after migration.
+Repository Node entrypoints auto-load the home config, then `.env`, without overriding already-exported shell variables. Precedence is `process.env` > home config > repo `config/*.json` > hardcoded defaults. Loading a present `.env` prints one deprecation notice per process pointing at `massa-vault config migrate`.
+
+### Home config
+
+```bash
+massa-vault config path              # print the resolved path
+massa-vault config migrate           # build the home config from .env + config/notes-automation.local.json
+massa-vault config migrate --force   # overwrite an existing home config
+massa-vault config migrate --dry-run # print the document, write nothing
+```
+
+`massa-vault config path` resolves to `~/.config/massa-ai-vault/config.json` (honors `XDG_CONFIG_HOME`, or an explicit override via `MASSA_VAULT_HOME_CONFIG`; set `MASSA_VAULT_HOME_CONFIG=off` to disable the home config entirely). It holds every mapped scalar setting (`litellm`, `router`, `server`, `mcp`, `chat` sections) plus a `notes` section that replaces `config/notes-automation.local.json`. The file is written with `0600` permissions in a `0700` directory since `litellm.master_key` is a secret. `config migrate` refuses to overwrite an existing home config without `--force`, and refuses to write a document whose `notes.vault_path` is missing or empty — run `massa-vault configure` first if you see that error.
 
 ### Executables and service ownership
 
@@ -127,9 +138,9 @@ Primary config files:
 
 - Server supervisor: `config/server.config.json`
 - Client CLI defaults: `config/vault-cli.config.json`
-- Notes automation: `config/notes-automation.config.json` plus ignored local override `config/notes-automation.local.json`
+- Notes automation: `config/notes-automation.config.json` plus the home config's `notes` section (or the deprecated `config/notes-automation.local.json`)
 
-Config is file-first. Environment variables and `.env` remain supported for secrets and explicit local overrides such as `LITELLM_MASTER_KEY`, `MASSA_VAULT_CHAT_GATEWAY_URL`, `ROUTER_GATEWAY_PORT`, and `MCP_SERVER_PORT`.
+Config is file-first. The home config (`~/.config/massa-ai-vault/config.json`, see above), environment variables, and `.env` remain supported for secrets and explicit local overrides such as `LITELLM_MASTER_KEY`, `MASSA_VAULT_CHAT_GATEWAY_URL`, `ROUTER_GATEWAY_PORT`, and `MCP_SERVER_PORT`.
 
 ### `chat`
 

@@ -1,3 +1,4 @@
+import "./helpers/neutralize-home-config.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isInteractiveTuiSupported } from "../tools/llm-chat-cli/src/cli.js";

@@ -21,6 +21,8 @@ npm run vault:chat             # Ink TUI chat REPL
 npm run vault -- chat "text"   # one-shot
 npm run vault:sync             # manual sync run
 npm run vault -- sync conflicts / sync resolve --done
+npm run vault -- config path                # print the resolved home config path
+npm run vault -- config migrate [--force] [--dry-run]  # build ~/.config/massa-ai-vault/config.json from .env + config/notes-automation.local.json
 npm run security:scan          # staged secret scan (also a pre-commit hook)
 npm run security:scan:all
 ```
@@ -40,7 +42,7 @@ notes-automation (watcher/daemon) ──▶ git + rclone bisync ──▶ extern
 mcp-server :4200 ──▶ grounded-source MCP over the vault
 ```
 
-- `tools/cli.js` — `massa-vault` client entrypoint (install/configure/chat/sync/gdrive). `start|stop|status|restart` are thin proxies to `massa-vault-server`.
+- `tools/cli.js` — `massa-vault` client entrypoint (install/configure/chat/sync/gdrive/config). `start|stop|status|restart` are thin proxies to `massa-vault-server`. `config path`/`config migrate` manage the user-owned home config at `~/.config/massa-ai-vault/config.json` (see `tools/shared/` below).
 - `tools/server` — supervisor. Probes each service's `health_url` **before spawning**; if already healthy it marks the service `external: true` and never spawns or kills it. Starts in config order, rolls back (`stopAllServices`) on any startup failure, stops in reverse order.
 - `tools/router-gateway` — classifies a request into `code`/`multimodal`/`general` lanes by phrase matching against `config/router-gateway.json`, falls back to `general` below `confidenceFloor` (0.55). Then `domain/model-resolution.js` picks a concrete model by complexity tier (token estimate = chars/4) from the generated LiteLLM YAML, unless a pinned model overrides it. Rewrites `body.model` and proxies to LiteLLM.
 - `tools/notes-automation` — file watcher + sync orchestrator. `services/sync-run.js` is the whole pipeline; `runQueuedSync` is the concurrency guard (a second sync request while one is in flight is coalesced into `queuedSyncReason`, not run concurrently).
@@ -61,6 +63,8 @@ Tools are **not** independent packages — there is one root `package.json` and 
 ### `tools/shared/` is the cross-package contract layer
 
 - `env.js` — the only `.env` parser in the repo. `loadLocalEnv()` **never overwrites an already-set `process.env` key** unless `override: true`. Multiple tools call it independently, some at module import time — first writer wins for the whole process.
+- `home-config.js` — the user-owned home config store: path resolution (`resolveHomeConfigPath`, honors `XDG_CONFIG_HOME` and `MASSA_VAULT_HOME_CONFIG`, including `MASSA_VAULT_HOME_CONFIG=off` to disable it), the frozen `HOME_CONFIG_ENV_MAP` (dotted document path → env key, 23 entries), the pure `projectHomeConfigEnv`/`buildHomeConfigDocument` functions that project to/from that map, and the fs read (`readHomeConfig`, tolerates malformed JSON by degrading to `{ loaded: false }` instead of throwing).
+- `runtime-env.js` — `loadRuntimeEnv()` = home config first, then `.env` (both assign with first-writer-wins, so whichever runs first claims a key — this ordering *is* the "env > home config > `.env`" precedence, R3/R4). Warns once per process when a present `.env` is loaded, pointing at `massa-vault config migrate`.
 - `model-managers.js` — owns the MMT state file (`.automation/llm-chat-cli/model-managers.json`) and the generated LiteLLM config (`.automation/llm-chat-cli/litellm-config.generated.yaml`).
 - `routing-metadata.js` — HTTP header ⇄ transcript-metadata codec. Gateway encodes routing decisions into response headers; chat CLI decodes them and persists them into transcripts.
 - `sync-status-contract.js` / `sync-status-model.js` — the JSON status schema that lets notes-automation (producer) and llm-chat-cli (consumer) agree without a shared server.
@@ -89,6 +93,8 @@ External clients must keep sending `smart-router`; `/model` pins are resolved se
 
 Flat `tests/*.test.js` at repo root, imported via relative paths into `tools/`. Uniform style: `import test from "node:test"` + `import assert from "node:assert/strict"`, flat `test()` calls — no `describe`/`it` anywhere.
 
+The one non-test file under `tests/` is `tests/helpers/neutralize-home-config.js`. It must be the **first** import of any test that transitively reaches a module calling `loadRuntimeEnv()` at import time, because it has to set `MASSA_VAULT_HOME_CONFIG=off` before that module's own static import evaluates — otherwise a developer's real `~/.config/massa-ai-vault/config.json` leaks into the run and the suite stops being machine-independent. It sits in a subdirectory precisely so it never matches the `*.test.js` discovery pattern.
+
 Isolation patterns to reuse:
 - `withTempDir` via `fs.mkdtempSync(os.tmpdir(), ...)` + `fs.rmSync` in `finally`.
 - Fake `spawn` returning an `EventEmitter` with `PassThrough` streams, injected as `spawnImpl`.
@@ -103,7 +109,7 @@ Isolation patterns to reuse:
 
 `.notebook/` is **tracked** design documentation, not runtime state — `INDEX.md` links per-feature notes (MMT model control, chat harness + Vault RAG, improvements). Read the relevant entry before changing those subsystems.
 
-`config/*.local.json` and `.env` are gitignored; `config/notes-automation.local.json` overrides the committed config, and `process.env` overrides both.
+`config/*.local.json` and `.env` are gitignored and deprecated in favor of the home config; `config/notes-automation.local.json` overrides the committed config, and `process.env` overrides both. The home config at `~/.config/massa-ai-vault/config.json` lives outside the checkout entirely and outranks `.env` but not `process.env` — see `tools/shared/home-config.js` and `tools/shared/runtime-env.js` above. `massa-vault config migrate` builds it from the existing `.env` + `config/notes-automation.local.json` without deleting either.
 
 ## CI
 

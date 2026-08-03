@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ALLOWED_GDRIVE_RESYNC_MODE_SET,
   DEFAULT_CONFIG_PATH,
@@ -20,6 +21,16 @@ import {
 } from "./config-constants.js";
 import { createDefaultConfigDocument } from "./config-definition.js";
 import { PROTECTED_ARTIFACT_GLOBS } from "../domain/protected-artifacts.js";
+import { readHomeConfigSection } from "../../../shared/home-config.js";
+
+const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../..");
+
+export class VaultPathError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "VaultPathError";
+  }
+}
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
@@ -47,7 +58,12 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
   const baseConfig = readJsonFile(configPath);
   const localPath = getLocalConfigPath(configPath, localConfigPath);
   const localConfig = localPath && fs.existsSync(localPath) ? readJsonFile(localPath) : {};
-  const parsed = { ...defaults, ...baseConfig, ...localConfig };
+  // Home config's `notes` section only attaches for the default config path
+  // (R9) -- an explicit non-default configPath (e.g. a temp-dir test) gets
+  // no home-config injection, keeping those tests isolated.
+  const isDefaultConfigPath = localConfigPath === undefined && path.resolve(configPath) === DEFAULT_CONFIG_PATH;
+  const homeNotes = isDefaultConfigPath ? readHomeConfigSection("notes") : {};
+  const parsed = { ...defaults, ...baseConfig, ...localConfig, ...homeNotes };
   const syncStrategy = String(parsed.sync_strategy || DEFAULT_SYNC_STRATEGY).toLowerCase();
   const gitEnabled = syncStrategy === "git" || syncStrategy === "both";
   const gdriveEnabled = syncStrategy === "gdrive" || syncStrategy === "both";
@@ -71,6 +87,13 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
     }
   }
 
+  const vaultPath = path.resolve(process.env.VAULT_PATH || parsed.vault_path || DEFAULT_VAULT_PATH);
+  if ((gitEnabled || gdriveEnabled) && vaultPath === REPO_ROOT) {
+    throw new VaultPathError(
+      `Refusing to load notes-automation config: vaultPath resolves to the tooling repo root (${REPO_ROOT}) with sync enabled. Set an explicit vault_path outside this repo.`
+    );
+  }
+
   return {
     enabled:
       String(
@@ -79,7 +102,7 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH, { localConfigPath }
           DEFAULT_NOTES_AUTOMATION_ENABLED
       ).toLowerCase() ===
       "true",
-    vaultPath: path.resolve(process.env.VAULT_PATH || parsed.vault_path || DEFAULT_VAULT_PATH),
+    vaultPath,
     watchPaths: parsed.watch_paths || ["."],
     includeGlobs: parsed.include_globs || ["**/*.md"],
     ignoreGlobs,
