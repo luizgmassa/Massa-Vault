@@ -24,7 +24,6 @@ const REPO_ROOT = path.resolve(".");
 const IMPORT_TIME_LOAD_ALLOWLIST = [
   "tools/cli.js",
   "tools/llm-chat-cli/src/infrastructure/chat-config.js",
-  "tools/mcp-server/src/infrastructure/runtime-config.js",
   "tools/notes-automation/src/commands/runtime.js"
 ];
 
@@ -35,7 +34,9 @@ const IMPORT_SAFE_MODULES = [
   "tools/shared/vault-cli-config.js",
   "tools/server/src/infrastructure/config.js",
   "tools/router-gateway/src/infrastructure/runtime-config.js",
-  "tools/router-gateway/src/server.js"
+  "tools/router-gateway/src/server.js",
+  "tools/mcp-server/src/infrastructure/runtime-config.js",
+  "tools/mcp-server/src/server.js"
 ];
 
 function listJsFiles(dir) {
