@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { stdout as output } from "node:process";
 import { pathToFileURL } from "node:url";
+import { assertRepoRootCwd } from "../../shared/repo-root.js";
 import {
   completeCommandInput,
   getCommandDefinitions,
@@ -151,6 +152,7 @@ export {
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  assertRepoRootCwd();
   main().catch((error) => {
     output.write("\n");
     console.error(`[chat] ${error instanceof Error ? error.message : String(error)}`);

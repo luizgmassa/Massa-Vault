@@ -15,6 +15,11 @@ automatically.
 
 ### Fixed
 
+- Running any CLI entrypoint from a subdirectory of this repo now fails fast
+  with a clear error instead of silently creating stray `config/` and
+  `.automation/` trees there (default paths resolve against the working
+  directory). Running the tools from a directory outside the repo is still
+  allowed.
 - MCP server auth hardening: `/auth/login` now locks out after 5 consecutive
   failures for 30 seconds (HTTP 429), and the `/auth/*` endpoints enforce the
   same origin allowlist as `/mcp` (requests without an `Origin` header, such

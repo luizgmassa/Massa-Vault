@@ -1,5 +1,6 @@
 import http from "node:http";
 import { pathToFileURL } from "node:url";
+import { assertRepoRootCwd } from "../../shared/repo-root.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer, createMcpServices } from "./mcp.js";
 import { AUTH_ERROR_CODES, AuthError } from "./services/auth.js";
@@ -165,5 +166,6 @@ export function startMcpServer({ runtime = loadMcpRuntimeConfig(), services } = 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  assertRepoRootCwd();
   startMcpServer();
 }
