@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-03
+
 ### Changed
 
 - Runtime env/config loading is now explicit instead of emergent from module
