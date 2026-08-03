@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
-import { readHomeConfigSection } from "../../../shared/home-config.js";
-import { SMART_ROUTER_MODEL_ID } from "../../../shared/smart-router.js";
+import { loadRuntimeEnv } from "./runtime-env.js";
+import { readHomeConfigSection } from "./home-config.js";
+import { SMART_ROUTER_MODEL_ID } from "./smart-router.js";
 
 export const DEFAULT_VAULT_CLI_CONFIG_PATH = path.resolve("config/vault-cli.config.json");
 export const DEFAULT_NOTES_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
@@ -80,5 +80,24 @@ export function loadVaultCliRuntimeConfig({
         DEFAULT_CHAT_IDLE_SYNC_MS
       )
     }
+  };
+}
+
+// Lazy resolution helpers for tools that reuse the chat client's settings
+// (mcp-server's grounded answering) without importing llm-chat-cli internals.
+// Each call re-reads config, unlike chat-config.js's import-time constants.
+
+export function resolveNotesConfigPath() {
+  return loadVaultCliRuntimeConfig().notesConfigPath;
+}
+
+export function resolveChatModel() {
+  return loadVaultCliRuntimeConfig().chat.model;
+}
+
+export function resolveGatewayOptions() {
+  return {
+    gatewayUrl: loadVaultCliRuntimeConfig().chat.gatewayUrl,
+    apiKey: process.env.LITELLM_MASTER_KEY || ""
   };
 }

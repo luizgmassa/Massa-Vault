@@ -17,7 +17,7 @@ fs.mkdirSync(path.join(SCRATCH_ROOT, "config"), { recursive: true });
 
 process.chdir(SCRATCH_ROOT);
 const { loadVaultCliRuntimeConfig, DEFAULT_VAULT_CLI_CONFIG_PATH } = await import(
-  "../tools/llm-chat-cli/src/infrastructure/vault-cli-config.js"
+  "../tools/shared/vault-cli-config.js"
 );
 process.chdir(ORIGINAL_CWD);
 

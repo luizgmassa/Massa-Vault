@@ -1,9 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
-import { readSearchIndex, writeSearchIndex } from "./state.js";
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_EMBED_MODEL = "embeddinggemma";
+
+// The index file stays under llm-chat-cli's state dir: the chat CLI and
+// mcp-server deliberately share one index (same vault, same embeddings).
+function searchIndexFilePath() {
+  return path.resolve(".automation/llm-chat-cli/search-index.json");
+}
+
+function readSearchIndex() {
+  try {
+    return JSON.parse(fs.readFileSync(searchIndexFilePath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeSearchIndex(indexData) {
+  fs.mkdirSync(path.dirname(searchIndexFilePath()), { recursive: true });
+  fs.writeFileSync(searchIndexFilePath(), JSON.stringify(indexData, null, 2), "utf8");
+}
 
 function toPosix(p) {
   return p.split(path.sep).join("/");

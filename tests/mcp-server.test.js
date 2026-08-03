@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ensureSearchIndex, searchIndex } from "../tools/llm-chat-cli/src/infrastructure/search.js";
+import { ensureSearchIndex, searchIndex } from "../tools/shared/search.js";
 import { createMcpServices } from "../tools/mcp-server/src/mcp.js";
 import { createMcpHttpServer } from "../tools/mcp-server/src/server.js";
 import { createAuthService } from "../tools/mcp-server/src/services/auth.js";

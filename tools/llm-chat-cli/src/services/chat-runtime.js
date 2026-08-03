@@ -5,7 +5,7 @@ import {
   isVaultContextEnabled
 } from "../infrastructure/chat-config.js";
 import { createStatusLine, createStatusState } from "./chat-status.js";
-import { streamChatCompletion } from "../infrastructure/gateway.js";
+import { streamChatCompletion } from "../../../shared/gateway.js";
 import { estimateTokensFromText } from "../domain/token-estimator.js";
 import { accumulateSessionUsage } from "../domain/usage.js";
 import { addUsageToLedger } from "./usage.js";

@@ -10,7 +10,7 @@ import { createStatusRenderer } from "../services/chat-status.js";
 import { createChatSession } from "../services/chat-session.js";
 import { runPrompt } from "../services/chat-runtime.js";
 import { runPlainRepl } from "./plain-repl.js";
-import { ensureSearchIndex, getSearchDefaults } from "../infrastructure/search.js";
+import { ensureSearchIndex, getSearchDefaults } from "../../../shared/search.js";
 import { runSearch } from "../services/search-runner.js";
 import { printSearchPlain } from "../commands/search-ui.js";
 import { saveTranscript } from "../services/transcript-store.js";

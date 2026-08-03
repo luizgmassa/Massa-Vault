@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
-import { DEFAULT_CONFIG_PATH } from "../../../llm-chat-cli/src/infrastructure/chat-config.js";
+import { resolveNotesConfigPath } from "../../../shared/vault-cli-config.js";
 import {
   ensureSearchIndex,
   getSearchDefaults,
   searchIndex
-} from "../../../llm-chat-cli/src/infrastructure/search.js";
+} from "../../../shared/search.js";
 import {
   resolveSourcePathInVault,
   sourceUriForId
@@ -26,7 +26,7 @@ function formatSourceForResponse(source) {
 
 export function createSourceRetrievalService({
   sourceLibrary,
-  notesConfigPath = DEFAULT_CONFIG_PATH,
+  notesConfigPath = resolveNotesConfigPath(),
   configLoader = loadConfig,
   searchDefaultsProvider = getSearchDefaults,
   ensureIndex = ensureSearchIndex,

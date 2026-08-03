@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ROUTER_GATEWAY_REQUIRED_MODEL } from "../tools/router-gateway/src/infrastructure/constants.js";
-import { DEFAULT_CHAT_MODEL } from "../tools/llm-chat-cli/src/infrastructure/vault-cli-config.js";
+import { DEFAULT_CHAT_MODEL } from "../tools/shared/vault-cli-config.js";
 import { generateLiteLLMConfigFromModelManagerState } from "../tools/shared/model-managers.js";
 import { SMART_ROUTER_MODEL_ID, smartRouterLaneAlias } from "../tools/shared/smart-router.js";
 import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/domain/classifier.js";

@@ -6,7 +6,7 @@ import {
   DEFAULT_CHAT_GATEWAY_URL,
   DEFAULT_CHAT_MODEL,
   DEFAULT_CHAT_IDLE_SYNC_MS
-} from "./vault-cli-config.js";
+} from "../../../shared/vault-cli-config.js";
 import {
   NOTES_AUTOMATION_CLI_PATH,
   formatSyncFeedback,
