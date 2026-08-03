@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 // Fixed vocabulary of auth failures. `server.js` maps these to client-facing
 // text so it never has to read `error.message` off a caught exception.
@@ -25,10 +25,12 @@ function newToken() {
 }
 
 function safeEqual(left, right) {
-  const leftBuffer = Buffer.from(String(left || ""));
-  const rightBuffer = Buffer.from(String(right || ""));
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  // Hash both sides to a fixed length before comparing: a raw length
+  // short-circuit would leak the credential's length through timing, which
+  // matters once credentials are rotated away from the public defaults.
+  const leftDigest = createHash("sha256").update(String(left || "")).digest();
+  const rightDigest = createHash("sha256").update(String(right || "")).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
 }
 
 function expiresAt(now, ttlMs) {

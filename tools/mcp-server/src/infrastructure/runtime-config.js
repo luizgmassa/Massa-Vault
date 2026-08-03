@@ -61,8 +61,11 @@ export function loadMcpRuntimeConfig(configPath = process.env.MCP_SERVER_CONFIG_
       ? raw.allowed_origins.map(normalizeOrigin).filter(Boolean)
       : ["http://127.0.0.1", "http://localhost"],
     auth: {
-      username: String(raw.auth?.username || "admin"),
-      password: String(raw.auth?.password || "admin"),
+      // Env outranks the tracked file so real credentials never need to live
+      // in the repo: the home config projects mcp.auth.* into these env keys,
+      // and the tracked config keeps non-secret defaults only.
+      username: String(process.env.MCP_SERVER_USERNAME || raw.auth?.username || "admin"),
+      password: String(process.env.MCP_SERVER_PASSWORD || raw.auth?.password || "admin"),
       accessTokenTtlMs: toPositiveNumber(raw.auth?.access_token_ttl_seconds, 3600) * 1000,
       refreshTokenTtlMs: toPositiveNumber(raw.auth?.refresh_token_ttl_seconds, 86400) * 1000
     },

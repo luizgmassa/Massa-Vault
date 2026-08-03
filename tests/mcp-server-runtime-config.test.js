@@ -12,7 +12,13 @@ import {
   DEFAULT_MCP_SERVER_HOST
 } from "../tools/mcp-server/src/infrastructure/runtime-config.js";
 
-const ENV_KEYS = ["MCP_SERVER_CONFIG_PATH", "MCP_SERVER_HOST", "MCP_SERVER_PORT"];
+const ENV_KEYS = [
+  "MCP_SERVER_CONFIG_PATH",
+  "MCP_SERVER_HOST",
+  "MCP_SERVER_PORT",
+  "MCP_SERVER_USERNAME",
+  "MCP_SERVER_PASSWORD"
+];
 
 function withTempDir(run) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-runtime-config-"));
@@ -63,6 +69,31 @@ test("isLocalBindHost rejects non-loopback hosts and empty/missing values", () =
   assert.equal(isLocalBindHost(""), false);
   assert.equal(isLocalBindHost(null), false);
   assert.equal(isLocalBindHost(undefined), false);
+});
+
+test("loadMcpRuntimeConfig prefers env credentials over the tracked config file", () => {
+  // The tracked config carries non-secret defaults (admin/admin); real
+  // credentials arrive via env — including the home config, which projects
+  // mcp.auth.* into MCP_SERVER_USERNAME/MCP_SERVER_PASSWORD.
+  withTempDir((tempDir) => {
+    const configPath = writeConfig(tempDir, {
+      auth: { username: "file-user", password: "file-pass" }
+    });
+    withEnv(
+      {
+        MCP_SERVER_CONFIG_PATH: configPath,
+        MCP_SERVER_HOST: undefined,
+        MCP_SERVER_PORT: undefined,
+        MCP_SERVER_USERNAME: "env-user",
+        MCP_SERVER_PASSWORD: "env-pass"
+      },
+      () => {
+        const config = loadMcpRuntimeConfig();
+        assert.equal(config.auth.username, "env-user");
+        assert.equal(config.auth.password, "env-pass");
+      }
+    );
+  });
 });
 
 // --- loadMcpRuntimeConfig: guard behavior ---

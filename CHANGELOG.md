@@ -15,6 +15,12 @@ automatically.
 
 ### Fixed
 
+- MCP server credentials no longer have to live in the tracked config file:
+  `MCP_SERVER_USERNAME` / `MCP_SERVER_PASSWORD` env vars (and the matching
+  `mcp.auth.*` home-config keys, which project into them) now override it, so
+  the repo copy can stay a non-secret default. The credential comparison also
+  hashes both sides to a fixed length before the constant-time check, closing
+  a credential-length timing leak.
 - The router gateway now refuses to start on a non-loopback bind host
   (`ROUTER_GATEWAY_HOST=0.0.0.0` and similar), mirroring the MCP server's
   existing guard. The gateway performs no authentication and forwards
