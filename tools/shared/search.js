@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { matchesGlob } from "./globs.js";
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_EMBED_MODEL = "embeddinggemma";
@@ -25,23 +26,6 @@ function writeSearchIndex(indexData) {
 
 function toPosix(p) {
   return p.split(path.sep).join("/");
-}
-
-function escapeRegex(input) {
-  return input.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-}
-
-function globToRegex(glob) {
-  let pattern = escapeRegex(toPosix(glob));
-  pattern = pattern.replace(/\*\*/g, "###DOUBLESTAR###");
-  pattern = pattern.replace(/\*/g, "[^/]*");
-  pattern = pattern.replace(/###DOUBLESTAR###/g, ".*");
-  return new RegExp(`^${pattern}$`);
-}
-
-function matchesGlobs(relativePath, globs) {
-  const normalized = toPosix(relativePath);
-  return globs.some((glob) => globToRegex(glob).test(normalized));
 }
 
 function defaultIgnoreGlobs() {
@@ -98,15 +82,15 @@ function listMarkdownFiles(vaultPath, { ignoreGlobs = [], includeGlobs = [] } = 
       if (!relativePath || relativePath === ".") continue;
 
       if (entry.isDirectory()) {
-        if (matchesGlobs(`${relativePath}/`, normalizedIgnore)) continue;
+        if (matchesGlob(`${relativePath}/`, normalizedIgnore)) continue;
         stack.push(absolutePath);
         continue;
       }
 
       if (entry.isFile()) {
         if (!relativePath.endsWith(".md")) continue;
-        if (matchesGlobs(relativePath, normalizedIgnore)) continue;
-        if (normalizedInclude.length && !matchesGlobs(relativePath, normalizedInclude)) continue;
+        if (matchesGlob(relativePath, normalizedIgnore)) continue;
+        if (normalizedInclude.length && !matchesGlob(relativePath, normalizedInclude)) continue;
         files.push(absolutePath);
       }
     }

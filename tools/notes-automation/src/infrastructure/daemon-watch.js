@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { matchesGlob } from "../domain/globs.js";
+import { matchesGlob } from "../../../shared/globs.js";
 import { isProtectedArtifactPath } from "../domain/protected-artifacts.js";
 
 function toPosix(filePath) {
