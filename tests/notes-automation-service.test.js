@@ -157,6 +157,7 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
   const vaultPath = path.join(tempDir, "vault");
   fs.mkdirSync(path.join(vaultPath, "notes"), { recursive: true });
   fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello", "utf8");
+  fs.writeFileSync(path.join(vaultPath, "notes", "gone.md"), "delete me", "utf8");
   const configPath = createConfig(tempDir, vaultPath);
 
   const originalWatch = fs.watch;
@@ -180,6 +181,14 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
     fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello, this content is longer now", "utf8");
     service.pollForChanges();
     assert.equal(service.changedFiles.has("notes/today.md"), true);
+
+    // Deletions are only visible as a key missing from the new snapshot, so the
+    // poll diff needs a reverse pass over the previous snapshot; without it a
+    // removed note never reaches git or Drive sync in polling mode.
+    assert.equal(service.changedFiles.has("notes/gone.md"), false);
+    fs.rmSync(path.join(vaultPath, "notes", "gone.md"));
+    service.pollForChanges();
+    assert.equal(service.changedFiles.has("notes/gone.md"), true);
   } finally {
     await service.shutdown();
     fs.watch = originalWatch;

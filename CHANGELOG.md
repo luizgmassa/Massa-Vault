@@ -15,6 +15,11 @@ automatically.
 
 ### Fixed
 
+- The polling watcher fallback (entered automatically when `fs.watch` fails or
+  degrades) now detects file deletions. Previously the poll diff only walked
+  the new snapshot, so a deleted note was never queued and never reached git or
+  Google Drive sync — the remote silently diverged until the next non-delete
+  edit. Native `fs.watch` mode was unaffected.
 - `install.sh` setup validation imported the notes-automation config module
   from a path that no longer exists (`src/config.js` instead of
   `src/infrastructure/config.js`), crashing every real (non `--check-only`)

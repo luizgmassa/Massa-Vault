@@ -97,6 +97,15 @@ export function pollForChanges(service) {
         service.queue(relativePath);
       }
     }
+    // A deleted file exists only as a key missing from the new snapshot, so it
+    // needs this reverse pass; queued deletions stage correctly because commit
+    // staging is per-path (`git add -- <path>` records removals).
+    // Test: node --test tests/notes-automation-service.test.js ("falls back to polling mode...")
+    for (const relativePath of service.trackedSnapshot.keys()) {
+      if (!nextSnapshot.has(relativePath)) {
+        service.queue(relativePath);
+      }
+    }
     service.trackedSnapshot = nextSnapshot;
   } catch (error) {
     service.updateState({
