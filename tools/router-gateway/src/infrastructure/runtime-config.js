@@ -1,4 +1,3 @@
-import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 import {
   ROUTER_GATEWAY_DEFAULT_HOST,
   ROUTER_GATEWAY_DEFAULT_LITELLM_BASE_URL,
@@ -6,8 +5,6 @@ import {
   ROUTER_GATEWAY_DEFAULT_PORT
 } from "./constants.js";
 import { resolveLiteLLMConfigPath } from "../../../shared/model-managers.js";
-
-loadRuntimeEnv();
 
 // Mirrors mcp-server's bind guard (tools/mcp-server/src/infrastructure/runtime-config.js).
 // The gateway performs no authentication and forwards Authorization headers
