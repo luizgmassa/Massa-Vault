@@ -17,6 +17,7 @@ const PUBLIC_ERROR_MESSAGES = Object.freeze({
   [AUTH_ERROR_CODES.MISSING_REFRESH_TOKEN]: "Missing or invalid refresh token",
   [AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN]: "Refresh token expired or invalid",
   [AUTH_ERROR_CODES.MISSING_TOKEN]: "Missing or invalid token",
+  [AUTH_ERROR_CODES.TOO_MANY_ATTEMPTS]: "Too many failed login attempts",
   [REQUEST_ERROR_CODES.PAYLOAD_TOO_LARGE]: "Payload too large",
   [REQUEST_ERROR_CODES.INVALID_JSON_BODY]: "Invalid JSON body"
 });
@@ -34,7 +35,13 @@ function publicErrorMessage(error, fallback) {
   return fallback;
 }
 
-async function handleAuthRoute(req, res, auth, route) {
+async function handleAuthRoute(req, res, auth, route, runtime) {
+  // Same origin policy as /mcp: credential-handling endpoints must not accept
+  // cross-origin requests. Requests without an Origin header (curl, local
+  // tools) pass, per isAllowedOrigin's contract.
+  if (!isAllowedOrigin(req.headers.origin, runtime.allowedOrigins)) {
+    return writeJson(res, 403, { error: { message: "Forbidden origin" } });
+  }
   try {
     const body = await readJsonBody(req);
     if (route === "/auth/login" && req.method === "POST") {
@@ -130,7 +137,7 @@ export function createMcpHttpServer({
     }
 
     if (url.pathname.startsWith("/auth/")) {
-      return handleAuthRoute(req, res, services.auth, url.pathname);
+      return handleAuthRoute(req, res, services.auth, url.pathname, runtime);
     }
 
     if (url.pathname === runtime.mcpPath) {

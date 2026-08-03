@@ -15,6 +15,12 @@ automatically.
 
 ### Fixed
 
+- MCP server auth hardening: `/auth/login` now locks out after 5 consecutive
+  failures for 30 seconds (HTTP 429), and the `/auth/*` endpoints enforce the
+  same origin allowlist as `/mcp` (requests without an `Origin` header, such
+  as curl and local tools, are unaffected). The router gateway no longer
+  echoes raw upstream LiteLLM error bodies to clients — detail goes to the
+  server log, callers get a fixed message.
 - MCP server credentials no longer have to live in the tracked config file:
   `MCP_SERVER_USERNAME` / `MCP_SERVER_PASSWORD` env vars (and the matching
   `mcp.auth.*` home-config keys, which project into them) now override it, so

@@ -93,10 +93,15 @@ export function createGatewayServer({
 
       if (!upstream.ok && !body.stream) {
         const text = await upstream.text();
+        // Upstream error bodies can carry LiteLLM/model-config internals, so
+        // the detail stays server-side; callers get the fixed message only.
+        // Test: node --test tests/router-gateway-negative-paths.test.js
+        console.error(
+          `[router-gateway] upstream ${upstream.status} on ${url.pathname}: ${text.slice(0, 2000)}`
+        );
         return writeJson(res, upstream.status, {
           error: {
             message: "Upstream LiteLLM call failed",
-            upstream: text,
             routing: resolvedRouting
           }
         });
