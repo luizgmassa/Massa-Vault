@@ -1,13 +1,13 @@
 import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
 import {
-  DEFAULT_CONFIG_PATH,
+  resolveDefaultConfigPath,
   resolveVaultPath
 } from "../infrastructure/chat-config.js";
 import { ensureSearchIndex, getSearchDefaults, searchIndex } from "../../../shared/search.js";
 
 export async function runSearch({ query, includeGlobs = [] }) {
   const vaultPath = resolveVaultPath();
-  const config = loadConfig(DEFAULT_CONFIG_PATH);
+  const config = loadConfig(resolveDefaultConfigPath());
   const defaults = getSearchDefaults();
   const { index, rebuilt } = await ensureSearchIndex({
     vaultPath,

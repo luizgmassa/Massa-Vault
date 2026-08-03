@@ -7,6 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
+| `arch3-runtime-env-loading` | Verified | T1-T7 + verification fix landed; independent verification PASS (10/10 ACs, 5/6 mutants killed + 1 accepted structural, poison sensor green) | PR to `master`; merge cuts v1.5.0 |
 | `home-config-store` | Shipped | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | None — PR #9 merged 2026-08-03, released in v1.4.0 |
 
 ## Completion evidence — `home-config-store`
@@ -22,6 +23,9 @@
 
 | # | Decision | Rationale |
 |---|---|---|
+| D7 | `.env` gets its own off-switch (`MASSA_VAULT_ENV_FILE=off`/`""`), guarded inside `loadLocalEnv` itself | The naive lazy slice was falsified 2026-08-03: any call-time load reachable from a cleared-env test window re-projects the developer's real `.env`. The store guards itself so every call path is covered; prerequisite landed before any de-freeze |
+| D8 | Env loading runs once per process, inside each entrypoint's `import.meta.url` guard; loaders read `process.env` per call | ARCH-3: precedence stops being emergent from module evaluation order; imports become side-effect-free; enforced by `tests/runtime-env-loading-discipline.test.js` (empty allowlist + poison-import check) |
+| D9 | No memoized config resolvers; module-level singletons must not evaluate resolver default params | Memoization is a hidden freeze-at-first-call with cross-test staleness; `transcript-store.js`'s module-level default store proved the failure mode (caught by the discipline sensor during T6) |
 | D1 | Home config directory is `massa-ai-vault`, not `massa-vault` | User-confirmed, deliberately diverging from the repo name and the `MASSA_VAULT_` env prefix |
 | D2 | `process.env` outranks the home config | ~35 test/CI sites drive the loaders by setting env vars directly |
 | D3 | `process.env` stays the internal transport; the home config projects into it | Keeps all ~35 existing read sites and their per-tool coercion quirks untouched — relocation without an implicit refactor |

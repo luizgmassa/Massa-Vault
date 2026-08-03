@@ -60,6 +60,17 @@ export function loadLocalEnv({
   envFile = ".env",
   override = false
 } = {}) {
+  // MASSA_VAULT_ENV_FILE=off (or "") disables the .env layer entirely,
+  // mirroring MASSA_VAULT_HOME_CONFIG's disable half (home-config.js). The
+  // guard lives here, in the only .env reader, so every call path -- direct,
+  // loadRuntimeEnv, or a loader's internal per-call load -- is covered.
+  // `path: null` (vs the resolved path on a merely missing file) is
+  // deliberate: off means "store not consulted".
+  const fileSwitch = process.env.MASSA_VAULT_ENV_FILE;
+  if (fileSwitch === "off" || fileSwitch === "") {
+    return { loaded: false, path: null, setCount: 0, parsedCount: 0 };
+  }
+
   const envPath = path.resolve(cwd, envFile);
   if (!fs.existsSync(envPath)) {
     return { loaded: false, path: envPath, setCount: 0, parsedCount: 0 };

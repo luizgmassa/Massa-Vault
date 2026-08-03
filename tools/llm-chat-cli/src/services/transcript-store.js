@@ -1,5 +1,5 @@
 import {
-  DEFAULT_GATEWAY_MODEL,
+  resolveDefaultGatewayModel,
   buildGatewayOptions,
   resolveVaultPath
 } from "../infrastructure/chat-config.js";
@@ -20,7 +20,7 @@ export function buildTranscriptPayload({
     id,
     createdAt,
     gatewayUrl,
-    model: model || DEFAULT_GATEWAY_MODEL,
+    model: model || resolveDefaultGatewayModel(),
     conversationPrompt: String(conversationPrompt || "").trim(),
     routing,
     usage,
@@ -31,7 +31,7 @@ export function buildTranscriptPayload({
 export function createTranscriptSessionStore({
   resolveVaultPathFn = resolveVaultPath,
   buildGatewayOptionsFn = buildGatewayOptions,
-  defaultGatewayModel = DEFAULT_GATEWAY_MODEL,
+  defaultGatewayModel = resolveDefaultGatewayModel(),
   writeTranscriptImpl = writeTranscript,
   syncClient = createSyncClient()
 } = {}) {
@@ -117,8 +117,14 @@ export function createTranscriptSessionStore({
   };
 }
 
-const defaultTranscriptStore = createTranscriptSessionStore();
-
-export const persistTranscriptForSession = defaultTranscriptStore.persistSession;
-export const saveAndSyncSession = defaultTranscriptStore.saveAndSyncSession;
-export const saveTranscript = defaultTranscriptStore.saveTranscript;
+// Default-store convenience exports construct the store per call: a
+// module-level createTranscriptSessionStore() would evaluate the default
+// parameters -- resolveDefaultGatewayModel() and createSyncClient() -- at
+// import time, re-freezing config at module scope (ARCH-3). The store is
+// stateless, so per-call construction only costs the config re-read.
+export const persistTranscriptForSession = (...args) =>
+  createTranscriptSessionStore().persistSession(...args);
+export const saveAndSyncSession = (...args) =>
+  createTranscriptSessionStore().saveAndSyncSession(...args);
+export const saveTranscript = (...args) =>
+  createTranscriptSessionStore().saveTranscript(...args);

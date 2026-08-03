@@ -1,5 +1,5 @@
 import {
-  DEFAULT_GATEWAY_MODEL,
+  resolveDefaultGatewayModel,
   buildGatewayOptions,
   isVaultContextEnabled
 } from "../infrastructure/chat-config.js";
@@ -65,7 +65,7 @@ export function createDefaultCommandRuntime({
 
   return createCommandRuntime({
     config: {
-      defaultGatewayModel: DEFAULT_GATEWAY_MODEL,
+      defaultGatewayModel: resolveDefaultGatewayModel(),
       defaultRagMaxChars: DEFAULT_RAG_MAX_CHARS,
       historyFlowPreview: HISTORY_FLOW_PREVIEW,
       historyFlowSummary: HISTORY_FLOW_SUMMARY,
@@ -102,7 +102,7 @@ export function createDefaultCommandRuntime({
           fallbackSessionId: session.sessionId,
           fallbackSessionStartedAt: session.sessionStartedAt,
           fallbackGatewayUrl: buildGatewayOptions().gatewayUrl,
-          fallbackModel: DEFAULT_GATEWAY_MODEL
+          fallbackModel: resolveDefaultGatewayModel()
         }),
       resetSession: resetChatSession
     }

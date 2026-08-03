@@ -1,6 +1,31 @@
 {
   "version": 1,
+  "active_feature": "arch3-runtime-env-loading",
   "features": [
+    {
+      "slug": "arch3-runtime-env-loading",
+      "title": "ARCH-3: single explicit runtime-env load per process entrypoint",
+      "status": "verified",
+      "workflow": "spec-driven",
+      "size": "large",
+      "sessionId": "spec-runtime-env-loading",
+      "artifacts": {
+        "spec": ".specs/features/arch3-runtime-env-loading/spec.md",
+        "design": ".specs/features/arch3-runtime-env-loading/design.md",
+        "tasks": ".specs/features/arch3-runtime-env-loading/tasks.md",
+        "validation": ".specs/features/arch3-runtime-env-loading/validation.md"
+      },
+      "requirements": 10,
+      "tasks": 7,
+      "source": "audits/implementation/2026-08-02 implementation-audit.md#ARCH-3",
+      "planChallenge": {
+        "gate": "full",
+        "mode": "pre_mortem",
+        "outcome": "revised",
+        "criticalFindings": 1,
+        "highFindings": 1
+      }
+    },
     {
       "slug": "home-config-store",
       "title": "Home config store at ~/.config/massa-ai-vault/config.json",

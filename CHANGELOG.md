@@ -13,6 +13,17 @@ automatically.
 
 ## [Unreleased]
 
+### Changed
+
+- Runtime env/config loading is now explicit instead of emergent from module
+  evaluation order: each process entrypoint calls `loadRuntimeEnv()` exactly
+  once inside its `import.meta.url` guard, no module loads `.env`/home config
+  at import time, and `llm-chat-cli`'s import-time-frozen gateway defaults
+  became per-call resolvers. A new `MASSA_VAULT_ENV_FILE=off` switch disables
+  the `.env` layer (mirroring `MASSA_VAULT_HOME_CONFIG=off`); the `.env`
+  deprecation warning now fires at process start rather than at first module
+  import. (Audit finding ARCH-3.)
+
 ## [1.4.1] - 2026-08-03
 
 ### Fixed

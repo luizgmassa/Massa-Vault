@@ -1,5 +1,5 @@
 import { stderr } from "node:process";
-import { DEFAULT_GATEWAY_MODEL } from "../infrastructure/chat-config.js";
+import { resolveDefaultGatewayModel } from "../infrastructure/chat-config.js";
 import { calculateRemainingFromLimits } from "../domain/usage.js";
 import { getUsageLedger } from "./usage.js";
 
@@ -21,7 +21,7 @@ export function createStatusState({
 
 export function createStatusLine(state) {
   const lane = state.routing?.lane || "unknown";
-  const model = state.routing?.targetModel || DEFAULT_GATEWAY_MODEL;
+  const model = state.routing?.targetModel || resolveDefaultGatewayModel();
   const modelManagerTool = state.routing?.modelManagerTool || "unknown";
   return (
     `[tokens session=${state.sessionUsage.total_tokens}` +
@@ -58,7 +58,7 @@ export function createUsageSummary({
   limitsByModel
 }) {
   const ledger = getUsageLedger();
-  const modelName = routing?.targetModel || DEFAULT_GATEWAY_MODEL;
+  const modelName = routing?.targetModel || resolveDefaultGatewayModel();
   const remaining = calculateRemainingFromLimits({
     limitsByModel,
     modelName,

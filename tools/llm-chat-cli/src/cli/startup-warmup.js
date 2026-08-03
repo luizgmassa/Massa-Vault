@@ -1,6 +1,6 @@
 import {
-  DEFAULT_GATEWAY_MODEL,
-  buildGatewayOptions
+  buildGatewayOptions,
+  resolveDefaultGatewayModel
 } from "../infrastructure/chat-config.js";
 import { streamChatCompletion } from "../../../shared/gateway.js";
 
@@ -63,7 +63,7 @@ export function createStartupWarmup({
   };
 
   const buildWarmupBody = (prompt) => ({
-    model: DEFAULT_GATEWAY_MODEL,
+    model: resolveDefaultGatewayModel(),
     stream: false,
     max_tokens: 1,
     messages: [{ role: "user", content: prompt }]

@@ -1,28 +1,29 @@
 import { after } from "node:test";
 
-// R2 says MASSA_VAULT_HOME_CONFIG=off makes the home-config loader a no-op,
-// which is exactly what keeps the suite machine-independent (R2/T9). Several
-// production modules call loadRuntimeEnv()/applyHomeConfigEnv() at *import
-// time* (router-gateway and mcp-server's runtime-config.js, llm-chat-cli's
-// chat-config.js, notes-automation's commands/runtime.js, tools/cli.js), so
-// disabling the home config from inside a test body is too late -- the
-// module has already read process.env by the time any test() callback runs.
+// Neutralizes both machine-local config stores for the whole test process:
+// MASSA_VAULT_HOME_CONFIG=off makes the home-config loader a no-op (R2 of
+// home-config-store) and MASSA_VAULT_ENV_FILE=off makes loadLocalEnv skip a
+// repo-root .env (R1 of arch3-runtime-env-loading). Together they keep the
+// suite machine-independent: a developer's real ~/.config/massa-ai-vault/
+// config.json or .env can never leak into process.env, whether a production
+// module loads at import time, at its entrypoint, or per call inside a
+// loader (loadVaultCliRuntimeConfig re-loads on every call by design).
 //
-// Importing this module *first*, before the module under test, is what makes
-// the timing work: ES module graphs evaluate sibling static imports in the
-// order they're written, so this file's top-level assignment always runs
-// before a subsequently-imported module's own top-level code does. See
-// tasks.md T9 and design.md's risk table for the background.
-//
-// Without this, a developer machine with a real, populated
-// ~/.config/massa-ai-vault/config.json could inject that machine's actual
-// litellm/router/server/mcp/chat settings into process.env for every test
-// file that (transitively) imports one of those modules, making the suite's
-// outcome depend on whether that file exists -- exactly what R2 forbids.
-const ORIGINAL_VALUE = process.env.MASSA_VAULT_HOME_CONFIG;
+// Import this helper in any test file that (transitively) reaches
+// loadRuntimeEnv()/applyHomeConfigEnv()/loadLocalEnv(). While any production
+// module still calls loadRuntimeEnv() at import time, this file must stay the
+// FIRST import so its assignments run before that module's top-level code
+// (sibling static imports evaluate in written order). Once zero import-time
+// loads remain (arch3-runtime-env-loading T2-T6), the switches gate loaders
+// at call time and the first-import ordering constraint retires.
+const ORIGINAL_HOME_CONFIG = process.env.MASSA_VAULT_HOME_CONFIG;
+const ORIGINAL_ENV_FILE = process.env.MASSA_VAULT_ENV_FILE;
 process.env.MASSA_VAULT_HOME_CONFIG = "off";
+process.env.MASSA_VAULT_ENV_FILE = "off";
 
 after(() => {
-  if (ORIGINAL_VALUE === undefined) delete process.env.MASSA_VAULT_HOME_CONFIG;
-  else process.env.MASSA_VAULT_HOME_CONFIG = ORIGINAL_VALUE;
+  if (ORIGINAL_HOME_CONFIG === undefined) delete process.env.MASSA_VAULT_HOME_CONFIG;
+  else process.env.MASSA_VAULT_HOME_CONFIG = ORIGINAL_HOME_CONFIG;
+  if (ORIGINAL_ENV_FILE === undefined) delete process.env.MASSA_VAULT_ENV_FILE;
+  else process.env.MASSA_VAULT_ENV_FILE = ORIGINAL_ENV_FILE;
 });
