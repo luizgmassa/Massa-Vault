@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-03
+
 ### Fixed
 
 - Running any CLI entrypoint from a subdirectory of this repo now fails fast
