@@ -3,11 +3,12 @@ import {
   getCommandSuggestions,
   resolveCommandSubmission
 } from "../commands.js";
+import { SMART_ROUTER_MODEL_ID } from "../../../shared/smart-router.js";
 
 export function modelStatusFromRouting(routing) {
   const displayCandidates = [routing?.displayModel, routing?.responseModel, routing?.targetModel]
     .map((value) => String(value || "").trim())
-    .filter((value) => value && !value.toLowerCase().startsWith("smart-router"));
+    .filter((value) => value && !value.toLowerCase().startsWith(SMART_ROUTER_MODEL_ID));
   const displayModel = displayCandidates[0] || "";
   const modelLocation = String(routing?.modelLocation || "").trim();
   const modelManagerTool = String(routing?.modelManagerTool || "").trim();

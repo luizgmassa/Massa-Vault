@@ -17,6 +17,7 @@ import {
   writeGeneratedLiteLLMConfig,
   writeModelManagerState
 } from "../../../shared/model-managers.js";
+import { SMART_ROUTER_MODEL_ID } from "../../../shared/smart-router.js";
 import { buildMarkdownTable } from "../domain/info-screen.js";
 
 function cleanText(value) {
@@ -47,7 +48,7 @@ export function routingFromPinnedModelState(state) {
   );
   if (!model) return null;
   return {
-    targetModel: "smart-router",
+    targetModel: SMART_ROUTER_MODEL_ID,
     routedModel: model.alias,
     providerModel: model.providerModel || model.name || model.alias,
     displayModel: model.name || model.alias,
