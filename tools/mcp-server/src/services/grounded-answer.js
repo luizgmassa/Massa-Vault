@@ -1,8 +1,5 @@
-import {
-  DEFAULT_GATEWAY_MODEL,
-  buildGatewayOptions
-} from "../../../llm-chat-cli/src/infrastructure/chat-config.js";
-import { streamChatCompletion } from "../../../llm-chat-cli/src/infrastructure/gateway.js";
+import { resolveChatModel, resolveGatewayOptions } from "../../../shared/vault-cli-config.js";
+import { streamChatCompletion } from "../../../shared/gateway.js";
 
 const GROUNDING_SYSTEM_PROMPT = [
   "You answer questions using only the provided source excerpts.",
@@ -63,9 +60,9 @@ export function createGroundedAnswerService({
   sourceLibrary,
   sourceRetrieval,
   answerSessions,
-  gatewayOptionsProvider = buildGatewayOptions,
+  gatewayOptionsProvider = resolveGatewayOptions,
   chatCompletion = streamChatCompletion,
-  defaultModel = DEFAULT_GATEWAY_MODEL
+  defaultModel = resolveChatModel()
 } = {}) {
   if (!sourceLibrary) throw new Error("sourceLibrary is required");
   if (!sourceRetrieval) throw new Error("sourceRetrieval is required");

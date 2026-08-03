@@ -13,6 +13,52 @@ automatically.
 
 ## [Unreleased]
 
+### Fixed
+
+- Running any CLI entrypoint from a subdirectory of this repo now fails fast
+  with a clear error instead of silently creating stray `config/` and
+  `.automation/` trees there (default paths resolve against the working
+  directory). Running the tools from a directory outside the repo is still
+  allowed.
+- MCP server auth hardening: `/auth/login` now locks out after 5 consecutive
+  failures for 30 seconds (HTTP 429), and the `/auth/*` endpoints enforce the
+  same origin allowlist as `/mcp` (requests without an `Origin` header, such
+  as curl and local tools, are unaffected). The router gateway no longer
+  echoes raw upstream LiteLLM error bodies to clients — detail goes to the
+  server log, callers get a fixed message.
+- MCP server credentials no longer have to live in the tracked config file:
+  `MCP_SERVER_USERNAME` / `MCP_SERVER_PASSWORD` env vars (and the matching
+  `mcp.auth.*` home-config keys, which project into them) now override it, so
+  the repo copy can stay a non-secret default. The credential comparison also
+  pads both sides into a fixed-size buffer before the constant-time check,
+  closing a credential-length timing leak without ever hashing credential
+  material (the prior SHA-256 pre-hash tripped CodeQL's
+  insufficient-password-hash check).
+- The router gateway now refuses to start on a non-loopback bind host
+  (`ROUTER_GATEWAY_HOST=0.0.0.0` and similar), mirroring the MCP server's
+  existing guard. The gateway performs no authentication and forwards
+  `Authorization` headers to LiteLLM verbatim, so one misconfigured env var
+  previously turned it into an unauthenticated network-reachable LLM proxy.
+- A sync request queued while another sync was in flight is no longer silently
+  discarded when that in-flight sync fails without pausing (for example on a
+  transient `git fetch` error). The queued request now runs, and the drain loop
+  is bounded to 10 back-to-back runs to prevent retry storms.
+- The polling watcher fallback (entered automatically when `fs.watch` fails or
+  degrades) now detects file deletions. Previously the poll diff only walked
+  the new snapshot, so a deleted note was never queued and never reached git or
+  Google Drive sync — the remote silently diverged until the next non-delete
+  edit. Native `fs.watch` mode was unaffected.
+- `install.sh` setup validation imported the notes-automation config module
+  from a path that no longer exists (`src/config.js` instead of
+  `src/infrastructure/config.js`), crashing every real (non `--check-only`)
+  bootstrap at the final validation step with `ERR_MODULE_NOT_FOUND`.
+- Conflict quarantine snapshots now use neutral `<file>.local.txt` /
+  `<file>.remote.txt` names with the correct rebase stage mapping. The previous
+  `.ours.txt` / `.theirs.txt` names were inverted under `git rebase`
+  reconciliation (stage 2 holds the remote tip, stage 3 the local commit), so a
+  user trusting the filenames while resolving a quarantined conflict kept the
+  wrong side's content.
+
 ## [1.4.0] - 2026-08-03
 
 ### Added

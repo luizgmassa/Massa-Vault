@@ -8,7 +8,8 @@ export const AUTH_ERROR_CODES = Object.freeze({
   INVALID_ACCESS_TOKEN: "invalid_access_token",
   MISSING_REFRESH_TOKEN: "missing_refresh_token",
   INVALID_REFRESH_TOKEN: "invalid_refresh_token",
-  MISSING_TOKEN: "missing_token"
+  MISSING_TOKEN: "missing_token",
+  TOO_MANY_ATTEMPTS: "too_many_attempts"
 });
 
 export class AuthError extends Error {
@@ -24,10 +25,22 @@ function newToken() {
   return randomBytes(32).toString("base64url");
 }
 
+// Fixed-size buffer used to normalize credential length before a
+// constant-time compare (see `safeEqual`). Generous for any realistic
+// username/password/token while keeping the padding cost trivial.
+const CREDENTIAL_COMPARISON_BYTES = 1024;
+
 function safeEqual(left, right) {
-  const leftBuffer = Buffer.from(String(left || ""));
-  const rightBuffer = Buffer.from(String(right || ""));
-  if (leftBuffer.length !== rightBuffer.length) return false;
+  // Pad both sides into a fixed-size, zero-filled buffer before comparing:
+  // `timingSafeEqual` throws on a length mismatch, and checking lengths
+  // first would leak the credential's length through timing, which matters
+  // once credentials are rotated away from the public defaults. Padding
+  // (instead of hashing) keeps the compare fixed-length without ever
+  // passing credential material into a hash function.
+  const leftBuffer = Buffer.alloc(CREDENTIAL_COMPARISON_BYTES);
+  const rightBuffer = Buffer.alloc(CREDENTIAL_COMPARISON_BYTES);
+  leftBuffer.write(String(left || ""), "utf8");
+  rightBuffer.write(String(right || ""), "utf8");
   return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
@@ -44,11 +57,17 @@ export function createAuthService({
   password = "admin",
   accessTokenTtlMs = 3600_000,
   refreshTokenTtlMs = 86_400_000,
+  maxLoginFailures = 5,
+  loginLockoutMs = 30_000,
   now = () => Date.now()
 } = {}) {
   const sessions = new Map();
   const accessTokens = new Map();
   const refreshTokens = new Map();
+  // Single global counter: the server is localhost-only and single-user, so
+  // per-source tracking would add state without adding protection.
+  let failedLogins = 0;
+  let lockedUntil = 0;
 
   function cleanupExpired() {
     const current = now();
@@ -94,9 +113,18 @@ export function createAuthService({
 
   function login({ username: candidateUsername, password: candidatePassword } = {}) {
     cleanupExpired();
+    if (now() < lockedUntil) {
+      throw new AuthError("Too many failed login attempts", 429, AUTH_ERROR_CODES.TOO_MANY_ATTEMPTS);
+    }
     if (!safeEqual(candidateUsername, username) || !safeEqual(candidatePassword, password)) {
+      failedLogins += 1;
+      if (failedLogins >= maxLoginFailures) {
+        lockedUntil = now() + loginLockoutMs;
+        failedLogins = 0;
+      }
       throw new AuthError("Invalid username or password", 401, AUTH_ERROR_CODES.INVALID_CREDENTIALS);
     }
+    failedLogins = 0;
     return publicSessionPayload(createSession());
   }
 

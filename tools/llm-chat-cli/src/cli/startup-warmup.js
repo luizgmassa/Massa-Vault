@@ -2,7 +2,7 @@ import {
   DEFAULT_GATEWAY_MODEL,
   buildGatewayOptions
 } from "../infrastructure/chat-config.js";
-import { streamChatCompletion } from "../infrastructure/gateway.js";
+import { streamChatCompletion } from "../../../shared/gateway.js";
 
 const GENERAL_SIMPLE_PROMPT = "Summarize today priorities.";
 const CODE_SIMPLE_PROMPT = "debug typescript stacktrace";

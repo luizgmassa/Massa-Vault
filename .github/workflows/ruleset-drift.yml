@@ -1,0 +1,37 @@
+# Detects drift between the live GitHub ruleset and the contract pinned in
+# tests/repo-gates.test.js. The repo side (workflow names, job ids, matrix)
+# is test-enforced, but nothing else can see a manual edit to the ruleset —
+# that drift strands every PR on "Expected — waiting for status" with no
+# failing test anywhere. A red run of this scheduled workflow IS the warning;
+# it is deliberately not a required check and must never be named CI (only
+# the workflow literally named CI may extend the release trigger chain).
+name: Ruleset Drift
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ruleset-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare live required checks against the pinned contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Keep in sync with tests/repo-gates.test.js and the Main -
+          # Restrictions ruleset (id 20187369).
+          expected='["coverage","test (25)"]'
+          live=$(gh api "/repos/${{ github.repository }}/rulesets/20187369" \
+            --jq '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | sort')
+          echo "live:     ${live}"
+          echo "expected: $(echo "${expected}" | jq -c 'sort')"
+          if [ "$(echo "${expected}" | jq -c 'sort')" != "$(echo "${live}" | jq -c '.')" ]; then
+            echo "::error::Live ruleset required checks drifted from the pinned contract. Update the ruleset and tests/repo-gates.test.js together."
+            exit 1
+          fi

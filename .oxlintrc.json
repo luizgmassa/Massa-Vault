@@ -9,5 +9,5 @@
     "restriction": "off",
     "nursery": "off"
   },
-  "ignorePatterns": ["**/node_modules/**"]
+  "ignorePatterns": ["**/node_modules/**", ".ua/**"]
 }

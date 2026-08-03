@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { formatProcessError } from "../domain/process-error.js";
 
 function runGit(args, opts = {}) {
   const cwd = opts.cwd || process.cwd();
@@ -64,7 +65,7 @@ export function gitRebaseOnto(upstreamRef, cwd) {
     const output = runGit(["rebase", "--autostash", upstreamRef], { cwd });
     return { ok: true, output };
   } catch (error) {
-    const output = String(error?.stderr || error?.message || "").trim();
+    const output = formatProcessError(error);
     const conflict = isRebaseConflictOutput(output);
     return { ok: false, output, conflict };
   }
@@ -153,7 +154,7 @@ export function gitPush(remote, branch, cwd) {
     const out = runGit(["push", remote, branch], { cwd });
     return { ok: true, output: out };
   } catch (error) {
-    const message = String(error?.stderr || error?.message || "").trim();
+    const message = formatProcessError(error);
     const nonFastForward =
       /non-fast-forward|fetch first|rejected|failed to push/i.test(message);
     return { ok: false, output: message, nonFastForward };
@@ -237,7 +238,7 @@ export function gitRemoteSetUrl(remote, url, cwd) {
   try {
     runGit(["remote", "add", remote, url], { cwd });
   } catch (error) {
-    const message = String(error?.stderr || error?.message || "");
+    const message = formatProcessError(error);
     if (/already exists/i.test(message)) {
       runGit(["remote", "set-url", remote, url], { cwd });
       return;

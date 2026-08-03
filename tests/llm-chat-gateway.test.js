@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { streamChatCompletion } from "../tools/llm-chat-cli/src/infrastructure/gateway.js";
+import { streamChatCompletion } from "../tools/shared/gateway.js";
 
 test("streamChatCompletion includes Authorization header when apiKey is set", async () => {
   const originalFetch = globalThis.fetch;

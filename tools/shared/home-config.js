@@ -24,6 +24,8 @@ export const HOME_CONFIG_ENV_MAP = Object.freeze(
     ["mcp.config_path", "MCP_SERVER_CONFIG_PATH"],
     ["mcp.host", "MCP_SERVER_HOST"],
     ["mcp.port", "MCP_SERVER_PORT"],
+    ["mcp.auth.username", "MCP_SERVER_USERNAME"],
+    ["mcp.auth.password", "MCP_SERVER_PASSWORD"],
     ["chat.gateway_url", "MASSA_VAULT_CHAT_GATEWAY_URL"],
     ["chat.model", "MASSA_VAULT_CHAT_MODEL"],
     ["chat.rag_enabled", "MASSA_VAULT_CHAT_RAG"],

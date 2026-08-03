@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { matchesGlob } from "../domain/globs.js";
+import { matchesGlob } from "../../../shared/globs.js";
 import { isProtectedArtifactPath } from "../domain/protected-artifacts.js";
 
 function toPosix(filePath) {
@@ -94,6 +94,15 @@ export function pollForChanges(service) {
     const nextSnapshot = captureTrackedSnapshot(service);
     for (const [relativePath, signature] of nextSnapshot.entries()) {
       if (service.trackedSnapshot.get(relativePath) !== signature) {
+        service.queue(relativePath);
+      }
+    }
+    // A deleted file exists only as a key missing from the new snapshot, so it
+    // needs this reverse pass; queued deletions stage correctly because commit
+    // staging is per-path (`git add -- <path>` records removals).
+    // Test: node --test tests/notes-automation-service.test.js ("falls back to polling mode...")
+    for (const relativePath of service.trackedSnapshot.keys()) {
+      if (!nextSnapshot.has(relativePath)) {
         service.queue(relativePath);
       }
     }

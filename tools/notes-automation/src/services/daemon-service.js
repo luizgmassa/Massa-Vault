@@ -1,6 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { matchesGlob } from "../domain/globs.js";
+import { matchesGlob } from "../../../shared/globs.js";
 import { createSyncState } from "../domain/sync-state.js";
 import { loadConfig } from "../infrastructure/config.js";
 import {

@@ -101,18 +101,35 @@ test("loadGatewayRuntimeConfig honors overrides for port/host/policyPath/liteLLM
   withEnv(
     {
       ROUTER_GATEWAY_PORT: "5555",
-      ROUTER_GATEWAY_HOST: "0.0.0.0",
+      ROUTER_GATEWAY_HOST: "localhost",
       ROUTER_POLICY_PATH: "config/custom-router-gateway.json",
       ROUTER_LITELLM_BASE_URL: "http://127.0.0.1:9999"
     },
     () => {
       const config = loadGatewayRuntimeConfig();
       assert.equal(config.port, 5555);
-      assert.equal(config.host, "0.0.0.0");
+      assert.equal(config.host, "localhost");
       assert.equal(config.policyPath, "config/custom-router-gateway.json");
       assert.equal(config.liteLLMBaseUrl, "http://127.0.0.1:9999");
     }
   );
+});
+
+test("loadGatewayRuntimeConfig rejects a non-loopback ROUTER_GATEWAY_HOST", () => {
+  // The gateway performs no authentication and forwards Authorization headers
+  // upstream, so a non-loopback bind must fail fast (mirrors mcp-server's guard).
+  withEnv({ ROUTER_GATEWAY_HOST: "0.0.0.0" }, () => {
+    assert.throws(() => loadGatewayRuntimeConfig(), /must bind to localhost/i);
+  });
+});
+
+test("loadGatewayRuntimeConfig accepts loopback host variants", () => {
+  withEnv({ ROUTER_GATEWAY_HOST: "::1" }, () => {
+    assert.equal(loadGatewayRuntimeConfig().host, "::1");
+  });
+  withEnv({ ROUTER_GATEWAY_HOST: "localhost" }, () => {
+    assert.equal(loadGatewayRuntimeConfig().host, "localhost");
+  });
 });
 
 test("loadGatewayRuntimeConfig honors LITELLM_CONFIG_PATH override for liteLLMConfigPath", () => {

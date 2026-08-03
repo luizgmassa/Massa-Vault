@@ -1,3 +1,5 @@
+import { SMART_ROUTER_MODEL_ID } from "./smart-router.js";
+
 const ROUTING_HEADER_MAP = Object.freeze({
   lane: "x-router-lane",
   confidence: "x-router-confidence",
@@ -27,7 +29,7 @@ const ROUTING_TRANSCRIPT_MAP = Object.freeze({
   modelManagerTool: "router_model_manager_tool"
 });
 const ROUTING_DEFAULT_VALUE = "unknown";
-const SMART_ROUTER_PREFIX = "smart-router";
+const SMART_ROUTER_PREFIX = SMART_ROUTER_MODEL_ID;
 
 function getHeaderValue(headers, key) {
   if (!headers) return null;

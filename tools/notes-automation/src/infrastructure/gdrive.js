@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { formatProcessError } from "../domain/process-error.js";
 import {
   ALLOWED_GDRIVE_RESYNC_MODE_SET,
   DEFAULT_GDRIVE_MODE,
@@ -168,7 +169,7 @@ function detectBisyncFailureType(output) {
 }
 
 function extractFailureDetails(error) {
-  const details = String(error?.stderr || error?.message || error);
+  const details = formatProcessError(error);
   const status = Number.isInteger(error?.status) ? Number(error.status) : null;
   return { details, status };
 }
@@ -221,7 +222,7 @@ export function cleanupGoogleDriveProtectedArtifacts(
       ok: false,
       args,
       dryRun,
-      error: String(error?.stderr || error?.message || error)
+      error: formatProcessError(error)
     };
   }
 }
@@ -247,7 +248,7 @@ export function prepareGoogleDriveSync(
   } catch (error) {
     return {
       ok: false,
-      error: `Failed to inspect rclone remotes: ${String(error?.stderr || error?.message || error)}`
+      error: `Failed to inspect rclone remotes: ${formatProcessError(error)}`
     };
   }
 
@@ -313,7 +314,7 @@ export function checkGoogleDriveRemote(
   } catch (error) {
     return {
       ok: false,
-      error: `Failed to inspect rclone remotes: ${String(error?.stderr || error?.message || error)}`
+      error: `Failed to inspect rclone remotes: ${formatProcessError(error)}`
     };
   }
 
@@ -335,7 +336,7 @@ export function checkGoogleDriveRemote(
       ok: false,
       remotePath: pathValidation.remotePath,
       remotes,
-      error: String(error?.stderr || error?.message || error)
+      error: formatProcessError(error)
     };
   }
 }

@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   ensureSearchIndex,
   searchIndex
-} from "../tools/llm-chat-cli/src/infrastructure/search.js";
+} from "../tools/shared/search.js";
 
 function vectorForText(text) {
   const value = String(text || "").toLowerCase();

@@ -157,6 +157,7 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
   const vaultPath = path.join(tempDir, "vault");
   fs.mkdirSync(path.join(vaultPath, "notes"), { recursive: true });
   fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello", "utf8");
+  fs.writeFileSync(path.join(vaultPath, "notes", "gone.md"), "delete me", "utf8");
   const configPath = createConfig(tempDir, vaultPath);
 
   const originalWatch = fs.watch;
@@ -180,6 +181,14 @@ test("falls back to polling mode when fs.watch throws EMFILE", async () => {
     fs.writeFileSync(path.join(vaultPath, "notes", "today.md"), "hello, this content is longer now", "utf8");
     service.pollForChanges();
     assert.equal(service.changedFiles.has("notes/today.md"), true);
+
+    // Deletions are only visible as a key missing from the new snapshot, so the
+    // poll diff needs a reverse pass over the previous snapshot; without it a
+    // removed note never reaches git or Drive sync in polling mode.
+    assert.equal(service.changedFiles.has("notes/gone.md"), false);
+    fs.rmSync(path.join(vaultPath, "notes", "gone.md"));
+    service.pollForChanges();
+    assert.equal(service.changedFiles.has("notes/gone.md"), true);
   } finally {
     await service.shutdown();
     fs.watch = originalWatch;
@@ -205,6 +214,53 @@ test("runSync serializes concurrent requests and replays queued reason", async (
   ]);
 
   assert.deepEqual(reasons, ["manual-a", "manual-b"]);
+});
+
+test("runSync still executes a queued reason after a non-pausing failure", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
+  const vaultPath = path.join(tempDir, "vault");
+  fs.mkdirSync(vaultPath, { recursive: true });
+  const configPath = createConfig(tempDir, vaultPath);
+  const service = new NotesAutomationService(configPath);
+
+  const reasons = [];
+  service.executeSync = (reason) => {
+    reasons.push(reason);
+    // First run fails without pausing (e.g. a transient git fetch error); the
+    // request queued mid-flight is an explicit ask and must still execute.
+    return reasons.length === 1 ? { ok: false, error: "transient fetch failure" } : { ok: true };
+  };
+
+  const [first, second] = await Promise.all([
+    service.runSync({ reason: "manual-a" }),
+    service.runSync({ reason: "manual-b" })
+  ]);
+
+  assert.deepEqual(reasons, ["manual-a", "manual-b"]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+});
+
+test("runSync bounds the queued-reason drain loop", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
+  const vaultPath = path.join(tempDir, "vault");
+  fs.mkdirSync(vaultPath, { recursive: true });
+  const configPath = createConfig(tempDir, vaultPath);
+  const service = new NotesAutomationService(configPath);
+
+  let runs = 0;
+  service.executeSync = () => {
+    runs += 1;
+    // Re-queue on every run: without the drain cap this loop never terminates.
+    service.queuedSyncReason = "again";
+    return { ok: true };
+  };
+
+  const result = await service.runSync({ reason: "manual" });
+
+  assert.equal(runs, 10);
+  assert.equal(result.ok, true);
+  assert.equal(service.queuedSyncReason, null);
 });
 
 test("gdrive lockout followed by auto-resync success does not pause sync", () => {
@@ -636,19 +692,19 @@ test("pullGitInbound conflict failure pauses and records conflicted files", () =
     assert.match(String(state.alert || ""), /Git conflict detected/i);
 
     // TST-13: pin the quarantine stage mapping so a refactor that swaps git conflict
-    // stages 2/3 is caught. NOTE (found while writing this test, not fixed per scope):
-    // pullGitInbound reconciles via `git rebase`, and under rebase git's ours/theirs
-    // are inverted relative to a merge -- stage 2 ("ours") is HEAD, which during a
-    // rebase is the upstream/remote tip, and stage 3 ("theirs") is the commit being
-    // replayed, i.e. the local edit. So quarantineGitConflicts' oursPath actually holds
-    // the remote content and theirsPath actually holds the local content -- the reverse
-    // of what the field names suggest to a user resolving conflicts by hand. This assertion
-    // pins today's verified, real behavior.
+    // stages 2/3 is caught. pullGitInbound reconciles via `git rebase`, and under
+    // rebase git's stage roles invert relative to a merge -- stage 2 ("ours") is the
+    // upstream/remote tip and stage 3 ("theirs") is the commit being replayed, i.e.
+    // the local edit. quarantineGitConflicts therefore snapshots stage 3 as
+    // `<file>.local.txt` and stage 2 as `<file>.remote.txt`, so the names match what
+    // a user resolving conflicts by hand expects.
     // (gitReadStageFile trims trailing whitespace from `git show`, so these have no
     // trailing newline even though the working files were written with one.)
     const conflict = state.sync.conflicts[0];
-    assert.equal(fs.readFileSync(conflict.oursPath, "utf8"), "remote-change");
-    assert.equal(fs.readFileSync(conflict.theirsPath, "utf8"), "local-change");
+    assert.match(String(conflict.localPath || ""), /\.local\.txt$/);
+    assert.match(String(conflict.remotePath || ""), /\.remote\.txt$/);
+    assert.equal(fs.readFileSync(conflict.localPath, "utf8"), "local-change");
+    assert.equal(fs.readFileSync(conflict.remotePath, "utf8"), "remote-change");
     assert.equal(fs.readFileSync(conflict.basePath, "utf8"), "base");
   });
 });

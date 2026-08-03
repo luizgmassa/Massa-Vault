@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { ROUTER_GATEWAY_REQUIRED_MODEL } from "../tools/router-gateway/src/infrastructure/constants.js";
-import { DEFAULT_CHAT_MODEL } from "../tools/llm-chat-cli/src/infrastructure/vault-cli-config.js";
+import { DEFAULT_CHAT_MODEL } from "../tools/shared/vault-cli-config.js";
 import { generateLiteLLMConfigFromModelManagerState } from "../tools/shared/model-managers.js";
+import { SMART_ROUTER_MODEL_ID, smartRouterLaneAlias } from "../tools/shared/smart-router.js";
+import { classifyRequest, loadPolicy } from "../tools/router-gateway/src/domain/classifier.js";
 
 function loadRouterGatewayPolicy() {
   const configPath = path.resolve("config/router-gateway.json");
@@ -47,6 +50,60 @@ test("every router-gateway.json lane model appears in the generated LiteLLM alia
       generated.aliases.includes(laneModel),
       `expected generated LiteLLM aliases to include lane model "${laneModel}", got: ${generated.aliases.join(", ")}`
     );
+  }
+});
+
+test("every contract site derives from the canonical SMART_ROUTER_MODEL_ID", () => {
+  assert.equal(ROUTER_GATEWAY_REQUIRED_MODEL, SMART_ROUTER_MODEL_ID);
+  assert.equal(DEFAULT_CHAT_MODEL, SMART_ROUTER_MODEL_ID);
+
+  // config/router-gateway.json cannot import the constant, so its literals are
+  // pinned here against the canonical lane aliases.
+  const policy = loadRouterGatewayPolicy();
+  const laneModels = Object.fromEntries(
+    Object.entries(policy.lanes).map(([lane, config]) => [lane, config.model])
+  );
+  assert.deepEqual(laneModels, {
+    code: smartRouterLaneAlias("code"),
+    multimodal: smartRouterLaneAlias("multimodal"),
+    general: smartRouterLaneAlias("general")
+  });
+});
+
+test("classifier falls back to the canonical general alias when the chosen lane has no model", () => {
+  const policy = {
+    confidenceFloor: 0.55,
+    lanes: {
+      code: { phrases: ["alpha", "beta", "gamma"] },
+      multimodal: { phrases: [] },
+      general: { phrases: [] }
+    }
+  };
+  const body = { messages: [{ role: "user", content: "alpha beta gamma" }] };
+
+  const result = classifyRequest(body, policy);
+
+  assert.equal(result.lane, "code");
+  assert.equal(result.targetModel, smartRouterLaneAlias("general"));
+});
+
+test("loadPolicy merges a partial lanes document over the canonical defaults", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "smart-router-policy-"));
+  try {
+    const policyPath = path.join(tempDir, "router-gateway.json");
+    fs.writeFileSync(
+      policyPath,
+      JSON.stringify({ version: 1, lanes: { code: { model: "custom-code", phrases: ["x"] } } }),
+      "utf8"
+    );
+
+    const policy = loadPolicy(policyPath);
+
+    assert.equal(policy.lanes.code.model, "custom-code");
+    assert.equal(policy.lanes.multimodal.model, smartRouterLaneAlias("multimodal"));
+    assert.equal(policy.lanes.general.model, smartRouterLaneAlias("general"));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

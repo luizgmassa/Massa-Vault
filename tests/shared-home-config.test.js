@@ -79,7 +79,12 @@ test("projectHomeConfigEnv projects every mapped leaf to its env key", () => {
       pid_path: "/server/pid",
       log_dir: "/server/logs"
     },
-    mcp: { config_path: "/mcp/config.json", host: "127.0.0.1", port: 4200 },
+    mcp: {
+      config_path: "/mcp/config.json",
+      host: "127.0.0.1",
+      port: 4200,
+      auth: { username: "mcp-user", password: "mcp-pass" }
+    },
     chat: {
       gateway_url: "http://127.0.0.1:4100",
       model: "smart-router",
@@ -103,6 +108,8 @@ test("projectHomeConfigEnv projects every mapped leaf to its env key", () => {
   assert.equal(projected.ROUTER_GATEWAY_PORT, "4100");
   assert.equal(projected.ROUTER_GATEWAY_REQUIRE_SMART_ROUTER_MODEL, "false");
   assert.equal(projected.MASSA_VAULT_CHAT_SYSTEM_PROMPT, "be terse");
+  assert.equal(projected.MCP_SERVER_USERNAME, "mcp-user");
+  assert.equal(projected.MCP_SERVER_PASSWORD, "mcp-pass");
 });
 
 test("projectHomeConfigEnv treats null, undefined, and empty string as absent", () => {

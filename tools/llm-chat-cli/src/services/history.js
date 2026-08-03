@@ -5,7 +5,7 @@ import {
   buildGatewayOptions,
   resolveVaultPath
 } from "../infrastructure/chat-config.js";
-import { streamChatCompletion } from "../infrastructure/gateway.js";
+import { streamChatCompletion } from "../../../shared/gateway.js";
 import {
   listTranscriptDates,
   listTranscriptsForDate,

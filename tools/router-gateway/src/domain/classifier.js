@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { extractUserText, hasMultimodalPayload } from "./extract-text.js";
+import { smartRouterLaneAlias } from "../../../shared/smart-router.js";
 
 const DEFAULT_POLICY = {
   version: 1,
   confidenceFloor: 0.55,
   lanes: {
-    code: { model: "smart-router-code", phrases: [] },
-    multimodal: { model: "smart-router-multimodal", phrases: [] },
-    general: { model: "smart-router-general", phrases: [] }
+    code: { model: smartRouterLaneAlias("code"), phrases: [] },
+    multimodal: { model: smartRouterLaneAlias("multimodal"), phrases: [] },
+    general: { model: smartRouterLaneAlias("general"), phrases: [] }
   }
 };
 
@@ -72,7 +73,7 @@ export function classifyRequest(body, policy) {
   const bestScore = sorted[0][1];
 
   const lane = bestScore < Number(policy.confidenceFloor || 0.55) ? "general" : bestLane;
-  const targetModel = policy.lanes?.[lane]?.model || "smart-router-general";
+  const targetModel = policy.lanes?.[lane]?.model || smartRouterLaneAlias("general");
 
   return {
     lane,

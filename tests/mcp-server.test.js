@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ensureSearchIndex, searchIndex } from "../tools/llm-chat-cli/src/infrastructure/search.js";
+import { ensureSearchIndex, searchIndex } from "../tools/shared/search.js";
 import { createMcpServices } from "../tools/mcp-server/src/mcp.js";
 import { createMcpHttpServer } from "../tools/mcp-server/src/server.js";
 import { createAuthService } from "../tools/mcp-server/src/services/auth.js";
@@ -146,6 +146,34 @@ test("auth service logs in, refreshes, expires, and logs out without console out
     console.log = originalLog;
     console.error = originalError;
   }
+});
+
+test("auth service locks out login after repeated failures and recovers after the window", () => {
+  let currentTime = 1_000_000;
+  const auth = createAuthService({
+    username: "admin",
+    password: "correct-password",
+    maxLoginFailures: 3,
+    loginLockoutMs: 30_000,
+    now: () => currentTime
+  });
+
+  for (let i = 0; i < 3; i += 1) {
+    assert.throws(
+      () => auth.login({ username: "admin", password: "wrong" }),
+      (error) => error.code === "invalid_credentials"
+    );
+  }
+
+  // Inside the lockout window even correct credentials are rejected.
+  assert.throws(
+    () => auth.login({ username: "admin", password: "correct-password" }),
+    (error) => error.code === "too_many_attempts" && error.statusCode === 429
+  );
+
+  currentTime += 30_001;
+  const session = auth.login({ username: "admin", password: "correct-password" });
+  assert.ok(session.access_token);
 });
 
 test("source library enforces vault-relative markdown paths and CRUD semantics", async () => {
@@ -328,6 +356,17 @@ test("MCP HTTP server protects /mcp and exposes source tools/resources", async (
         body: "{}"
       });
       assert.equal(invalidOrigin.status, 403);
+
+      // The credential-handling endpoints enforce the same origin policy as /mcp.
+      const invalidOriginLogin = await fetch(`${baseUrl}/auth/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://evil.example"
+        },
+        body: JSON.stringify({ username: "admin", password: "admin" })
+      });
+      assert.equal(invalidOriginLogin.status, 403);
 
       const client = new Client({ name: "mcp-test-client", version: "1.0.0" });
       const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {

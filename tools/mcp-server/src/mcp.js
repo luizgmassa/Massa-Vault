@@ -1,6 +1,6 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
-import { DEFAULT_CONFIG_PATH } from "../../llm-chat-cli/src/infrastructure/chat-config.js";
+import { resolveNotesConfigPath } from "../../shared/vault-cli-config.js";
 import { loadConfig } from "../../notes-automation/src/infrastructure/config.js";
 import { createAnswerSessionStore } from "./services/answer-sessions.js";
 import { createAuthService } from "./services/auth.js";
@@ -52,7 +52,7 @@ function wrapTool(handler) {
 
 export function createMcpServices({
   runtime,
-  notesConfigPath = DEFAULT_CONFIG_PATH,
+  notesConfigPath = resolveNotesConfigPath(),
   configLoader = loadConfig,
   searchDefaultsProvider,
   ensureIndex,

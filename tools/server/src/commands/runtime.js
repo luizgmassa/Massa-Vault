@@ -32,9 +32,9 @@ function parseArgs(argv) {
   return { command, json, selectedServices };
 }
 
-function createRuntime(selectedServices = []) {
+function createRuntime(selectedServices = [], createSupervisor = (config) => new ServerSupervisor(config)) {
   const config = filterServerConfigServices(loadServerConfig(), selectedServices);
-  return new ServerSupervisor(config);
+  return createSupervisor(config);
 }
 
 function printStatus(status, { json = false } = {}) {
@@ -49,9 +49,13 @@ function printStatus(status, { json = false } = {}) {
   }
 }
 
-export async function main(argv = process.argv.slice(2)) {
+// `createSupervisor` is the injection seam for tests (the repo's usual
+// { xImpl = x } convention): start/restart spawn a real detached process, so
+// exercising the dispatch requires substituting the supervisor, not patching
+// its prototype.
+export async function main(argv = process.argv.slice(2), { createSupervisor } = {}) {
   const { command, json, selectedServices } = parseArgs(argv);
-  const supervisor = createRuntime(selectedServices);
+  const supervisor = createRuntime(selectedServices, createSupervisor);
 
   switch (command) {
     case "run":

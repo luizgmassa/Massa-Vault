@@ -1,4 +1,4 @@
-# Massa Vault System (v1.2)
+# Massa Vault System
 
 Automation system for a personal Obsidian knowledge base with:
 
@@ -71,6 +71,7 @@ npm run vault -- sync
 npm run vault -- sync status
 npm run vault -- sync conflicts
 npm run vault -- sync resolve --done
+npm run vault -- flush-push   # ask the running daemon to run a sync now
 ```
 
 ### `setup`
@@ -420,12 +421,13 @@ npm run security:scan:all
 npm test
 ```
 
-Covers:
+Covers, among others:
 
-- semantic lane routing
-- gateway forwarding contract
-- glob matching rules
-- sync strategy config parsing
+- semantic lane routing and the gateway forwarding contract
+- the sync pipeline: conflict quarantine, polling watcher, Google Drive recovery
+- home config store, runtime env precedence, and per-tool config loading
+- MCP server auth, origin policy, and grounded-source retrieval
+- repo gates: workflow names, coverage floors, changelog discipline
 
 ## Notes
 

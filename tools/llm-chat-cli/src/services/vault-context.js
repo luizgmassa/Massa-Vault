@@ -4,7 +4,7 @@ import {
   ensureSearchIndex,
   getSearchDefaults,
   searchIndex
-} from "../infrastructure/search.js";
+} from "../../../shared/search.js";
 import {
   DEFAULT_RAG_CHUNK_LIMIT,
   DEFAULT_RAG_MAX_CHARS,

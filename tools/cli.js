@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { assertRepoRootCwd } from "./shared/repo-root.js";
 import { pathToFileURL } from "node:url";
 import {
   DEFAULT_GDRIVE_MODE,
@@ -61,7 +62,7 @@ const USAGE_LINES = Object.freeze([
   "  npm run vault -- config path|migrate [--force] [--dry-run]",
   "  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync",
   "  # or",
-  "  npm run vault -- install|configure|chat|gdrive|sync|config|start|stop|status|restart|resume|flush-sync"
+  "  npm run vault -- install|configure|chat|gdrive|sync|config|start|stop|status|restart|resume|flush-sync|flush-push"
 ]);
 
 function runTool(command, args = []) {
@@ -486,6 +487,7 @@ export {
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  assertRepoRootCwd();
   main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[vault-cli] ${message}`);

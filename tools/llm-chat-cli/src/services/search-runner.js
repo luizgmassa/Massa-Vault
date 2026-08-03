@@ -3,7 +3,7 @@ import {
   DEFAULT_CONFIG_PATH,
   resolveVaultPath
 } from "../infrastructure/chat-config.js";
-import { ensureSearchIndex, getSearchDefaults, searchIndex } from "../infrastructure/search.js";
+import { ensureSearchIndex, getSearchDefaults, searchIndex } from "../../../shared/search.js";
 
 export async function runSearch({ query, includeGlobs = [] }) {
   const vaultPath = resolveVaultPath();

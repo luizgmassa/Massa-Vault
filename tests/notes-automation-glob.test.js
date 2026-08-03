@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchesGlob } from "../tools/notes-automation/src/domain/globs.js";
+import { matchesGlob } from "../tools/shared/globs.js";
 
 test("matches markdown files", () => {
   assert.equal(matchesGlob("notes/today.md", ["**/*.md"]), true);

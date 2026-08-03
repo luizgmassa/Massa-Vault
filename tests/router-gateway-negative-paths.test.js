@@ -100,8 +100,13 @@ test("router-gateway returns 404 for an unknown path", async () => {
   });
 });
 
-test("router-gateway passes through an upstream 500 error envelope for non-streaming requests", async () => {
+test("router-gateway returns a fixed message for an upstream 500 without echoing the body", async () => {
+  // Upstream error bodies can carry LiteLLM/model-config internals; the client
+  // gets a constant message and the detail goes to the server log only.
   const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const consoleErrors = [];
+  console.error = (...args) => consoleErrors.push(args.join(" "));
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ error: { message: "upstream exploded" } }), {
       status: 500,
@@ -121,11 +126,18 @@ test("router-gateway passes through an upstream 500 error envelope for non-strea
       assert.equal(response.status, 500);
       const payload = await response.json();
       assert.equal(payload.error.message, "Upstream LiteLLM call failed");
-      assert.match(payload.error.upstream, /upstream exploded/);
+      assert.equal(payload.error.upstream, undefined);
+      assert.equal(JSON.stringify(payload).includes("upstream exploded"), false);
       assert.ok(payload.error.routing);
     });
+    assert.equal(
+      consoleErrors.some((entry) => entry.includes("upstream exploded")),
+      true,
+      "expected the upstream body to be logged server-side"
+    );
   } finally {
     globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 });
 
