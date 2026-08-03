@@ -26,8 +26,6 @@ import { loadRuntimeEnv } from "./shared/runtime-env.js";
 import { buildHomeConfigDocument, resolveHomeConfigPath } from "./shared/home-config.js";
 import { parseEnvContent } from "./shared/env.js";
 
-loadRuntimeEnv();
-
 const CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 const NOTES_CLI = path.resolve("tools/notes-automation/src/cli.js");
 const CHAT_CLI = path.resolve("tools/llm-chat-cli/src/cli.js");
@@ -488,6 +486,10 @@ export {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   assertRepoRootCwd();
+  // The one env load for this process (ARCH-3). Subcommands spawned from
+  // here re-load in their own guards; first-writer-wins keeps the inherited
+  // env idempotent.
+  loadRuntimeEnv();
   main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[vault-cli] ${message}`);

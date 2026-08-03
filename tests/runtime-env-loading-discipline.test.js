@@ -22,7 +22,6 @@ const REPO_ROOT = path.resolve(".");
 // T2 router-gateway, T3 mcp-server, T4 notes-automation, T5 tools/cli.js,
 // T6 llm-chat-cli chat-config. Must reach [] by the end of the feature.
 const IMPORT_TIME_LOAD_ALLOWLIST = [
-  "tools/cli.js",
   "tools/llm-chat-cli/src/infrastructure/chat-config.js"
 ];
 
@@ -37,7 +36,8 @@ const IMPORT_SAFE_MODULES = [
   "tools/mcp-server/src/infrastructure/runtime-config.js",
   "tools/mcp-server/src/server.js",
   "tools/notes-automation/src/commands/runtime.js",
-  "tools/notes-automation/src/cli.js"
+  "tools/notes-automation/src/cli.js",
+  "tools/cli.js"
 ];
 
 function listJsFiles(dir) {
