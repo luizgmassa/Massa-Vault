@@ -15,6 +15,11 @@ automatically.
 
 ### Fixed
 
+- The router gateway now refuses to start on a non-loopback bind host
+  (`ROUTER_GATEWAY_HOST=0.0.0.0` and similar), mirroring the MCP server's
+  existing guard. The gateway performs no authentication and forwards
+  `Authorization` headers to LiteLLM verbatim, so one misconfigured env var
+  previously turned it into an unauthenticated network-reachable LLM proxy.
 - A sync request queued while another sync was in flight is no longer silently
   discarded when that in-flight sync fails without pausing (for example on a
   transient `git fetch` error). The queued request now runs, and the drain loop
