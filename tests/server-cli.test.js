@@ -5,19 +5,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { main } from "../tools/server/src/commands/runtime.js";
-import { ServerSupervisor } from "../tools/server/src/services/supervisor.js";
 
-// tools/server/src/commands/runtime.js always constructs a real
-// ServerSupervisor internally (createRuntime -> new ServerSupervisor(config)),
-// with no injection seam on `main` itself. Adding one would be a production
-// change outside this task's write set. `start`/`restart` unconditionally
-// spawn a *real detached* child process (the supervisor re-exec), which would
-// leak an orphaned, permanently-alive process out of a plain in-process call.
-// So collaborators are stubbed the only place available without touching
-// production code: ServerSupervisor.prototype methods, restored in `finally`.
-// This still exercises the real thing under test - the argv -> command ->
-// supervisor-method dispatch in commands/runtime.js - without ever letting a
-// stubbed method actually spawn, probe health, or block on a signal handler.
+// `start`/`restart` spawn a *real detached* child process (the supervisor
+// re-exec), which would leak an orphaned, permanently-alive process out of a
+// plain in-process call. So the tests inject a stub supervisor through main's
+// `createSupervisor` seam: the argv -> command -> supervisor-method dispatch
+// under test runs for real, but no stub ever spawns, probes health, or blocks
+// on a signal handler. Stub methods are bound to `{ config }` so `this.config`
+// sees the filtered service list, like the real supervisor would.
 
 async function withTempDir(run) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-cli-"));
@@ -47,18 +42,20 @@ function writeServerConfig(tempDir, servicesOverride) {
   return configPath;
 }
 
-async function withPatchedSupervisor(patches, run) {
-  const originals = {};
-  for (const [name, impl] of Object.entries(patches)) {
-    originals[name] = ServerSupervisor.prototype[name];
-    ServerSupervisor.prototype[name] = impl;
-  }
+let injectedCreateSupervisor = null;
+
+async function withStubbedSupervisor(stubMethods, run) {
+  injectedCreateSupervisor = (config) => {
+    const supervisor = { config };
+    for (const [name, impl] of Object.entries(stubMethods)) {
+      supervisor[name] = impl.bind(supervisor);
+    }
+    return supervisor;
+  };
   try {
     return await run();
   } finally {
-    for (const [name, original] of Object.entries(originals)) {
-      ServerSupervisor.prototype[name] = original;
-    }
+    injectedCreateSupervisor = null;
   }
 }
 
@@ -87,7 +84,10 @@ async function callMain(argv, configPath) {
   const originalEnv = process.env.MASSA_VAULT_SERVER_CONFIG_PATH;
   process.env.MASSA_VAULT_SERVER_CONFIG_PATH = configPath;
   try {
-    return await main(argv);
+    return await main(
+      argv,
+      injectedCreateSupervisor ? { createSupervisor: injectedCreateSupervisor } : {}
+    );
   } finally {
     if (originalEnv === undefined) delete process.env.MASSA_VAULT_SERVER_CONFIG_PATH;
     else process.env.MASSA_VAULT_SERVER_CONFIG_PATH = originalEnv;
@@ -99,7 +99,7 @@ async function callMain(argv, configPath) {
 test("parseArgs: no argv defaults command to status", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       { status: async function () { return { running: false, pid: null, services: [] }; } },
       () =>
         withCapturedIo(async ({ logs }) => {
@@ -113,7 +113,7 @@ test("parseArgs: no argv defaults command to status", async () => {
 test("parseArgs: --only <name> threads a single enabled service through to the supervisor's config", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         status: async function () {
           return {
@@ -136,7 +136,7 @@ test("parseArgs: --only <name> threads a single enabled service through to the s
 test("parseArgs: --only=<name> form threads a single enabled service through to the supervisor's config", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         status: async function () {
           return {
@@ -159,7 +159,7 @@ test("parseArgs: --only=<name> form threads a single enabled service through to 
 test("parseArgs: without --only, both originally-enabled services stay enabled", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         status: async function () {
           return {
@@ -197,7 +197,7 @@ test("command 'run' dispatches to supervisor.runForeground", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
     const calls = [];
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       { runForeground: async function () { calls.push("runForeground"); } },
       () =>
         withCapturedIo(async () => {
@@ -212,7 +212,7 @@ test("command 'start' dispatches to supervisor.startDetached and reports a fresh
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
     const calls = [];
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         startDetached: async function (options) {
           calls.push({ method: "startDetached", options });
@@ -233,7 +233,7 @@ test("command 'start' dispatches to supervisor.startDetached and reports a fresh
 test("command 'start' reports already-running when supervisor.startDetached says so", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         startDetached: async function () {
           return { alreadyRunning: true, pid: 555 };
@@ -252,7 +252,7 @@ test("command 'stop' dispatches to supervisor.stopDetached and reports the signa
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
     const calls = [];
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         stopDetached: async function () {
           calls.push("stopDetached");
@@ -272,7 +272,7 @@ test("command 'stop' dispatches to supervisor.stopDetached and reports the signa
 test("command 'stop' reports not-running when supervisor.stopDetached says so", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       { stopDetached: async function () { return { stopped: false, pid: null }; } },
       () =>
         withCapturedIo(async ({ logs }) => {
@@ -287,7 +287,7 @@ test("command 'restart' dispatches stopDetached then startDetached, in that orde
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
     const calls = [];
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         stopDetached: async function () {
           calls.push("stop");
@@ -314,7 +314,7 @@ test("command 'restart' dispatches stopDetached then startDetached, in that orde
 test("command 'status' without --json prints the human-readable service summary", async () => {
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       {
         status: async function () {
           return {
@@ -344,7 +344,7 @@ test("command 'status --json' prints the raw status object as JSON", async () =>
   await withTempDir(async (tempDir) => {
     const configPath = writeServerConfig(tempDir);
     const canned = { running: false, pid: null, services: [] };
-    await withPatchedSupervisor(
+    await withStubbedSupervisor(
       { status: async function () { return canned; } },
       () =>
         withCapturedIo(async ({ logs }) => {
