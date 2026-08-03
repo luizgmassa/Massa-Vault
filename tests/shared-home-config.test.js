@@ -7,10 +7,12 @@ import {
   HOME_CONFIG_ENV_MAP,
   applyHomeConfigEnv,
   buildHomeConfigDocument,
+  getPath,
   projectHomeConfigEnv,
   readHomeConfig,
   readHomeConfigSection,
-  resolveHomeConfigPath
+  resolveHomeConfigPath,
+  setPath
 } from "../tools/shared/home-config.js";
 
 function withTempDir(callback) {
@@ -244,4 +246,50 @@ test("buildHomeConfigDocument is the inverse of projectHomeConfigEnv for mapped 
   const document = buildHomeConfigDocument({ envValues });
   const roundTripped = projectHomeConfigEnv(document);
   assert.deepEqual(roundTripped, envValues);
+});
+
+test("setPath never pollutes Object.prototype for a dotted path containing __proto__, constructor, or prototype", () => {
+  for (const dottedPath of [
+    "__proto__.polluted",
+    "constructor.prototype.polluted",
+    "safe.__proto__.polluted",
+    "safe.prototype.polluted"
+  ]) {
+    const document = {};
+    setPath(document, dottedPath, "attacker-controlled");
+
+    assert.equal(Object.prototype.polluted, undefined, `${dottedPath} must not pollute Object.prototype`);
+    assert.equal({}.polluted, undefined, `${dottedPath} must not leak onto plain object instances`);
+  }
+});
+
+test("getPath never reads through __proto__, constructor, or prototype segments", () => {
+  // A document parsed from attacker-controlled JSON can carry these as
+  // ordinary own keys (JSON.parse never touches the real prototype), but
+  // getPath must still refuse to traverse through them.
+  const document = JSON.parse(
+    '{"litellm":{"master_key":"sk-real"},"__proto__":{"polluted":"yes"},"constructor":{"prototype":{"polluted2":"yes"}}}'
+  );
+
+  assert.equal(getPath(document, "__proto__.polluted"), undefined);
+  assert.equal(getPath(document, "constructor.prototype.polluted2"), undefined);
+  assert.equal(getPath(document, "litellm.master_key"), "sk-real");
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.equal({}.polluted2, undefined);
+});
+
+test("buildHomeConfigDocument and projectHomeConfigEnv round-trip cleanly even when the local notes document carries dangerous keys", () => {
+  const localNotesDocument = JSON.parse('{"vault_path":"/tmp/vault","__proto__":{"polluted":"yes"}}');
+
+  const document = buildHomeConfigDocument({
+    envValues: { LITELLM_MASTER_KEY: "sk-real" },
+    localNotesDocument
+  });
+
+  assert.equal(document.litellm.master_key, "sk-real");
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.equal({}.polluted, undefined);
+
+  const projected = projectHomeConfigEnv(document);
+  assert.equal(projected.LITELLM_MASTER_KEY, "sk-real");
 });

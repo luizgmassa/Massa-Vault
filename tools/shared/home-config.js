@@ -40,23 +40,34 @@ function isAbsent(value) {
   return value === null || value === undefined || value === "";
 }
 
-function getPath(document, dottedPath) {
+// Dotted paths today only ever come from the frozen HOME_CONFIG_ENV_MAP, but
+// getPath/setPath also walk parsed JSON documents -- guard the prototype
+// chain anyway rather than relying on that being permanent.
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+// Exported only so tests can assert the prototype-pollution guard directly
+// against these functions instead of the shape of their callers.
+export function getPath(document, dottedPath) {
   const segments = dottedPath.split(".");
   let current = document;
   for (const segment of segments) {
+    if (UNSAFE_PATH_SEGMENTS.has(segment)) return undefined;
     if (current === null || typeof current !== "object") return undefined;
+    if (!Object.hasOwn(current, segment)) return undefined;
     current = current[segment];
   }
   return current;
 }
 
-function setPath(document, dottedPath, value) {
+export function setPath(document, dottedPath, value) {
   const segments = dottedPath.split(".");
+  if (segments.some((segment) => UNSAFE_PATH_SEGMENTS.has(segment))) return;
+
   let current = document;
   for (let i = 0; i < segments.length - 1; i += 1) {
     const segment = segments[i];
-    if (current[segment] === null || typeof current[segment] !== "object") {
-      current[segment] = {};
+    if (!Object.hasOwn(current, segment) || current[segment] === null || typeof current[segment] !== "object") {
+      current[segment] = Object.create(null);
     }
     current = current[segment];
   }
