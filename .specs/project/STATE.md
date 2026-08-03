@@ -7,7 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `arch3-runtime-env-loading` | Executing | T1-T7 landed on `refactor/arch3-runtime-env-loading` (7 commits incl. specs); poison sensor PASS (627/627 with divergent stores present) | Independent verification-agent → validation.md → PR |
+| `arch3-runtime-env-loading` | Verified | T1-T7 + verification fix landed; independent verification PASS (10/10 ACs, 5/6 mutants killed + 1 accepted structural, poison sensor green) | PR to `master`; merge cuts v1.5.0 |
 | `home-config-store` | Shipped | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | None — PR #9 merged 2026-08-03, released in v1.4.0 |
 
 ## Completion evidence — `home-config-store`
