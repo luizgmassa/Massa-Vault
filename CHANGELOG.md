@@ -15,6 +15,10 @@ automatically.
 
 ### Fixed
 
+- A sync request queued while another sync was in flight is no longer silently
+  discarded when that in-flight sync fails without pausing (for example on a
+  transient `git fetch` error). The queued request now runs, and the drain loop
+  is bounded to 10 back-to-back runs to prevent retry storms.
 - The polling watcher fallback (entered automatically when `fs.watch` fails or
   degrades) now detects file deletions. Previously the poll diff only walked
   the new snapshot, so a deleted note was never queued and never reached git or

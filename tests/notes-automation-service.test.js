@@ -216,6 +216,53 @@ test("runSync serializes concurrent requests and replays queued reason", async (
   assert.deepEqual(reasons, ["manual-a", "manual-b"]);
 });
 
+test("runSync still executes a queued reason after a non-pausing failure", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
+  const vaultPath = path.join(tempDir, "vault");
+  fs.mkdirSync(vaultPath, { recursive: true });
+  const configPath = createConfig(tempDir, vaultPath);
+  const service = new NotesAutomationService(configPath);
+
+  const reasons = [];
+  service.executeSync = (reason) => {
+    reasons.push(reason);
+    // First run fails without pausing (e.g. a transient git fetch error); the
+    // request queued mid-flight is an explicit ask and must still execute.
+    return reasons.length === 1 ? { ok: false, error: "transient fetch failure" } : { ok: true };
+  };
+
+  const [first, second] = await Promise.all([
+    service.runSync({ reason: "manual-a" }),
+    service.runSync({ reason: "manual-b" })
+  ]);
+
+  assert.deepEqual(reasons, ["manual-a", "manual-b"]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+});
+
+test("runSync bounds the queued-reason drain loop", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "notes-service-"));
+  const vaultPath = path.join(tempDir, "vault");
+  fs.mkdirSync(vaultPath, { recursive: true });
+  const configPath = createConfig(tempDir, vaultPath);
+  const service = new NotesAutomationService(configPath);
+
+  let runs = 0;
+  service.executeSync = () => {
+    runs += 1;
+    // Re-queue on every run: without the drain cap this loop never terminates.
+    service.queuedSyncReason = "again";
+    return { ok: true };
+  };
+
+  const result = await service.runSync({ reason: "manual" });
+
+  assert.equal(runs, 10);
+  assert.equal(result.ok, true);
+  assert.equal(service.queuedSyncReason, null);
+});
+
 test("gdrive lockout followed by auto-resync success does not pause sync", () => {
   withTempCwd((tempDir) => {
     const vaultPath = path.join(tempDir, "vault");

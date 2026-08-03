@@ -483,6 +483,10 @@ export function executeSyncRun(service, reason) {
   }
 }
 
+// Upper bound on back-to-back runs in one drain, so a caller that queues a new
+// reason during every run cannot spin the loop forever.
+const MAX_QUEUED_SYNC_DRAIN = 10;
+
 export function runQueuedSync(service, { reason = "manual" } = {}) {
   if (service.syncLock) {
     service.queuedSyncReason = reason;
@@ -495,11 +499,17 @@ export function runQueuedSync(service, { reason = "manual" } = {}) {
     .then(() => {
       let nextReason = reason;
       let lastResult = { ok: true };
+      let runs = 0;
+      // A reason queued mid-flight is an explicit request, so it still runs when
+      // the in-flight sync fails without pausing (e.g. a transient fetch error).
+      // The drain stops only on pause or the run cap.
+      // Test: node --test tests/notes-automation-service.test.js ("non-pausing failure")
       do {
+        runs += 1;
         lastResult = service.executeSync(nextReason);
         nextReason = service.queuedSyncReason;
         service.queuedSyncReason = null;
-      } while (nextReason && lastResult.ok && !service.paused);
+      } while (nextReason && !service.paused && runs < MAX_QUEUED_SYNC_DRAIN);
       return lastResult;
     })
     .finally(() => {
