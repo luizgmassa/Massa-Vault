@@ -1,7 +1,7 @@
 import { stdin as input, stdout as output } from "node:process";
 import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
 import {
-  DEFAULT_CONFIG_PATH,
+  resolveDefaultConfigPath,
   buildGatewayOptions,
   isVaultContextEnabled,
   resolveVaultPath
@@ -113,7 +113,7 @@ export function createChatMain({
   ensureSearchIndexFn = ensureSearchIndex,
   resolveVaultPathFn = resolveVaultPath,
   loadConfigFn = loadConfig,
-  defaultConfigPath = DEFAULT_CONFIG_PATH,
+  defaultConfigPath = resolveDefaultConfigPath(),
   getSearchDefaultsFn = getSearchDefaults,
   printSearch = printSearchPlain,
   exit = (code) => process.exit(code)

@@ -1,6 +1,6 @@
 import { stdout as output } from "node:process";
 import {
-  DEFAULT_GATEWAY_MODEL,
+  resolveDefaultGatewayModel,
   buildGatewayOptions,
   isVaultContextEnabled
 } from "../infrastructure/chat-config.js";
@@ -137,7 +137,7 @@ export async function runPrompt(
     baseUrl: gateway.gatewayUrl,
     apiKey: gateway.apiKey,
     body: {
-      model: DEFAULT_GATEWAY_MODEL,
+      model: resolveDefaultGatewayModel(),
       stream: true,
       stream_options: { include_usage: true },
       messages: requestMessages,
@@ -205,7 +205,7 @@ export async function runPrompt(
   accumulateSessionUsage(session.sessionUsage, usage);
   const ledger = addUsageToLedger({
     usage,
-    modelName: routing?.targetModel || DEFAULT_GATEWAY_MODEL
+    modelName: routing?.targetModel || resolveDefaultGatewayModel()
   });
 
   session.latestRouting = routing;

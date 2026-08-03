@@ -1,5 +1,5 @@
 import { loadConfig } from "../../../notes-automation/src/infrastructure/config.js";
-import { DEFAULT_CONFIG_PATH } from "../infrastructure/chat-config.js";
+import { resolveDefaultConfigPath } from "../infrastructure/chat-config.js";
 import {
   ensureSearchIndex,
   getSearchDefaults,
@@ -66,7 +66,7 @@ export async function buildVaultContext({
     return null;
   }
 
-  const config = loadConfig(DEFAULT_CONFIG_PATH);
+  const config = loadConfig(resolveDefaultConfigPath());
   const defaults = getSearchDefaults();
   const { index } = await ensureSearchIndex({
     vaultPath: config.vaultPath,

@@ -9,10 +9,10 @@ import {
   resolveCommandSubmission
 } from "./commands.js";
 import {
-  DEFAULT_GATEWAY_MODEL,
   buildGatewayOptions,
   isVaultContextEnabled,
-  readLocalSyncStatusModel
+  readLocalSyncStatusModel,
+  resolveDefaultGatewayModel
 } from "./infrastructure/chat-config.js";
 import {
   createStatusLine,
@@ -112,7 +112,6 @@ async function processPrompt({
 }
 
 export {
-  DEFAULT_GATEWAY_MODEL,
   buildGatewayOptions,
   buildVaultAccessContract,
   buildVaultContext,
@@ -143,6 +142,7 @@ export {
   readLocalSyncStatusModel,
   resetConversation,
   resolveCommandSubmission,
+  resolveDefaultGatewayModel,
   runOneShot,
   runPlainRepl,
   runPrompt,

@@ -1,5 +1,5 @@
 import {
-  DEFAULT_GATEWAY_MODEL,
+  resolveDefaultGatewayModel,
   DEFAULT_HISTORY_SUMMARY_MAX_CHARS,
   DEFAULT_HISTORY_SUMMARY_TIMEOUT_MS,
   buildGatewayOptions,
@@ -92,7 +92,7 @@ export async function summarizeHistoryTranscript({
       baseUrl: gateway.gatewayUrl,
       apiKey: gateway.apiKey,
       body: {
-        model: DEFAULT_GATEWAY_MODEL,
+        model: resolveDefaultGatewayModel(),
         stream: false,
         messages: [
           {

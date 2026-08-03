@@ -1,7 +1,7 @@
 import * as readlinePromises from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { executeCommand as defaultExecuteCommand } from "../services/command-executor.js";
-import { DEFAULT_IDLE_SYNC_MS } from "../infrastructure/chat-config.js";
+import { resolveDefaultIdleSyncMs } from "../infrastructure/chat-config.js";
 import { createStatusRenderer } from "../services/chat-status.js";
 import { createChatSession } from "../services/chat-session.js";
 import { runPrompt } from "../services/chat-runtime.js";
@@ -17,7 +17,7 @@ export function createPlainReplRunner({
   createSession = createChatSession,
   createStatusRendererFn = createStatusRenderer,
   readLiteLLMLimitsFn = readLiteLLMLimits,
-  idleSyncMs = DEFAULT_IDLE_SYNC_MS,
+  idleSyncMs = resolveDefaultIdleSyncMs(),
   createStartupWarmupFn = createStartupWarmup,
   commandExecutor = defaultExecuteCommand,
   promptRunner = runPrompt,

@@ -18,12 +18,11 @@ import { pathToFileURL } from "node:url";
 
 const REPO_ROOT = path.resolve(".");
 
-// Files still calling loadRuntimeEnv() at module scope. Shrinks per task:
-// T2 router-gateway, T3 mcp-server, T4 notes-automation, T5 tools/cli.js,
-// T6 llm-chat-cli chat-config. Must reach [] by the end of the feature.
-const IMPORT_TIME_LOAD_ALLOWLIST = [
-  "tools/llm-chat-cli/src/infrastructure/chat-config.js"
-];
+// Files calling loadRuntimeEnv() at module scope. Emptied by
+// arch3-runtime-env-loading T2-T6; any entry reappearing is a regression:
+// entrypoints load inside their import.meta.url guard, everything else
+// reads process.env per call.
+const IMPORT_TIME_LOAD_ALLOWLIST = [];
 
 // Modules whose import must be side-effect-free with respect to env loading.
 const IMPORT_SAFE_MODULES = [
@@ -37,7 +36,9 @@ const IMPORT_SAFE_MODULES = [
   "tools/mcp-server/src/server.js",
   "tools/notes-automation/src/commands/runtime.js",
   "tools/notes-automation/src/cli.js",
-  "tools/cli.js"
+  "tools/cli.js",
+  "tools/llm-chat-cli/src/infrastructure/chat-config.js",
+  "tools/llm-chat-cli/src/cli.js"
 ];
 
 function listJsFiles(dir) {
