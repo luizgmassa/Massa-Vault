@@ -61,7 +61,7 @@ const USAGE_LINES = Object.freeze([
   "  npm run vault -- config path|migrate [--force] [--dry-run]",
   "  npm run vault:start|vault:stop|vault:status|vault:resume|vault:flush-sync",
   "  # or",
-  "  npm run vault -- install|configure|chat|gdrive|sync|config|start|stop|status|restart|resume|flush-sync"
+  "  npm run vault -- install|configure|chat|gdrive|sync|config|start|stop|status|restart|resume|flush-sync|flush-push"
 ]);
 
 function runTool(command, args = []) {

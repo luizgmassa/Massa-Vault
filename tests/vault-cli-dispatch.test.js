@@ -411,11 +411,10 @@ test("vault cli command tables stay in sync with the documented usage banner", (
   assert.deepEqual([...GDRIVE_COMMANDS.keys()], ["check", "dry-run"]);
   assert.deepEqual([...SYNC_COMMANDS.keys()], ["conflicts", "resolve", "status"]);
 
-  // `flush-push` is a dispatchable command that the usage banner does not list.
-  // Pinned as current behavior so the gap is visible rather than accidental;
-  // closing it is a docs change, not a test change.
+  // Every dispatchable proxy command must appear in the usage banner; this
+  // catches a new command landing without its docs line.
   const undocumented = [...SERVER_PROXY_COMMANDS, ...NOTES_PROXY_COMMANDS].filter(
     (cmd) => !USAGE_LINES.some((line) => line.includes(cmd))
   );
-  assert.deepEqual(undocumented, ["flush-push"]);
+  assert.deepEqual(undocumented, []);
 });

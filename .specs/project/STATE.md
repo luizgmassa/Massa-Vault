@@ -7,7 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `home-config-store` | Complete | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | Open the PR and let CI run the real gates |
+| `home-config-store` | Shipped | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | None — PR #9 merged 2026-08-03, released in v1.4.0 |
 
 ## Completion evidence — `home-config-store`
 
