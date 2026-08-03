@@ -15,6 +15,10 @@ automatically.
 
 ### Fixed
 
+- `install.sh` setup validation imported the notes-automation config module
+  from a path that no longer exists (`src/config.js` instead of
+  `src/infrastructure/config.js`), crashing every real (non `--check-only`)
+  bootstrap at the final validation step with `ERR_MODULE_NOT_FOUND`.
 - Conflict quarantine snapshots now use neutral `<file>.local.txt` /
   `<file>.remote.txt` names with the correct rebase stage mapping. The previous
   `.ours.txt` / `.theirs.txt` names were inverted under `git rebase`

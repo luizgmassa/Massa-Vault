@@ -715,7 +715,7 @@ validate_setup() {
   npm run security:scan:all
   DEBUG=false "$LITELLM_VENV/bin/litellm" --version
   node -e 'const fs = require("fs"); JSON.parse(fs.readFileSync(".litellm/router.json", "utf8"));'
-  node --input-type=module -e 'import { loadConfig } from "./tools/notes-automation/src/config.js"; const cfg = loadConfig(); if (!cfg.vaultPath) throw new Error("missing vaultPath"); console.log(`[setup] config vault: ${cfg.vaultPath}`);'
+  node --input-type=module -e 'import { loadConfig } from "./tools/notes-automation/src/infrastructure/config.js"; const cfg = loadConfig(); if (!cfg.vaultPath) throw new Error("missing vaultPath"); console.log(`[setup] config vault: ${cfg.vaultPath}`);'
 }
 
 wait_for_url() {
