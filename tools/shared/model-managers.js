@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { smartRouterLaneAlias } from "./smart-router.js";
 
 export const MODEL_MANAGER_STATE_PATH = ".automation/llm-chat-cli/model-managers.json";
 export const GENERATED_LITELLM_CONFIG_PATH =
@@ -343,9 +344,9 @@ export function generateLiteLLMConfigFromModelManagerState(state) {
   const autoAlias = chooseAutoAlias(normalized, models);
   if (autoAlias) {
     for (const routerAlias of [
-      "smart-router-general",
-      "smart-router-code",
-      "smart-router-multimodal"
+      smartRouterLaneAlias("general"),
+      smartRouterLaneAlias("code"),
+      smartRouterLaneAlias("multimodal")
     ]) {
       aliases.push(routerAlias);
       lines.push(`  - model_name: ${routerAlias}`);

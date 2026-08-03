@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadRuntimeEnv } from "../../../shared/runtime-env.js";
 import { readHomeConfigSection } from "../../../shared/home-config.js";
+import { SMART_ROUTER_MODEL_ID } from "../../../shared/smart-router.js";
 
 export const DEFAULT_VAULT_CLI_CONFIG_PATH = path.resolve("config/vault-cli.config.json");
 export const DEFAULT_NOTES_CONFIG_PATH = path.resolve("config/notes-automation.config.json");
 export const DEFAULT_CHAT_GATEWAY_URL = "http://127.0.0.1:4100";
-export const DEFAULT_CHAT_MODEL = "smart-router";
+export const DEFAULT_CHAT_MODEL = SMART_ROUTER_MODEL_ID;
 export const DEFAULT_CHAT_RAG_ENABLED = true;
 export const DEFAULT_CHAT_IDLE_SYNC_MS = 30_000;
 
