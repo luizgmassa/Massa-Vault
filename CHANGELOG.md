@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-04
+
 ### Changed
 
 - Renamed the project to `massa-ai-vault`, matching the renamed GitHub
