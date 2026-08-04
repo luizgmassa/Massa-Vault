@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-04
+
 ### Added
 
 - End-to-end test suite (`tests/e2e-*.test.js` + `tests/helpers/e2e-harness.js`)
