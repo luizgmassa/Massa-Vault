@@ -7,36 +7,27 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `arch3-runtime-env-loading` | Verified | T1-T7 + verification fix landed; independent verification PASS (10/10 ACs, 5/6 mutants killed + 1 accepted structural, poison sensor green) | PR to `master`; merge cuts v1.5.0 |
-| `home-config-store` | Shipped | Execute done, T1-T10 landed; independent verification PASS (15/15 requirements, 7/7 mutants killed) | None — PR #9 merged 2026-08-03, released in v1.4.0 |
-
-## Completion evidence — `home-config-store`
-
-- 13 commits on `feat/home-config-store`, one atomic commit per task plus one guard fix and one verification fix.
-- `npm run lint` exit 0 · `npm test` 592/592 · `npm run security:scan:all` clean · `bash install.sh --check-only` exit 0.
-- `CI=1 node --test --experimental-test-coverage` → 91.28 / 75.89 / 89.42 against floors 88 / 72 / 86.
-- `node scripts/release-version.js --dry-run` → minor bump to `1.4.0`.
-- Validation report: `.specs/features/home-config-store/validation.md`.
-- Two verifier-found gaps closed: the `0700` directory mode now applies to a pre-existing directory, and `CLAUDE.md` documents the `tests/helpers/` exception.
+| `e2e-test-suite` | Executing | Specify + Design + Tasks done; pre-mortem gate passed (revised) | Execute T1–T9 on `feat/e2e-test-suite` (worktree `/Users/luizmassa/Projects/massa-vault-e2e`) |
+| `arch3-runtime-env-loading` | Shipped | — | None — PR #11 merged, released in v1.5.0 |
+| `home-config-store` | Shipped | — | None — PR #9 merged, released in v1.4.0 |
 
 ## Decisions
 
 | # | Decision | Rationale |
 |---|---|---|
-| D7 | `.env` gets its own off-switch (`MASSA_VAULT_ENV_FILE=off`/`""`), guarded inside `loadLocalEnv` itself | The naive lazy slice was falsified 2026-08-03: any call-time load reachable from a cleared-env test window re-projects the developer's real `.env`. The store guards itself so every call path is covered; prerequisite landed before any de-freeze |
-| D8 | Env loading runs once per process, inside each entrypoint's `import.meta.url` guard; loaders read `process.env` per call | ARCH-3: precedence stops being emergent from module evaluation order; imports become side-effect-free; enforced by `tests/runtime-env-loading-discipline.test.js` (empty allowlist + poison-import check) |
-| D9 | No memoized config resolvers; module-level singletons must not evaluate resolver default params | Memoization is a hidden freeze-at-first-call with cross-test staleness; `transcript-store.js`'s module-level default store proved the failure mode (caught by the discipline sensor during T6) |
-| D1 | Home config directory is `massa-ai-vault`, not `massa-vault` | User-confirmed, deliberately diverging from the repo name and the `MASSA_VAULT_` env prefix |
-| D2 | `process.env` outranks the home config | ~35 test/CI sites drive the loaders by setting env vars directly |
-| D3 | `process.env` stays the internal transport; the home config projects into it | Keeps all ~35 existing read sites and their per-tool coercion quirks untouched — relocation without an implicit refactor |
-| D4 | Repo `config/router-gateway.json` and `config/server.config.json` stay in the repo | They are shipped defaults (lane phrases, service argv); moving them would stop `git pull` from updating them |
-| D5 | `""` in the home config means absent, not "explicitly clear" | Consumers use `||` chaining, so `""` falls through to lower layers instead of clearing — for `vault_path` that reaches the tooling repo root with sync enabled |
-| D6 | The vault-root guard (R15) ships with this migration, not after | Retiring `notes-automation.local.json` removes the layer that has been masking the latent `DEFAULT_VAULT_PATH = "."` defect |
+| D10 | E2E suite rides standard `node --test` discovery as flat `tests/e2e-*.test.js`; no separate script or CI job | One-runner repo convention; CI topology (`CI`→release chain, `Coverage` separation) is load-bearing and untouched |
+| D11 | E2E backend boundary is an in-process OpenAI-compatible LiteLLM stub + Ollama-embed stub; every Node-owned hop (client CLI, gateway, mcp-server, notes CLI, supervisor) runs as a real subprocess | Real LiteLLM is Python + local models — not CI-runnable; the wiring under test is all Node |
+| D12 | All E2E children run with `cwd=<temp workspace>` + both config kill-switches; repo-committed configs referenced by absolute env paths | Default paths are cwd-relative (`path.resolve`) — temp cwd keeps `.automation/`/`.logs/` pollution out of the checkout; exception: config-migrate test redirects `XDG_CONFIG_HOME`/`HOME` instead (it must exercise `.env` + home-config writes) |
+| D13 | Wait deadlines are generous (30s) and calibration evidence is two green CI samples, never local timing | Pre-mortem critical finding: 2-vCPU CI under ~70 concurrent test files starves CPU; deadlines cost nothing on green runs |
+| D14 | `ci.yml` test job gains an automated post-suite `git status --porcelain` step | Pre-mortem high finding: a hermeticity guarantee nobody re-checks decays silently; workflow name/job id untouched so release chain + required checks unaffected |
+| D15 | Supervisor env-delivery path must be observable: canary port delivered only via the chosen mechanism, asserted end-to-end | Pre-mortem high finding: a silent fallback would let E2E-04/11 pass without proving the config-loader path |
+| D1–D9 | Prior features (`home-config-store`, `arch3-runtime-env-loading`) | Preserved in git history of this file; both features shipped |
 
 ## Risks accepted
 
-- `.env` remains supported this release; deletion is deferred to a later release.
-- The existing suite's dependence on a developer's repo-local `.env` is pre-existing and out of scope; this work only avoids making it worse.
+- SSE fragmentation robustness of the client parser beyond one deliberate mid-line split is out of scope (R10).
+- Port retry is bounded at one attempt; labeled errors make a residual collision diagnosable (R5/pre-mortem #5).
+- P3 journeys (sync conflicts, fake-gdrive) recorded in spec traceability, deliberately deferred.
 
 ## Blockers
 
