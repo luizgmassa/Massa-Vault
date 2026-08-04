@@ -1,4 +1,4 @@
-# Massa Vault System
+# Massa AI Vault System
 
 Automation system for a personal Obsidian knowledge base with:
 
@@ -26,7 +26,7 @@ Your actual notes/memories live in an external vault path configured by CLI.
 - `tools/notes-automation`: file watcher + sync orchestrator for external vault.
 - `tools/server`: supervisor for background services: LiteLLM, router-gateway, MCP server, and notes automation.
 - `tools/security`: secret scanning + git hook installer.
-- `tools/cli.js`: `massa-vault` client entrypoint for installation, configuration, chat, and sync actions.
+- `tools/cli.js`: `mav` client entrypoint for installation, configuration, chat, and sync actions.
 
 ## Sync Backends
 
@@ -91,30 +91,30 @@ Noninteractive example:
 Common flags:
 
 - `--check-only` checks tools without writing files, including reporting home-config presence.
-- `--start` starts `massa-vault-server` after validation.
+- `--start` starts `mavs` after validation.
 - `--no-start` installs and validates only.
 - `--vault-path`, `--sync-strategy`, `--git-mode`, `--git-repo-url`, `--gdrive-remote-path` configure local sync.
 
 Setup writes machine-specific settings to `config/notes-automation.local.json` and secrets to `.env`, then migrates both into a single user-owned config file at `~/.config/massa-ai-vault/config.json` (outside any checkout). All three are gitignored/external; `.env` and `config/notes-automation.local.json` are deprecated in favor of the home config but still work and are left in place after migration.
-Repository Node entrypoints auto-load the home config, then `.env`, without overriding already-exported shell variables. Precedence is `process.env` > home config > repo `config/*.json` > hardcoded defaults. Loading a present `.env` prints one deprecation notice per process pointing at `massa-vault config migrate`.
+Repository Node entrypoints auto-load the home config, then `.env`, without overriding already-exported shell variables. Precedence is `process.env` > home config > repo `config/*.json` > hardcoded defaults. Loading a present `.env` prints one deprecation notice per process pointing at `mav config migrate`.
 
 ### Home config
 
 ```bash
-massa-vault config path              # print the resolved path
-massa-vault config migrate           # build the home config from .env + config/notes-automation.local.json
-massa-vault config migrate --force   # overwrite an existing home config
-massa-vault config migrate --dry-run # print the document, write nothing
+mav config path              # print the resolved path
+mav config migrate           # build the home config from .env + config/notes-automation.local.json
+mav config migrate --force   # overwrite an existing home config
+mav config migrate --dry-run # print the document, write nothing
 ```
 
-`massa-vault config path` resolves to `~/.config/massa-ai-vault/config.json` (honors `XDG_CONFIG_HOME`, or an explicit override via `MASSA_AI_VAULT_HOME_CONFIG`; set `MASSA_AI_VAULT_HOME_CONFIG=off` to disable the home config entirely). It holds every mapped scalar setting (`litellm`, `router`, `server`, `mcp`, `chat` sections) plus a `notes` section that replaces `config/notes-automation.local.json`. The file is written with `0600` permissions in a `0700` directory since `litellm.master_key` is a secret. `config migrate` refuses to overwrite an existing home config without `--force`, and refuses to write a document whose `notes.vault_path` is missing or empty — run `massa-vault configure` first if you see that error.
+`mav config path` resolves to `~/.config/massa-ai-vault/config.json` (honors `XDG_CONFIG_HOME`, or an explicit override via `MASSA_AI_VAULT_HOME_CONFIG`; set `MASSA_AI_VAULT_HOME_CONFIG=off` to disable the home config entirely). It holds every mapped scalar setting (`litellm`, `router`, `server`, `mcp`, `chat` sections) plus a `notes` section that replaces `config/notes-automation.local.json`. The file is written with `0600` permissions in a `0700` directory since `litellm.master_key` is a secret. `config migrate` refuses to overwrite an existing home config without `--force`, and refuses to write a document whose `notes.vault_path` is missing or empty — run `mav configure` first if you see that error.
 
 ### Executables and service ownership
 
 Package binaries:
 
-- `massa-vault`: client CLI for install/configure/chat/sync/gdrive and compatibility `start|stop|status` wrappers.
-- `massa-vault-server`: background supervisor for LiteLLM, router-gateway, MCP server, and notes automation.
+- `mav`: client CLI for install/configure/chat/sync/gdrive and compatibility `start|stop|status` wrappers.
+- `mavs`: background supervisor for LiteLLM, router-gateway, MCP server, and notes automation.
 
 Server lifecycle:
 
@@ -133,7 +133,7 @@ npm run vault:status
 npm run vault:stop
 ```
 
-`massa-vault-server run` stays in the foreground for development or system supervisors. `massa-vault-server start` daemonizes the supervisor and records state in `.automation/server/state.json`. Services detected as already healthy are marked as `external` and are not stopped by the supervisor.
+`mavs run` stays in the foreground for development or system supervisors. `mavs start` daemonizes the supervisor and records state in `.automation/server/state.json`. Services detected as already healthy are marked as `external` and are not stopped by the supervisor.
 
 Primary config files:
 
@@ -172,7 +172,7 @@ Chat defaults:
 
 ### Local MCP grounded source server
 
-`npm run vault:mcp` starts only the MCP service through `massa-vault-server run --only mcp-server` for grounded source workflows. `npm run server:start` starts it together with the other background services.
+`npm run vault:mcp` starts only the MCP service through `mavs run --only mcp-server` for grounded source workflows. `npm run server:start` starts it together with the other background services.
 
 Defaults:
 
@@ -204,7 +204,7 @@ MCP client config shape:
 ```json
 {
   "mcpServers": {
-    "massa-vault-sources": {
+    "massa-ai-vault-sources": {
       "url": "http://127.0.0.1:4200/mcp",
       "headers": {
         "Authorization": "Bearer <access_token>"
