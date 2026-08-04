@@ -126,3 +126,74 @@ test("one-shot chat returns the stub reply through the real gateway and persists
   assert.match(transcript, /router_target_model[^\n]*smart-router-general/);
   assert.match(transcript, /router_routed_model[^\n]*e2e-general-model/);
 });
+
+test("gateway rejects non-smart-router models without touching the backend", async (t) => {
+  const { workspace, fixturePath } = chatFixtures(t);
+  const stub = await startStubLiteLLM(t, { replyText: REPLY });
+  const gateway = await startGateway(t, { stubUrl: stub.url, fixturePath, workspace });
+
+  const response = await fetch(`${gateway.url}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4",
+      messages: [{ role: "user", content: "hello" }],
+      stream: false
+    })
+  });
+
+  // E2E-09: exact 400 per the smart-router contract, and the request never
+  // reaches LiteLLM.
+  assert.equal(response.status, 400);
+  await response.text();
+  assert.equal(stub.requests.length, 0);
+});
+
+test("smart-router responses carry routing headers with the resolved model", async (t) => {
+  const { workspace, fixturePath } = chatFixtures(t);
+  const stub = await startStubLiteLLM(t, { replyText: REPLY });
+  const gateway = await startGateway(t, { stubUrl: stub.url, fixturePath, workspace });
+
+  const response = await fetch(`${gateway.url}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "smart-router",
+      messages: [{ role: "user", content: "hello headers" }],
+      stream: false
+    })
+  });
+
+  // E2E-09: routing decisions are exposed as response headers (the codec the
+  // chat client decodes into transcript metadata).
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-router-lane"), "general");
+  assert.equal(response.headers.get("x-router-routed-model"), "e2e-general-model");
+  const payload = await response.json();
+  assert.ok(JSON.stringify(payload).includes(REPLY));
+  assert.equal(stub.requests.length, 1);
+});
+
+test("chat exits non-zero when the backend is down", async (t) => {
+  const { workspace, vaultDir, cliConfigPath, fixturePath } = chatFixtures(t);
+  // Gateway points at a dead port: allocated, never listened on.
+  const deadPort = await getFreePort();
+  const gateway = await startGateway(t, {
+    stubUrl: `http://127.0.0.1:${deadPort}`,
+    fixturePath,
+    workspace
+  });
+
+  const client = runChatOnce(t, {
+    gatewayUrl: gateway.url,
+    vaultDir,
+    cliConfigPath,
+    prompt: ["hello", "downtime"]
+  });
+  const exit = await client.waitForExit();
+
+  // P1-A AC4: a dead backend surfaces as a prompt non-zero exit with an error
+  // on stderr — never a hang (waitForExit's deadline is the hang detector).
+  assert.notEqual(exit.code, 0, client.diagnostics());
+  assert.ok(client.stderr().length > 0, client.diagnostics());
+});
