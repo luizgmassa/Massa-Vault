@@ -96,8 +96,8 @@ The shipped E2E suite proves five journeys but deliberately deferred two P3 requ
 
 | Requirement ID | Story | Priority | Phase | Status |
 | --- | --- | --- | --- | --- |
-| E2E-12 | P1 conflict journey (parent P3-G) | P1 (was parent P3) | Execute | Pending |
-| E2E-13 | P1 gdrive journey (parent P3-G) | P1 (was parent P3) | Execute | Pending |
+| E2E-12 | P1 conflict journey (parent P3-G) | P1 (was parent P3) | Execute | Implemented (`tests/e2e-sync-conflicts.test.js`, commit b24b3ea6) |
+| E2E-13 | P1 gdrive journey (parent P3-G) | P1 (was parent P3) | Execute | Implemented (`tests/e2e-gdrive-journey.test.js`, commit c2a1463b; spec revised via safety valve) |
 
 **Coverage:** 2 total · 2 in-plan · 0 unmapped. IDs owned by the parent spec; statuses mirrored there on completion.
 

@@ -7,7 +7,8 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `e2e-test-suite` | Verified | T1–T9 landed; independent verification PASS (12/12 requirements, 4/4 mutants killed); two green CI samples | **PR #13 open, CI fully green** — awaiting merge approval; merge cuts v1.6.0 |
+| `e2e-extended-journeys` | Executing | Plan gated (full Fool pre-mortem, revised); T1 (E2E-12) + T2 (E2E-13) landed with per-task gates; coverage re-measured 92.44/77.77/91.15 | T3 docs closure → final battery → independent verification → PR |
+| `e2e-test-suite` | Shipped | — | None — PR #13 merged, released in v1.6.0; P3 deferral (E2E-12/13) closed by `e2e-extended-journeys` |
 | `arch3-runtime-env-loading` | Shipped | — | None — PR #11 merged, released in v1.5.0 |
 | `home-config-store` | Shipped | — | None — PR #9 merged, released in v1.4.0 |
 
@@ -32,7 +33,7 @@
 
 - SSE fragmentation robustness of the client parser beyond one deliberate mid-line split is out of scope (R10).
 - Port retry is bounded at one attempt; labeled errors make a residual collision diagnosable (R5/pre-mortem #5).
-- P3 journeys (sync conflicts, fake-gdrive) recorded in spec traceability, deliberately deferred.
+- ~~P3 journeys (sync conflicts, fake-gdrive) recorded in spec traceability, deliberately deferred.~~ Closed 2026-08-04 by `e2e-extended-journeys` (E2E-12/13 implemented).
 
 ## Blockers
 

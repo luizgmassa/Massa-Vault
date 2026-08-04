@@ -150,10 +150,10 @@ The repo has 64 unit/integration test files, but nearly all exercise modules in-
 | E2E-09 | P1-A gateway contract | P2 | Execute | Implemented |
 | E2E-10 | P2-F config | P2 | Execute | Implemented |
 | E2E-11 | P1-B external detect | P2 | Execute | Implemented |
-| E2E-12 | P3-G conflicts | P3 | Backlog | Deferred (P3) |
-| E2E-13 | P3-G gdrive | P3 | Backlog | Deferred (P3) |
+| E2E-12 | P3-G conflicts | P3 | Execute | Implemented (follow-up: `e2e-extended-journeys`) |
+| E2E-13 | P3-G gdrive | P3 | Execute | Implemented (follow-up: `e2e-extended-journeys`) |
 
-**Coverage:** 14 total · 12 in-plan (P1+P2) · 2 backlog (P3, explicitly deferred — recorded here so deferral is a decision, not an omission).
+**Coverage:** 14 total · 12 shipped in this feature (P1+P2) · 2 implemented by the follow-up feature `.specs/features/e2e-extended-journeys/` (P3 deferral closed 2026-08-04; requirement IDs remain owned here).
 
 ## Success Criteria
 

@@ -5,7 +5,7 @@
     {
       "slug": "e2e-extended-journeys",
       "title": "E2E extended journeys: sync conflict path (E2E-12) and fake-rclone gdrive both-mode journey (E2E-13)",
-      "status": "specified",
+      "status": "implemented",
       "workflow": "spec-driven",
       "size": "medium",
       "sessionId": "spec-e2e-extended-journeys",
@@ -31,7 +31,7 @@
     {
       "slug": "e2e-test-suite",
       "title": "E2E test suite: real-subprocess journeys for chat, server lifecycle, sync, MCP, config migrate",
-      "status": "verified",
+      "status": "complete",
       "workflow": "spec-driven",
       "size": "large",
       "sessionId": "spec-e2e-test-suite",

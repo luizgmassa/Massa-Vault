@@ -13,6 +13,19 @@ automatically.
 
 ## [Unreleased]
 
+### Added
+
+- Extended E2E journeys completing the suite's deferred P3 backlog
+  (`tests/e2e-sync-conflicts.test.js`, `tests/e2e-gdrive-journey.test.js`):
+  the sync conflict recovery loop through the real one-shot CLI against a
+  diverged peer clone (quarantined rebase-stage snapshots, `sync-conflicts`
+  listing, `sync-resolve --done` clearing, unblocked follow-up sync), and the
+  `both`-strategy gdrive journey through a fake rclone subprocess (pre-gdrive
+  snapshot push, first-run `--resync` bisync, the dangerous-import safety
+  hold on the first run, and the next run pushing the held import). Same
+  hermetic harness and conventions as the shipped suite; no production code
+  changed.
+
 ## [1.6.0] - 2026-08-04
 
 ### Added
