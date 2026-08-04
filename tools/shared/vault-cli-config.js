@@ -48,7 +48,7 @@ export function loadVaultCliRuntimeConfig({
 } = {}) {
   loadRuntimeEnv({ envFile: ".env" });
   const resolvedConfigPath = path.resolve(
-    configPath || env.MASSA_VAULT_CLI_CONFIG_PATH || DEFAULT_VAULT_CLI_CONFIG_PATH
+    configPath || env.MASSA_AI_VAULT_CLI_CONFIG_PATH || DEFAULT_VAULT_CLI_CONFIG_PATH
   );
   const document = readConfigDocument(resolvedConfigPath);
   const chat = document.chat && typeof document.chat === "object" ? document.chat : {};
@@ -63,20 +63,20 @@ export function loadVaultCliRuntimeConfig({
     configPath: resolvedConfigPath,
     notesConfigPath: resolveFromConfigBase(
       resolvedConfigPath,
-      env.MASSA_VAULT_NOTES_CONFIG_PATH || document.notes_config_path,
+      env.MASSA_AI_VAULT_NOTES_CONFIG_PATH || document.notes_config_path,
       DEFAULT_NOTES_CONFIG_PATH
     ),
     chat: {
       gatewayUrl: String(
-        env.MASSA_VAULT_CHAT_GATEWAY_URL || mergedChat.gateway_url || DEFAULT_CHAT_GATEWAY_URL
+        env.MASSA_AI_VAULT_CHAT_GATEWAY_URL || mergedChat.gateway_url || DEFAULT_CHAT_GATEWAY_URL
       ),
-      model: String(env.MASSA_VAULT_CHAT_MODEL || mergedChat.model || DEFAULT_CHAT_MODEL),
+      model: String(env.MASSA_AI_VAULT_CHAT_MODEL || mergedChat.model || DEFAULT_CHAT_MODEL),
       ragEnabled: toBoolean(
-        env.MASSA_VAULT_CHAT_RAG,
+        env.MASSA_AI_VAULT_CHAT_RAG,
         mergedChat.rag_enabled ?? DEFAULT_CHAT_RAG_ENABLED
       ),
       idleSyncMs: toPositiveNumber(
-        env.MASSA_VAULT_CHAT_IDLE_SYNC_MS || mergedChat.idle_sync_ms,
+        env.MASSA_AI_VAULT_CHAT_IDLE_SYNC_MS || mergedChat.idle_sync_ms,
         DEFAULT_CHAT_IDLE_SYNC_MS
       )
     }

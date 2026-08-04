@@ -122,7 +122,7 @@ function gatewayService(port) {
 function runServerCli(t, args, { workspace, configPath, name }) {
   return spawnChild(t, process.execPath, [SERVER_CLI, ...args], {
     cwd: workspace,
-    env: childEnv({ MASSA_VAULT_SERVER_CONFIG_PATH: configPath }),
+    env: childEnv({ MASSA_AI_VAULT_SERVER_CONFIG_PATH: configPath }),
     name
   });
 }

@@ -74,9 +74,9 @@ test("importing de-frozen modules never projects a poison .env into process.env"
 
     for (const relativePath of IMPORT_SAFE_MODULES) {
       const moduleUrl = pathToFileURL(path.join(REPO_ROOT, relativePath)).href;
-      const childEnv = { ...process.env, MASSA_VAULT_HOME_CONFIG: "off" };
+      const childEnv = { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off" };
       // The sensor validates real-world default behavior: no off-switch set.
-      delete childEnv.MASSA_VAULT_ENV_FILE;
+      delete childEnv.MASSA_AI_VAULT_ENV_FILE;
 
       const result = spawnSync(
         process.execPath,

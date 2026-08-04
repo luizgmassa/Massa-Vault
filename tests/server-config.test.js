@@ -64,8 +64,8 @@ test("server config preserves env overrides for local runtime ports and paths", 
     const config = loadServerConfig({
       configPath,
       env: {
-        MASSA_VAULT_SERVER_STATE_PATH: path.join(tempDir, "state.json"),
-        MASSA_VAULT_SERVER_LOG_DIR: path.join(tempDir, "logs"),
+        MASSA_AI_VAULT_SERVER_STATE_PATH: path.join(tempDir, "state.json"),
+        MASSA_AI_VAULT_SERVER_LOG_DIR: path.join(tempDir, "logs"),
         ROUTER_GATEWAY_PORT: "4111",
         MCP_SERVER_PORT: "4222"
       }
@@ -104,8 +104,8 @@ test("vault CLI config reads JSON defaults with env overrides for chat settings"
     const config = loadVaultCliRuntimeConfig({
       configPath,
       env: {
-        MASSA_VAULT_CHAT_GATEWAY_URL: "http://127.0.0.1:4999",
-        MASSA_VAULT_CHAT_RAG: "on"
+        MASSA_AI_VAULT_CHAT_GATEWAY_URL: "http://127.0.0.1:4999",
+        MASSA_AI_VAULT_CHAT_RAG: "on"
       }
     });
 

@@ -10,7 +10,7 @@ const ENV_KEYS = [
   "MV_TEST_B",
   "MV_TEST_QUOTED",
   "MV_TEST_UNCHANGED",
-  "MASSA_VAULT_ENV_FILE"
+  "MASSA_AI_VAULT_ENV_FILE"
 ];
 
 function withEnv(overrides, callback) {
@@ -90,8 +90,8 @@ test("loadLocalEnv no-ops when env file does not exist", () => {
   assert.equal(result.parsedCount, 0);
 });
 
-test('MASSA_VAULT_ENV_FILE="off" skips a present .env entirely', () => {
-  withEnv({ MASSA_VAULT_ENV_FILE: "off" }, () => {
+test('MASSA_AI_VAULT_ENV_FILE="off" skips a present .env entirely', () => {
+  withEnv({ MASSA_AI_VAULT_ENV_FILE: "off" }, () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-env-"));
     fs.writeFileSync(path.join(tempDir, ".env"), "MV_TEST_A=alpha\n", "utf8");
 
@@ -101,8 +101,8 @@ test('MASSA_VAULT_ENV_FILE="off" skips a present .env entirely', () => {
   });
 });
 
-test('MASSA_VAULT_ENV_FILE="" disables the .env layer like "off"', () => {
-  withEnv({ MASSA_VAULT_ENV_FILE: "" }, () => {
+test('MASSA_AI_VAULT_ENV_FILE="" disables the .env layer like "off"', () => {
+  withEnv({ MASSA_AI_VAULT_ENV_FILE: "" }, () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-env-"));
     fs.writeFileSync(path.join(tempDir, ".env"), "MV_TEST_A=alpha\n", "utf8");
 
@@ -112,8 +112,8 @@ test('MASSA_VAULT_ENV_FILE="" disables the .env layer like "off"', () => {
   });
 });
 
-test("MASSA_VAULT_ENV_FILE with any other value leaves loading enabled", () => {
-  withEnv({ MASSA_VAULT_ENV_FILE: "on" }, () => {
+test("MASSA_AI_VAULT_ENV_FILE with any other value leaves loading enabled", () => {
+  withEnv({ MASSA_AI_VAULT_ENV_FILE: "on" }, () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-env-"));
     fs.writeFileSync(path.join(tempDir, ".env"), "MV_TEST_A=alpha\n", "utf8");
 

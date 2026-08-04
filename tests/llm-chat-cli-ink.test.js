@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { executeCommand } from "../tools/llm-chat-cli/src/cli.js";
 
-process.env.MASSA_VAULT_CHAT_RAG = "off";
+process.env.MASSA_AI_VAULT_CHAT_RAG = "off";
 
 /**
  * Poll until `predicate()` holds, or give up after `timeout`.

@@ -17,7 +17,7 @@ import { saveTranscript } from "../services/transcript-store.js";
 
 export function parseArguments(argv) {
   const args = [...argv];
-  let systemPrompt = process.env.MASSA_VAULT_CHAT_SYSTEM_PROMPT || "";
+  let systemPrompt = process.env.MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT || "";
 
   if (args[0] === "--system" && args[1]) {
     systemPrompt = args[1];

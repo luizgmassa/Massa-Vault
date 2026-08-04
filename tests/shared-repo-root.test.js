@@ -22,7 +22,7 @@ test("assertRepoRootCwd rejects a repo subdirectory", () => {
 test("vault cli invoked from a repo subdirectory fails fast instead of creating stray state", () => {
   const result = spawnSync(process.execPath, [path.join(REPO_ROOT, "tools", "cli.js"), "status"], {
     cwd: path.join(REPO_ROOT, "tools"),
-    env: { ...process.env, MASSA_VAULT_HOME_CONFIG: "off" },
+    env: { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off" },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });

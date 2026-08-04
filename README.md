@@ -107,7 +107,7 @@ massa-vault config migrate --force   # overwrite an existing home config
 massa-vault config migrate --dry-run # print the document, write nothing
 ```
 
-`massa-vault config path` resolves to `~/.config/massa-ai-vault/config.json` (honors `XDG_CONFIG_HOME`, or an explicit override via `MASSA_VAULT_HOME_CONFIG`; set `MASSA_VAULT_HOME_CONFIG=off` to disable the home config entirely). It holds every mapped scalar setting (`litellm`, `router`, `server`, `mcp`, `chat` sections) plus a `notes` section that replaces `config/notes-automation.local.json`. The file is written with `0600` permissions in a `0700` directory since `litellm.master_key` is a secret. `config migrate` refuses to overwrite an existing home config without `--force`, and refuses to write a document whose `notes.vault_path` is missing or empty — run `massa-vault configure` first if you see that error.
+`massa-vault config path` resolves to `~/.config/massa-ai-vault/config.json` (honors `XDG_CONFIG_HOME`, or an explicit override via `MASSA_AI_VAULT_HOME_CONFIG`; set `MASSA_AI_VAULT_HOME_CONFIG=off` to disable the home config entirely). It holds every mapped scalar setting (`litellm`, `router`, `server`, `mcp`, `chat` sections) plus a `notes` section that replaces `config/notes-automation.local.json`. The file is written with `0600` permissions in a `0700` directory since `litellm.master_key` is a secret. `config migrate` refuses to overwrite an existing home config without `--force`, and refuses to write a document whose `notes.vault_path` is missing or empty — run `massa-vault configure` first if you see that error.
 
 ### Executables and service ownership
 
@@ -141,7 +141,7 @@ Primary config files:
 - Client CLI defaults: `config/vault-cli.config.json`
 - Notes automation: `config/notes-automation.config.json` plus the home config's `notes` section (or the deprecated `config/notes-automation.local.json`)
 
-Config is file-first. The home config (`~/.config/massa-ai-vault/config.json`, see above), environment variables, and `.env` remain supported for secrets and explicit local overrides such as `LITELLM_MASTER_KEY`, `MASSA_VAULT_CHAT_GATEWAY_URL`, `ROUTER_GATEWAY_PORT`, and `MCP_SERVER_PORT`.
+Config is file-first. The home config (`~/.config/massa-ai-vault/config.json`, see above), environment variables, and `.env` remain supported for secrets and explicit local overrides such as `LITELLM_MASTER_KEY`, `MASSA_AI_VAULT_CHAT_GATEWAY_URL`, `ROUTER_GATEWAY_PORT`, and `MCP_SERVER_PORT`.
 
 ### `chat`
 
@@ -166,7 +166,7 @@ Chat defaults:
 - usage/search state: `.automation/llm-chat-cli/*`
 - search embeddings: Ollama `/api/embed` using `embeddinggemma` (override by env)
 - auth: `LITELLM_MASTER_KEY` from `.env` is sent as `Authorization: Bearer ...` when present
-- auto vault context: enabled by default (`MASSA_VAULT_CHAT_RAG=off` disables auto retrieval)
+- auto vault context: enabled by default (`MASSA_AI_VAULT_CHAT_RAG=off` disables auto retrieval)
 - `/config` includes `vault_context` mode (`auto` or `disabled`)
 - vault context modes: semantic note chunks for content questions, manifest file lists for vault listing questions
 

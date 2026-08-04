@@ -81,16 +81,16 @@ async function withCapturedIo(run) {
 }
 
 async function callMain(argv, configPath) {
-  const originalEnv = process.env.MASSA_VAULT_SERVER_CONFIG_PATH;
-  process.env.MASSA_VAULT_SERVER_CONFIG_PATH = configPath;
+  const originalEnv = process.env.MASSA_AI_VAULT_SERVER_CONFIG_PATH;
+  process.env.MASSA_AI_VAULT_SERVER_CONFIG_PATH = configPath;
   try {
     return await main(
       argv,
       injectedCreateSupervisor ? { createSupervisor: injectedCreateSupervisor } : {}
     );
   } finally {
-    if (originalEnv === undefined) delete process.env.MASSA_VAULT_SERVER_CONFIG_PATH;
-    else process.env.MASSA_VAULT_SERVER_CONFIG_PATH = originalEnv;
+    if (originalEnv === undefined) delete process.env.MASSA_AI_VAULT_SERVER_CONFIG_PATH;
+    else process.env.MASSA_AI_VAULT_SERVER_CONFIG_PATH = originalEnv;
   }
 }
 

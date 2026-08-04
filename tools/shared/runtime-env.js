@@ -22,8 +22,8 @@ export function resetRuntimeEnvWarningForTests() {
  * layer runs first claims a key, and process.env set directly by the shell
  * or CI was already there before either layer ran.
  *
- * Each layer honors its own off-switch: MASSA_VAULT_HOME_CONFIG=off and
- * MASSA_VAULT_ENV_FILE=off. With both off this function touches nothing,
+ * Each layer honors its own off-switch: MASSA_AI_VAULT_HOME_CONFIG=off and
+ * MASSA_AI_VAULT_ENV_FILE=off. With both off this function touches nothing,
  * which is what keeps the test suite machine-independent regardless of when
  * (import time, entrypoint, or per call) a loader runs it.
  */

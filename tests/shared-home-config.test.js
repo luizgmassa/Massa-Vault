@@ -39,25 +39,25 @@ test("resolveHomeConfigPath honours XDG_CONFIG_HOME", () => {
   assert.equal(resolved, path.join("/xdg/config", "massa-ai-vault", "config.json"));
 });
 
-test("resolveHomeConfigPath honours MASSA_VAULT_HOME_CONFIG as an explicit path override", () => {
+test("resolveHomeConfigPath honours MASSA_AI_VAULT_HOME_CONFIG as an explicit path override", () => {
   const resolved = resolveHomeConfigPath({
-    env: { MASSA_VAULT_HOME_CONFIG: "/explicit/path/config.json" },
+    env: { MASSA_AI_VAULT_HOME_CONFIG: "/explicit/path/config.json" },
     homedir: () => SAMPLE_HOMEDIR
   });
   assert.equal(resolved, path.resolve("/explicit/path/config.json"));
 });
 
-test("resolveHomeConfigPath returns null when MASSA_VAULT_HOME_CONFIG is off", () => {
+test("resolveHomeConfigPath returns null when MASSA_AI_VAULT_HOME_CONFIG is off", () => {
   const resolved = resolveHomeConfigPath({
-    env: { MASSA_VAULT_HOME_CONFIG: "off" },
+    env: { MASSA_AI_VAULT_HOME_CONFIG: "off" },
     homedir: () => SAMPLE_HOMEDIR
   });
   assert.equal(resolved, null);
 });
 
-test("resolveHomeConfigPath returns null when MASSA_VAULT_HOME_CONFIG is an empty string", () => {
+test("resolveHomeConfigPath returns null when MASSA_AI_VAULT_HOME_CONFIG is an empty string", () => {
   const resolved = resolveHomeConfigPath({
-    env: { MASSA_VAULT_HOME_CONFIG: "" },
+    env: { MASSA_AI_VAULT_HOME_CONFIG: "" },
     homedir: () => SAMPLE_HOMEDIR
   });
   assert.equal(resolved, null);
@@ -107,7 +107,7 @@ test("projectHomeConfigEnv projects every mapped leaf to its env key", () => {
   assert.equal(projected.LITELLM_MASTER_KEY, "sk-test");
   assert.equal(projected.ROUTER_GATEWAY_PORT, "4100");
   assert.equal(projected.ROUTER_GATEWAY_REQUIRE_SMART_ROUTER_MODEL, "false");
-  assert.equal(projected.MASSA_VAULT_CHAT_SYSTEM_PROMPT, "be terse");
+  assert.equal(projected.MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT, "be terse");
   assert.equal(projected.MCP_SERVER_USERNAME, "mcp-user");
   assert.equal(projected.MCP_SERVER_PASSWORD, "mcp-pass");
 });
@@ -179,19 +179,19 @@ test("applyHomeConfigEnv sets unset keys and never overrides an already-set key"
     );
 
     const env = {
-      MASSA_VAULT_HOME_CONFIG: configPath,
-      MASSA_VAULT_CHAT_MODEL: "already-set-by-shell"
+      MASSA_AI_VAULT_HOME_CONFIG: configPath,
+      MASSA_AI_VAULT_CHAT_MODEL: "already-set-by-shell"
     };
 
     const result = applyHomeConfigEnv({ env, homedir: () => SAMPLE_HOMEDIR });
     assert.equal(result.loaded, true);
-    assert.equal(env.MASSA_VAULT_CHAT_MODEL, "already-set-by-shell");
-    assert.equal(env.MASSA_VAULT_CHAT_GATEWAY_URL, "http://127.0.0.1:4100");
+    assert.equal(env.MASSA_AI_VAULT_CHAT_MODEL, "already-set-by-shell");
+    assert.equal(env.MASSA_AI_VAULT_CHAT_GATEWAY_URL, "http://127.0.0.1:4100");
   });
 });
 
 test("applyHomeConfigEnv is a no-op when disabled", () => {
-  const env = { MASSA_VAULT_HOME_CONFIG: "off" };
+  const env = { MASSA_AI_VAULT_HOME_CONFIG: "off" };
   const result = applyHomeConfigEnv({ env, homedir: () => SAMPLE_HOMEDIR });
   assert.equal(result.loaded, false);
   assert.equal(result.setCount, 0);
@@ -206,7 +206,7 @@ test("readHomeConfigSection returns the named section or {} when absent", () => 
       "utf8"
     );
 
-    const env = { MASSA_VAULT_HOME_CONFIG: configPath };
+    const env = { MASSA_AI_VAULT_HOME_CONFIG: configPath };
     assert.deepEqual(readHomeConfigSection("notes", { env, homedir: () => SAMPLE_HOMEDIR }), {
       vault_path: "/tmp/vault",
       sync_strategy: "both"
@@ -216,7 +216,7 @@ test("readHomeConfigSection returns the named section or {} when absent", () => 
 });
 
 test("readHomeConfigSection returns {} when the home config is disabled", () => {
-  const env = { MASSA_VAULT_HOME_CONFIG: "off" };
+  const env = { MASSA_AI_VAULT_HOME_CONFIG: "off" };
   assert.deepEqual(readHomeConfigSection("notes", { env, homedir: () => SAMPLE_HOMEDIR }), {});
 });
 
@@ -224,8 +224,8 @@ test("buildHomeConfigDocument builds the nested document from a flat env map", (
   const document = buildHomeConfigDocument({
     envValues: {
       LITELLM_MASTER_KEY: "sk-live",
-      MASSA_VAULT_CHAT_MODEL: "smart-router",
-      MASSA_VAULT_CHAT_RAG: ""
+      MASSA_AI_VAULT_CHAT_MODEL: "smart-router",
+      MASSA_AI_VAULT_CHAT_RAG: ""
     },
     localNotesDocument: { vault_path: "/tmp/vault", sync_strategy: "both" }
   });
@@ -235,6 +235,18 @@ test("buildHomeConfigDocument builds the nested document from a flat env map", (
   assert.equal(document.chat.model, "smart-router");
   assert.equal("rag_enabled" in document.chat, false);
   assert.deepEqual(document.notes, { vault_path: "/tmp/vault", sync_strategy: "both" });
+});
+
+test("buildHomeConfigDocument ignores legacy MASSA_VAULT_-prefixed env keys after the massa-ai-vault rename", () => {
+  const document = buildHomeConfigDocument({
+    envValues: {
+      MASSA_VAULT_CHAT_MODEL: "legacy-model",
+      MASSA_VAULT_SERVER_LOG_DIR: "/tmp/legacy-logs"
+    }
+  });
+
+  assert.equal("chat" in document, false);
+  assert.equal("server" in document, false);
 });
 
 test("buildHomeConfigDocument omits the notes section when no local document is given", () => {

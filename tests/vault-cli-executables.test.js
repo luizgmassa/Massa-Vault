@@ -33,13 +33,13 @@ function withTempDir(run) {
 
 function runVaultCli(args, env) {
   // This spawns a real subprocess that loads its own runtime env (R2/T9):
-  // without forcing MASSA_VAULT_HOME_CONFIG=off, a developer machine with a
+  // without forcing MASSA_AI_VAULT_HOME_CONFIG=off, a developer machine with a
   // real, populated ~/.config/massa-ai-vault/config.json would leak that
   // file's settings into the child, making this test's outcome depend on
   // whether the file exists.
   const result = spawnSync(process.execPath, [VAULT_CLI, ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, MASSA_VAULT_HOME_CONFIG: "off", ...env },
+    env: { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off", ...env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -70,7 +70,7 @@ test("vault status delegates to massa-vault-server status JSON", () => {
     );
 
     const result = runVaultCli(["status", "--json"], {
-      MASSA_VAULT_SERVER_CONFIG_PATH: configPath
+      MASSA_AI_VAULT_SERVER_CONFIG_PATH: configPath
     });
     assert.equal(result.status, 0);
     assertOnlyExpectedStderr(result.stderr);

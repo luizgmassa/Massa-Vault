@@ -29,12 +29,12 @@ function readState(tempDir) {
 
 function runNotesCli(args, cwd) {
   // This spawns a real subprocess whose commands/runtime.js loads the runtime
-  // env at import time: without forcing MASSA_VAULT_HOME_CONFIG=off, a developer
+  // env at import time: without forcing MASSA_AI_VAULT_HOME_CONFIG=off, a developer
   // machine with a real ~/.config/massa-ai-vault/config.json would leak that
   // file's settings into the child (same guard as vault-cli-executables.test.js).
   const result = spawnSync(process.execPath, [NOTES_AUTOMATION_CLI, ...args], {
     cwd,
-    env: { ...process.env, MASSA_VAULT_HOME_CONFIG: "off" },
+    env: { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off" },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });

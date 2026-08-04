@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { loadRuntimeEnv, resetRuntimeEnvWarningForTests } from "../tools/shared/runtime-env.js";
 
-const TEST_KEY = "MASSA_VAULT_CHAT_MODEL";
-const ENV_KEYS = [TEST_KEY, "MASSA_VAULT_HOME_CONFIG", "MASSA_VAULT_ENV_FILE"];
+const TEST_KEY = "MASSA_AI_VAULT_CHAT_MODEL";
+const ENV_KEYS = [TEST_KEY, "MASSA_AI_VAULT_HOME_CONFIG", "MASSA_AI_VAULT_ENV_FILE"];
 
 function withTempDir(callback) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "shared-runtime-env-"));
@@ -50,7 +50,7 @@ const silentStderr = { write: () => {} };
 
 test("process.env beats both the home config and .env", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: writeHomeConfig(tempDir, "home-value"), [TEST_KEY]: "shell-value" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: writeHomeConfig(tempDir, "home-value"), [TEST_KEY]: "shell-value" }, () => {
       fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
 
       loadRuntimeEnv({ cwd: tempDir, stderr: silentStderr });
@@ -61,7 +61,7 @@ test("process.env beats both the home config and .env", () => {
 
 test("home config beats .env when process.env has no value", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: writeHomeConfig(tempDir, "home-value") }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: writeHomeConfig(tempDir, "home-value") }, () => {
       fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
 
       loadRuntimeEnv({ cwd: tempDir, stderr: silentStderr });
@@ -72,7 +72,7 @@ test("home config beats .env when process.env has no value", () => {
 
 test(".env applies when no home config and no process.env value are present", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: "off" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: "off" }, () => {
       fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
 
       loadRuntimeEnv({ cwd: tempDir, stderr: silentStderr });
@@ -83,7 +83,7 @@ test(".env applies when no home config and no process.env value are present", ()
 
 test("no layer sets the key when process.env, home config, and .env are all absent", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: "off" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: "off" }, () => {
       loadRuntimeEnv({ cwd: tempDir });
       assert.equal(process.env[TEST_KEY], undefined);
     });
@@ -92,7 +92,7 @@ test("no layer sets the key when process.env, home config, and .env are all abse
 
 test("loading a present .env emits exactly one deprecation warning per process", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: "off" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: "off" }, () => {
       fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
 
       let writes = 0;
@@ -107,9 +107,9 @@ test("loading a present .env emits exactly one deprecation warning per process",
   });
 });
 
-test("MASSA_VAULT_ENV_FILE=off leaves a present .env unread and emits no warning", () => {
+test("MASSA_AI_VAULT_ENV_FILE=off leaves a present .env unread and emits no warning", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: "off", MASSA_VAULT_ENV_FILE: "off" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: "off", MASSA_AI_VAULT_ENV_FILE: "off" }, () => {
       fs.writeFileSync(path.join(tempDir, ".env"), `${TEST_KEY}=dotenv-value\n`, "utf8");
 
       let writes = 0;
@@ -126,7 +126,7 @@ test("MASSA_VAULT_ENV_FILE=off leaves a present .env unread and emits no warning
 
 test("no .env present emits zero deprecation warnings", () => {
   withTempDir((tempDir) => {
-    withEnv({ MASSA_VAULT_HOME_CONFIG: "off" }, () => {
+    withEnv({ MASSA_AI_VAULT_HOME_CONFIG: "off" }, () => {
       let writes = 0;
       const stderr = { write: () => { writes += 1; } };
 

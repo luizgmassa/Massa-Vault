@@ -5,14 +5,14 @@
 - `npm run vault:chat` enters `tools/cli.js chat`, which proxies to `tools/llm-chat-cli/src/cli.js`, then `tools/llm-chat-cli/src/cli/main.js`.
 - Chat runs as an Ink TUI when stdin/stdout are TTY and `NO_COLOR` is absent; otherwise it falls back to the plain REPL. Passing prompt args runs a one-shot chat request.
 - Session state owns conversation history, token usage, latest routing metadata, `activeSystemPrompt`, and one-shot `addedContextEntries`.
-- System prompt sources are `MASSA_VAULT_CHAT_SYSTEM_PROMPT`, `--system`, and `/system set`.
+- System prompt sources are `MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT`, `--system`, and `/system set`.
 - `runPrompt` builds request messages from history plus the active system prompt, inserts staged history context and Vault RAG context immediately before the latest user prompt, then sends `model: smart-router`.
 - Router gateway classifies the request and forwards to the concrete LiteLLM model, while the CLI keeps `smart-router` as the stable request contract.
 - Transcript save/sync runs on `/exit`, process signals, idle sync after an assistant response, and finalization.
 
 ## Vault RAG
 
-- Auto vault context is enabled by default; `MASSA_VAULT_CHAT_RAG=off` disables automatic retrieval.
+- Auto vault context is enabled by default; `MASSA_AI_VAULT_CHAT_RAG=off` disables automatic retrieval.
 - The search index reads markdown from the configured Obsidian vault, ignores automation/binary/cache paths, and uses Ollama `/api/embed` with `embeddinggemma` by default.
 - Markdown files are split into 900-character chunks with 120-character overlap before embedding.
 - Semantic retrieval embeds the user query, ranks indexed chunks by cosine similarity, and injects the top context as system messages.

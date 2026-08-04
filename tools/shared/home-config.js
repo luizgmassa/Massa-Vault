@@ -17,24 +17,24 @@ export const HOME_CONFIG_ENV_MAP = Object.freeze(
     ["router.litellm_base_url", "ROUTER_LITELLM_BASE_URL"],
     ["router.policy_path", "ROUTER_POLICY_PATH"],
     ["router.require_smart_router_model", "ROUTER_GATEWAY_REQUIRE_SMART_ROUTER_MODEL"],
-    ["server.config_path", "MASSA_VAULT_SERVER_CONFIG_PATH"],
-    ["server.state_path", "MASSA_VAULT_SERVER_STATE_PATH"],
-    ["server.pid_path", "MASSA_VAULT_SERVER_PID_PATH"],
-    ["server.log_dir", "MASSA_VAULT_SERVER_LOG_DIR"],
+    ["server.config_path", "MASSA_AI_VAULT_SERVER_CONFIG_PATH"],
+    ["server.state_path", "MASSA_AI_VAULT_SERVER_STATE_PATH"],
+    ["server.pid_path", "MASSA_AI_VAULT_SERVER_PID_PATH"],
+    ["server.log_dir", "MASSA_AI_VAULT_SERVER_LOG_DIR"],
     ["mcp.config_path", "MCP_SERVER_CONFIG_PATH"],
     ["mcp.host", "MCP_SERVER_HOST"],
     ["mcp.port", "MCP_SERVER_PORT"],
     ["mcp.auth.username", "MCP_SERVER_USERNAME"],
     ["mcp.auth.password", "MCP_SERVER_PASSWORD"],
-    ["chat.gateway_url", "MASSA_VAULT_CHAT_GATEWAY_URL"],
-    ["chat.model", "MASSA_VAULT_CHAT_MODEL"],
-    ["chat.rag_enabled", "MASSA_VAULT_CHAT_RAG"],
-    ["chat.idle_sync_ms", "MASSA_VAULT_CHAT_IDLE_SYNC_MS"],
-    ["chat.system_prompt", "MASSA_VAULT_CHAT_SYSTEM_PROMPT"],
-    ["chat.ollama_url", "MASSA_VAULT_OLLAMA_URL"],
-    ["chat.embed_model", "MASSA_VAULT_EMBED_MODEL"],
-    ["chat.cli_config_path", "MASSA_VAULT_CLI_CONFIG_PATH"],
-    ["chat.notes_config_path", "MASSA_VAULT_NOTES_CONFIG_PATH"]
+    ["chat.gateway_url", "MASSA_AI_VAULT_CHAT_GATEWAY_URL"],
+    ["chat.model", "MASSA_AI_VAULT_CHAT_MODEL"],
+    ["chat.rag_enabled", "MASSA_AI_VAULT_CHAT_RAG"],
+    ["chat.idle_sync_ms", "MASSA_AI_VAULT_CHAT_IDLE_SYNC_MS"],
+    ["chat.system_prompt", "MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT"],
+    ["chat.ollama_url", "MASSA_AI_VAULT_OLLAMA_URL"],
+    ["chat.embed_model", "MASSA_AI_VAULT_EMBED_MODEL"],
+    ["chat.cli_config_path", "MASSA_AI_VAULT_CLI_CONFIG_PATH"],
+    ["chat.notes_config_path", "MASSA_AI_VAULT_NOTES_CONFIG_PATH"]
   ])
 );
 
@@ -82,12 +82,12 @@ export function setPath(document, dottedPath, value) {
 }
 
 /**
- * Pure over injected `env`/`homedir`. Order: MASSA_VAULT_HOME_CONFIG (explicit
+ * Pure over injected `env`/`homedir`. Order: MASSA_AI_VAULT_HOME_CONFIG (explicit
  * path override, or "off"/"" to disable) -> XDG_CONFIG_HOME -> homedir()/.config.
  * Returns null when disabled (R2).
  */
 export function resolveHomeConfigPath({ env = process.env, homedir = os.homedir } = {}) {
-  const override = env.MASSA_VAULT_HOME_CONFIG;
+  const override = env.MASSA_AI_VAULT_HOME_CONFIG;
   if (override === "off" || override === "") return null;
   if (!isAbsent(override)) return path.resolve(override);
 

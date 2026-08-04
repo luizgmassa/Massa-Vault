@@ -355,7 +355,7 @@ export function createVaultCli({
     const targetPath = resolveHomeConfigPath({ homedir });
     if (!targetPath) {
       logError(
-        "[vault-cli] home config is disabled (MASSA_VAULT_HOME_CONFIG=off); nothing to migrate."
+        "[vault-cli] home config is disabled (MASSA_AI_VAULT_HOME_CONFIG=off); nothing to migrate."
       );
       exit(1);
       return;
