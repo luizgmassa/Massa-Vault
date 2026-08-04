@@ -132,4 +132,7 @@ None. No coverage gap, no looser-than-spec assertion, no undocumented production
 
 ## CI calibration evidence (appended post-verification)
 
-Pending the PR's CI run — recorded here once available, per the parent's E2E-07 convention.
+Per the parent's E2E-07 convention (two green CI samples on `ubuntu-latest`):
+
+1. PR #14 initial run, head `ca2fc22e` — `test (25)` pass 26s (includes the post-suite porcelain step), `coverage` pass 28s, CodeQL + Analyze ×2 pass. Zero E2E flakes.
+2. The bookkeeping push recording this evidence triggers the second sample — confirmed green on the PR before merge approval.
