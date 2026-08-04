@@ -29,8 +29,8 @@ function deadlineTimer(ms) {
  * stores for real.
  */
 export const KILL_SWITCH_ENV = Object.freeze({
-  MASSA_VAULT_HOME_CONFIG: "off",
-  MASSA_VAULT_ENV_FILE: "off"
+  MASSA_AI_VAULT_HOME_CONFIG: "off",
+  MASSA_AI_VAULT_ENV_FILE: "off"
 });
 
 /**

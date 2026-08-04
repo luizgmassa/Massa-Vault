@@ -72,10 +72,10 @@ function runChatOnce(t, { gatewayUrl, vaultDir, cliConfigPath, prompt }) {
   return spawnChild(t, process.execPath, [repoPath("tools", "cli.js"), "chat", ...prompt], {
     cwd: repoPath("."),
     env: childEnv({
-      MASSA_VAULT_CHAT_GATEWAY_URL: gatewayUrl,
-      MASSA_VAULT_CHAT_RAG: "false",
+      MASSA_AI_VAULT_CHAT_GATEWAY_URL: gatewayUrl,
+      MASSA_AI_VAULT_CHAT_RAG: "false",
       VAULT_PATH: vaultDir,
-      MASSA_VAULT_CLI_CONFIG_PATH: cliConfigPath
+      MASSA_AI_VAULT_CLI_CONFIG_PATH: cliConfigPath
     }),
     name: "chat-client"
   });

@@ -43,10 +43,10 @@ export function buildGatewayOptions() {
 
 export function isVaultContextEnabled(env = process.env) {
   const config = loadVaultCliRuntimeConfig({ env });
-  if (env.MASSA_VAULT_CHAT_RAG === undefined) {
+  if (env.MASSA_AI_VAULT_CHAT_RAG === undefined) {
     return Boolean(config.chat.ragEnabled);
   }
-  const raw = String(env.MASSA_VAULT_CHAT_RAG || "")
+  const raw = String(env.MASSA_AI_VAULT_CHAT_RAG || "")
     .trim()
     .toLowerCase();
   if (!raw) return true;

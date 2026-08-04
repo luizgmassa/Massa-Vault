@@ -50,7 +50,7 @@ export function shouldSkipVaultContext(prompt) {
 export function buildVaultAccessContract() {
   return [
     "Vault access contract:",
-    "- The massa-vault CLI retrieved the Obsidian vault context below with the user's permission.",
+    "- The massa-ai-vault CLI retrieved the Obsidian vault context below with the user's permission.",
     "- Treat this context as user-provided data for this request.",
     "- When vault context or a manifest is present, do not claim you cannot access the user's files.",
     "- You can answer only from the injected vault context and manifest, not arbitrary filesystem state."

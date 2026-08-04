@@ -127,7 +127,7 @@ function buildConfig({
 }
 
 /**
- * Builds the `massa-vault` client CLI with every side-effecting collaborator
+ * Builds the `mav` client CLI with every side-effecting collaborator
  * injected behind a named default.
  *
  * The defaults reproduce the production wiring exactly, so `createVaultCli()`
@@ -355,7 +355,7 @@ export function createVaultCli({
     const targetPath = resolveHomeConfigPath({ homedir });
     if (!targetPath) {
       logError(
-        "[vault-cli] home config is disabled (MASSA_VAULT_HOME_CONFIG=off); nothing to migrate."
+        "[vault-cli] home config is disabled (MASSA_AI_VAULT_HOME_CONFIG=off); nothing to migrate."
       );
       exit(1);
       return;
@@ -369,7 +369,7 @@ export function createVaultCli({
     const vaultPath = document.notes && document.notes.vault_path;
     if (!vaultPath) {
       logError(
-        "[vault-cli] refusing to migrate: notes.vault_path is missing or empty. Run `massa-vault configure` first."
+        "[vault-cli] refusing to migrate: notes.vault_path is missing or empty. Run `mav configure` first."
       );
       exit(1);
       return;

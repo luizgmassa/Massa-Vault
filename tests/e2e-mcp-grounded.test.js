@@ -69,8 +69,8 @@ async function startMcpServer(t) {
         cwd: workspace,
         env: childEnv({
           MCP_SERVER_CONFIG_PATH: mcpConfigPath,
-          MASSA_VAULT_NOTES_CONFIG_PATH: notesConfigPath,
-          MASSA_VAULT_OLLAMA_URL: embed.url
+          MASSA_AI_VAULT_NOTES_CONFIG_PATH: notesConfigPath,
+          MASSA_AI_VAULT_OLLAMA_URL: embed.url
         }),
         name: "mcp-server"
       }

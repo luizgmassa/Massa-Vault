@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const VAULT_CLI = path.resolve("tools/cli.js");
 const ENV_DEPRECATION_NOTICE =
-  "massa-vault: loading configuration from .env is deprecated; run `massa-vault config migrate` to move it to the home config.";
+  "mav: loading configuration from .env is deprecated; run `mav config migrate` to move it to the home config.";
 
 // This spawns real subprocesses (tools/cli.js proxying to tools/server/src/cli.js)
 // inheriting this repo's actual cwd and env. When a developer has a real .env
@@ -33,13 +33,13 @@ function withTempDir(run) {
 
 function runVaultCli(args, env) {
   // This spawns a real subprocess that loads its own runtime env (R2/T9):
-  // without forcing MASSA_VAULT_HOME_CONFIG=off, a developer machine with a
+  // without forcing MASSA_AI_VAULT_HOME_CONFIG=off, a developer machine with a
   // real, populated ~/.config/massa-ai-vault/config.json would leak that
   // file's settings into the child, making this test's outcome depend on
   // whether the file exists.
   const result = spawnSync(process.execPath, [VAULT_CLI, ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, MASSA_VAULT_HOME_CONFIG: "off", ...env },
+    env: { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off", ...env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -50,7 +50,27 @@ function runVaultCli(args, env) {
   };
 }
 
-test("vault status delegates to massa-vault-server status JSON", () => {
+test("vault cli emits the exact .env deprecation notice when a legacy .env is present", () => {
+  // Plants a .env in a temp cwd so the notice fires deterministically,
+  // independent of whether the developer's checkout has one -- this is the
+  // content-level sensor on the notice string itself (validation mutant C).
+  withTempDir((tempDir) => {
+    fs.writeFileSync(path.join(tempDir, ".env"), "MASSA_AI_VAULT_CHAT_MODEL=from-env\n", "utf8");
+    const env = { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off" };
+    delete env.MASSA_AI_VAULT_ENV_FILE;
+    const result = spawnSync(process.execPath, [VAULT_CLI, "config", "path"], {
+      cwd: tempDir,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    assert.equal(Number(result.status), 0);
+    const stderrLines = String(result.stderr || "").trim().split("\n").filter(Boolean);
+    assert.deepEqual(stderrLines, [ENV_DEPRECATION_NOTICE]);
+  });
+});
+
+test("vault status delegates to mavs status JSON", () => {
   withTempDir((tempDir) => {
     const configPath = path.join(tempDir, "server.config.json");
     const statePath = path.join(tempDir, "server-state.json");
@@ -70,7 +90,7 @@ test("vault status delegates to massa-vault-server status JSON", () => {
     );
 
     const result = runVaultCli(["status", "--json"], {
-      MASSA_VAULT_SERVER_CONFIG_PATH: configPath
+      MASSA_AI_VAULT_SERVER_CONFIG_PATH: configPath
     });
     assert.equal(result.status, 0);
     assertOnlyExpectedStderr(result.stderr);

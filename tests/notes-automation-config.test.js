@@ -41,7 +41,7 @@ const CONFIG_ENV_KEYS = [
   "NOTES_AUTOMATION_GDRIVE_BIN",
   "NOTES_AUTOMATION_GDRIVE_REMOTE_PATH",
   "VAULT_PATH",
-  "MASSA_VAULT_HOME_CONFIG"
+  "MASSA_AI_VAULT_HOME_CONFIG"
 ];
 
 function withConfigEnv(overrides, callback) {
@@ -54,9 +54,9 @@ function withConfigEnv(overrides, callback) {
   // falls through resolveHomeConfigPath() to the real default
   // homedir()/.config/massa-ai-vault/config.json, which would read a real,
   // populated home config on a developer machine. Tests that intentionally
-  // exercise the home-config layer (below) set MASSA_VAULT_HOME_CONFIG to an
+  // exercise the home-config layer (below) set MASSA_AI_VAULT_HOME_CONFIG to an
   // explicit fixture path inside their own callback, after this default runs.
-  process.env.MASSA_VAULT_HOME_CONFIG = "off";
+  process.env.MASSA_AI_VAULT_HOME_CONFIG = "off";
   Object.assign(process.env, overrides);
 
   try {
@@ -407,7 +407,7 @@ test("home config's notes section beats the deprecated .local.json for the defau
     writeHomeConfig(homeConfigPath, {
       notes: { vault_path: path.join(SCRATCH_ROOT, "home-vault"), branch: "home" }
     });
-    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+    process.env.MASSA_AI_VAULT_HOME_CONFIG = homeConfigPath;
 
     try {
       const config = loadConfig(DEFAULT_CONFIG_PATH);
@@ -431,7 +431,7 @@ test("environment values still override the home config's notes section", () => 
       writeHomeConfig(homeConfigPath, {
         notes: { vault_path: path.join(SCRATCH_ROOT, "home-vault"), branch: "home" }
       });
-      process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = homeConfigPath;
 
       const config = loadConfig(DEFAULT_CONFIG_PATH);
       assert.equal(config.vaultPath, path.join(SCRATCH_ROOT, "env-vault"));
@@ -458,7 +458,7 @@ test("a non-default configPath gets no home-config injection", () => {
     writeHomeConfig(homeConfigPath, {
       notes: { vault_path: "/should-not-apply", branch: "should-not-apply" }
     });
-    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+    process.env.MASSA_AI_VAULT_HOME_CONFIG = homeConfigPath;
 
     const config = loadConfig(configPath);
     assert.equal(config.vaultPath, path.join(tempDir, "temp-base-vault"));
@@ -473,7 +473,7 @@ test("the T1 vault-root guard still fires through the home config notes layer", 
     writeHomeConfig(homeConfigPath, {
       notes: { vault_path: REPO_ROOT, sync_strategy: "both" }
     });
-    process.env.MASSA_VAULT_HOME_CONFIG = homeConfigPath;
+    process.env.MASSA_AI_VAULT_HOME_CONFIG = homeConfigPath;
 
     assert.throws(() => loadConfig(DEFAULT_CONFIG_PATH), VaultPathError);
   });

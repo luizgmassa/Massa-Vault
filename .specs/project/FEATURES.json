@@ -1,7 +1,30 @@
 {
   "version": 1,
-  "active_feature": "e2e-extended-journeys",
+  "active_feature": "rename-massa-ai-vault",
   "features": [
+    {
+      "slug": "rename-massa-ai-vault",
+      "title": "Project rename to massa-ai-vault: package/bins (mav/mavs), MASSA_AI_VAULT_ env prefix, emitted strings, docs, remote",
+      "status": "verified",
+      "workflow": "spec-driven",
+      "size": "large",
+      "sessionId": "spec-rename-massa-ai-vault",
+      "artifacts": {
+        "spec": ".specs/features/rename-massa-ai-vault/spec.md",
+        "design": ".specs/features/rename-massa-ai-vault/design.md",
+        "tasks": ".specs/features/rename-massa-ai-vault/tasks.md",
+        "validation": ".specs/features/rename-massa-ai-vault/validation.md"
+      },
+      "requirements": 8,
+      "tasks": 4,
+      "planChallenge": {
+        "gate": "full",
+        "mode": "pre_mortem",
+        "outcome": "revised",
+        "criticalFindings": 0,
+        "highFindings": 2
+      }
+    },
     {
       "slug": "e2e-extended-journeys",
       "title": "E2E extended journeys: sync conflict path (E2E-12) and fake-rclone gdrive both-mode journey (E2E-13)",

@@ -181,7 +181,7 @@ async function captureProcessPromptBody({ prompt, tempDir }) {
   fs.writeFileSync(path.join(vaultPath, "Beta.md"), "# Beta\nbeta reference note", "utf8");
 
   let capturedBody = null;
-  await withEnvValue("MASSA_VAULT_CHAT_RAG", undefined, async () => {
+  await withEnvValue("MASSA_AI_VAULT_CHAT_RAG", undefined, async () => {
     await withEnvValue("VAULT_PATH", vaultPath, async () => {
       await withMockEmbeddings(async () => {
         await processPrompt({
@@ -446,9 +446,9 @@ test("processPrompt warns and continues when vault retrieval fails", async () =>
   });
 });
 
-test("MASSA_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports disabled", async () => {
-  const previousRag = process.env.MASSA_VAULT_CHAT_RAG;
-  process.env.MASSA_VAULT_CHAT_RAG = "off";
+test("MASSA_AI_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports disabled", async () => {
+  const previousRag = process.env.MASSA_AI_VAULT_CHAT_RAG;
+  process.env.MASSA_AI_VAULT_CHAT_RAG = "off";
   try {
     await withTempDir(async () => {
       writeMinimalConfig(process.cwd());
@@ -505,9 +505,9 @@ test("MASSA_VAULT_CHAT_RAG=off disables automatic retrieval and /config reports 
     });
   } finally {
     if (previousRag === undefined) {
-      delete process.env.MASSA_VAULT_CHAT_RAG;
+      delete process.env.MASSA_AI_VAULT_CHAT_RAG;
     } else {
-      process.env.MASSA_VAULT_CHAT_RAG = previousRag;
+      process.env.MASSA_AI_VAULT_CHAT_RAG = previousRag;
     }
   }
 });

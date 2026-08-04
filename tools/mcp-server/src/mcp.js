@@ -105,7 +105,7 @@ export function createMcpServices({
 export function createMcpServer(services) {
   const server = new McpServer(
     {
-      name: "massa-vault-grounded-sources",
+      name: "massa-ai-vault-grounded-sources",
       version: "1.0.0"
     },
     {

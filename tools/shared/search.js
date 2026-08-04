@@ -393,7 +393,7 @@ export async function searchIndex({
 
 export function getSearchDefaults() {
   return {
-    baseUrl: process.env.MASSA_VAULT_OLLAMA_URL || DEFAULT_OLLAMA_BASE_URL,
-    model: process.env.MASSA_VAULT_EMBED_MODEL || DEFAULT_EMBED_MODEL
+    baseUrl: process.env.MASSA_AI_VAULT_OLLAMA_URL || DEFAULT_OLLAMA_BASE_URL,
+    model: process.env.MASSA_AI_VAULT_EMBED_MODEL || DEFAULT_EMBED_MODEL
   };
 }

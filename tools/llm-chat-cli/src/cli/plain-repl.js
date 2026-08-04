@@ -107,7 +107,7 @@ export function createPlainReplRunner({
         }
       };
 
-      console.log("massa-vault chat started. type / to discover commands.");
+      console.log("massa-ai-vault chat started. type / to discover commands.");
 
       try {
         while (true) {

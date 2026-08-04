@@ -35,7 +35,7 @@ test("home config's chat section beats config/vault-cli.config.json for the defa
   const homeConfigPath = path.join(SCRATCH_ROOT, "home-config.json");
   writeHomeConfig(homeConfigPath, { chat: { model: "home-model" } });
 
-  const config = loadVaultCliRuntimeConfig({ env: { MASSA_VAULT_HOME_CONFIG: homeConfigPath } });
+  const config = loadVaultCliRuntimeConfig({ env: { MASSA_AI_VAULT_HOME_CONFIG: homeConfigPath } });
   assert.equal(config.chat.model, "home-model");
   // Home config only overrides the keys it sets -- the tracked file's other
   // chat field must still apply.
@@ -49,8 +49,8 @@ test("environment values still override the home config's chat section", () => {
 
   const config = loadVaultCliRuntimeConfig({
     env: {
-      MASSA_VAULT_HOME_CONFIG: homeConfigPath,
-      MASSA_VAULT_CHAT_MODEL: "env-model"
+      MASSA_AI_VAULT_HOME_CONFIG: homeConfigPath,
+      MASSA_AI_VAULT_CHAT_MODEL: "env-model"
     }
   });
   assert.equal(config.chat.model, "env-model");
@@ -66,7 +66,7 @@ test("a non-default configPath gets no home-config injection", () => {
 
   const config = loadVaultCliRuntimeConfig({
     configPath,
-    env: { MASSA_VAULT_HOME_CONFIG: homeConfigPath }
+    env: { MASSA_AI_VAULT_HOME_CONFIG: homeConfigPath }
   });
   assert.equal(config.chat.model, "explicit-model");
 });
@@ -74,6 +74,6 @@ test("a non-default configPath gets no home-config injection", () => {
 test("no home config present leaves the tracked config's chat section untouched", () => {
   writeDefaultTrackedConfig({ chat: { model: "tracked-only-model" } });
 
-  const config = loadVaultCliRuntimeConfig({ env: { MASSA_VAULT_HOME_CONFIG: "off" } });
+  const config = loadVaultCliRuntimeConfig({ env: { MASSA_AI_VAULT_HOME_CONFIG: "off" } });
   assert.equal(config.chat.model, "tracked-only-model");
 });

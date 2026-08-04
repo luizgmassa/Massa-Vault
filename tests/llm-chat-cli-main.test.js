@@ -48,15 +48,15 @@ function withEnvVar(name, value, fn) {
 // --- parseArguments -------------------------------------------------------
 
 test("parseArguments splices out --system <prompt> and returns the remaining args", () => {
-  withEnvVar("MASSA_VAULT_CHAT_SYSTEM_PROMPT", undefined, () => {
+  withEnvVar("MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT", undefined, () => {
     const result = parseArguments(["--system", "be terse", "hello", "world"]);
     assert.deepEqual(result.args, ["hello", "world"]);
     assert.equal(result.systemPrompt, "be terse");
   });
 });
 
-test("parseArguments falls back to MASSA_VAULT_CHAT_SYSTEM_PROMPT when --system is absent", () => {
-  withEnvVar("MASSA_VAULT_CHAT_SYSTEM_PROMPT", "env prompt", () => {
+test("parseArguments falls back to MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT when --system is absent", () => {
+  withEnvVar("MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT", "env prompt", () => {
     const result = parseArguments(["hello"]);
     assert.deepEqual(result.args, ["hello"]);
     assert.equal(result.systemPrompt, "env prompt");
@@ -64,7 +64,7 @@ test("parseArguments falls back to MASSA_VAULT_CHAT_SYSTEM_PROMPT when --system 
 });
 
 test("parseArguments yields an empty systemPrompt when neither --system nor the env var is set", () => {
-  withEnvVar("MASSA_VAULT_CHAT_SYSTEM_PROMPT", undefined, () => {
+  withEnvVar("MASSA_AI_VAULT_CHAT_SYSTEM_PROMPT", undefined, () => {
     const result = parseArguments(["hello"]);
     assert.deepEqual(result.args, ["hello"]);
     assert.equal(result.systemPrompt, "");

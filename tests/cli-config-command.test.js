@@ -69,7 +69,7 @@ async function expectExit(run, expectedCode) {
 const FIXTURE_ENV = [
   "LITELLM_MASTER_KEY=sk-fixture-key",
   "ROUTER_GATEWAY_PORT=4100",
-  "MASSA_VAULT_CHAT_MODEL=smart-router",
+  "MASSA_AI_VAULT_CHAT_MODEL=smart-router",
   ""
 ].join("\n");
 
@@ -101,8 +101,8 @@ test("vault cli config command table and usage banner mention path and migrate",
 test("vault cli config path prints the resolved home config path", async () => {
   await withTempDir(async (tempDir) => {
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "path"]);
       cli.configCommand("path", []);
       assert.deepEqual(calls.log, [targetPath]);
@@ -111,8 +111,8 @@ test("vault cli config path prints the resolved home config path", async () => {
 });
 
 test("vault cli config path prints an empty line when the home config is disabled", async () => {
-  await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-    process.env.MASSA_VAULT_HOME_CONFIG = "off";
+  await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+    process.env.MASSA_AI_VAULT_HOME_CONFIG = "off";
     const { cli, calls } = harness(["config", "path"]);
     cli.configCommand("path", []);
     assert.deepEqual(calls.log, [""]);
@@ -124,8 +124,8 @@ test("vault cli config migrate builds and writes the home config from .env and .
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
       cli.configCommand("migrate", []);
 
@@ -159,8 +159,8 @@ test("vault cli config migrate tightens a pre-existing home config directory to 
     fs.chmodSync(targetDir, 0o755);
     assert.equal(fs.statSync(targetDir).mode & 0o777, 0o755);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
       cli.configCommand("migrate", []);
 
@@ -181,8 +181,8 @@ test("vault cli config migrate refuses to clobber an existing home config withou
     );
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
 
       await expectExit(() => cli.configCommand("migrate", []), 1);
@@ -204,8 +204,8 @@ test("vault cli config migrate --force overwrites an existing home config", asyn
     );
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli } = harness(["config", "migrate", "--force"], { envPath, localNotesConfigPath });
       cli.configCommand("migrate", ["--force"]);
 
@@ -222,8 +222,8 @@ test("vault cli config migrate --dry-run prints the document and writes nothing"
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "migrate", "--dry-run"], {
         envPath,
         localNotesConfigPath
@@ -245,15 +245,15 @@ test("vault cli config migrate refuses to write a document with a missing notes.
     const localNotesConfigPath = path.join(tempDir, "notes-automation.local.json");
     fs.writeFileSync(localNotesConfigPath, JSON.stringify({ vault_path: "" }), "utf8");
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
 
       await expectExit(() => cli.configCommand("migrate", []), 1);
       assert.ok(
         calls.logError.some((line) => line.includes("notes.vault_path is missing or empty"))
       );
-      assert.ok(calls.logError.some((line) => line.includes("massa-vault configure")));
+      assert.ok(calls.logError.some((line) => line.includes("mav configure")));
       assert.equal(fs.existsSync(targetPath), false);
     });
   });
@@ -262,8 +262,8 @@ test("vault cli config migrate refuses to write a document with a missing notes.
 test("vault cli config migrate refuses to write when the home config is disabled", async () => {
   await withTempDir(async (tempDir) => {
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = "off";
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = "off";
       const { cli, calls } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
 
       await expectExit(() => cli.configCommand("migrate", []), 1);
@@ -281,8 +281,8 @@ test("vault cli config rejects an unknown subcommand with exit 1", async () => {
 test("vault cli main dispatches config path through the top-level cmd switch", async () => {
   await withTempDir(async (tempDir) => {
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "path"]);
       await cli.main();
       assert.deepEqual(calls.log, [targetPath]);
@@ -295,8 +295,8 @@ test("vault cli main dispatches config migrate through the top-level cmd switch"
     const targetPath = path.join(tempDir, "massa-ai-vault", "config.json");
     const { envPath, localNotesConfigPath } = writeFixtures(tempDir);
 
-    await withSavedEnv(["MASSA_VAULT_HOME_CONFIG"], async () => {
-      process.env.MASSA_VAULT_HOME_CONFIG = targetPath;
+    await withSavedEnv(["MASSA_AI_VAULT_HOME_CONFIG"], async () => {
+      process.env.MASSA_AI_VAULT_HOME_CONFIG = targetPath;
       const { cli, calls } = harness(["config", "migrate"], { envPath, localNotesConfigPath });
       await cli.main();
       assert.ok(fs.existsSync(targetPath));

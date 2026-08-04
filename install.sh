@@ -437,7 +437,7 @@ report_home_config() {
   if [[ -n "$home_config_path" && -f "$home_config_path" ]]; then
     log "home config: present ($home_config_path)"
   else
-    warn "home config is missing (will be created via 'massa-vault config migrate')"
+    warn "home config is missing (will be created via 'mav config migrate')"
   fi
 }
 

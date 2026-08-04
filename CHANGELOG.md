@@ -13,6 +13,25 @@ automatically.
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the project to `massa-ai-vault`, matching the renamed GitHub
+  repository. The npm package is now `massa-ai-vault-tools`; the CLI bins are
+  `mav` (was `massa-vault`) and `mavs` (was `massa-vault-server`), with the old
+  command names removed. Emitted strings follow the new identity: the server
+  log tag is `[mavs]`, client warnings use the `mav:` prefix, the chat TUI
+  header reads "Massa AI Vault Assistant", and the MCP server announces itself
+  as `massa-ai-vault-grounded-sources`.
+- Renamed every `MASSA_VAULT_*` environment variable to `MASSA_AI_VAULT_*`
+  (hard cut, no legacy fallback), including the `MASSA_AI_VAULT_HOME_CONFIG`
+  and `MASSA_AI_VAULT_ENV_FILE` kill-switches and the per-service
+  `MASSA_AI_VAULT_SERVER_<NAME>_ENABLED` overrides. **User action:** rename any
+  old-prefix keys in your `.env` or shell profile — old keys are now silently
+  ignored. The home config file at `~/.config/massa-ai-vault/config.json` is
+  unaffected (its keys are dotted document paths). **User action:** update MCP
+  client configs that reference the grounded-sources server to the new
+  `massa-ai-vault-sources` / `massa-ai-vault-grounded-sources` names.
+
 ## [1.7.0] - 2026-08-04
 
 ### Added

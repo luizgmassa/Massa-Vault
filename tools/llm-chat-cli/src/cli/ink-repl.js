@@ -588,7 +588,7 @@ export function InkChatApp({
   }, [finalizeExit]);
 
   useEffect(() => {
-    appendMessage("system", "massa-vault chat started. type / to discover commands.");
+    appendMessage("system", "massa-ai-vault chat started. type / to discover commands.");
   }, [appendMessage]);
 
   useEffect(() => {
@@ -775,7 +775,7 @@ export function InkChatApp({
         paddingX: 1,
         flexDirection: "column"
       },
-      createElement(Text, { color: CHAT_THEME.header, bold: true }, "Massa Vault AI Assistant"),
+      createElement(Text, { color: CHAT_THEME.header, bold: true }, "Massa AI Vault Assistant"),
       createElement(Text, { color: "gray" }, headerMeta)
     ),
     createElement(

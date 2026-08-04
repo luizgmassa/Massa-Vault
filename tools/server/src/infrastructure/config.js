@@ -93,7 +93,7 @@ function applyRuntimeEnvOverrides(serviceName, service, env) {
 
 function normalizeService(name, raw, globalDefaults, env) {
   const service = applyRuntimeEnvOverrides(name, raw || {}, env);
-  const enabledKey = `MASSA_VAULT_SERVER_${name.replace(/-/g, "_").toUpperCase()}_ENABLED`;
+  const enabledKey = `MASSA_AI_VAULT_SERVER_${name.replace(/-/g, "_").toUpperCase()}_ENABLED`;
   return {
     name,
     enabled: toBoolean(env[enabledKey], service.enabled !== false),
@@ -120,7 +120,7 @@ export function loadServerConfig({
 } = {}) {
   loadRuntimeEnv({ envFile: ".env" });
   const resolvedConfigPath = path.resolve(
-    configPath || env.MASSA_VAULT_SERVER_CONFIG_PATH || DEFAULT_SERVER_CONFIG_PATH
+    configPath || env.MASSA_AI_VAULT_SERVER_CONFIG_PATH || DEFAULT_SERVER_CONFIG_PATH
   );
   const document = readConfigDocument(resolvedConfigPath);
   const startupTimeoutMs = toPositiveNumber(document.startup_timeout_ms, 30_000);
@@ -135,17 +135,17 @@ export function loadServerConfig({
     configPath: resolvedConfigPath,
     statePath: resolveFromConfigBase(
       resolvedConfigPath,
-      env.MASSA_VAULT_SERVER_STATE_PATH || document.state_path,
+      env.MASSA_AI_VAULT_SERVER_STATE_PATH || document.state_path,
       DEFAULT_SERVER_STATE_PATH
     ),
     pidPath: resolveFromConfigBase(
       resolvedConfigPath,
-      env.MASSA_VAULT_SERVER_PID_PATH || document.pid_path,
+      env.MASSA_AI_VAULT_SERVER_PID_PATH || document.pid_path,
       DEFAULT_SERVER_PID_PATH
     ),
     logDir: resolveFromConfigBase(
       resolvedConfigPath,
-      env.MASSA_VAULT_SERVER_LOG_DIR || document.log_dir,
+      env.MASSA_AI_VAULT_SERVER_LOG_DIR || document.log_dir,
       DEFAULT_SERVER_LOG_DIR
     ),
     startupTimeoutMs,

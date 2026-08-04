@@ -14,11 +14,11 @@ import {
 // changes made after module import are visible on the next call.
 
 const TOUCHED_ENV_KEYS = [
-  "MASSA_VAULT_CHAT_MODEL",
-  "MASSA_VAULT_CHAT_GATEWAY_URL",
-  "MASSA_VAULT_CHAT_IDLE_SYNC_MS",
-  "MASSA_VAULT_NOTES_CONFIG_PATH",
-  "MASSA_VAULT_CLI_CONFIG_PATH"
+  "MASSA_AI_VAULT_CHAT_MODEL",
+  "MASSA_AI_VAULT_CHAT_GATEWAY_URL",
+  "MASSA_AI_VAULT_CHAT_IDLE_SYNC_MS",
+  "MASSA_AI_VAULT_NOTES_CONFIG_PATH",
+  "MASSA_AI_VAULT_CLI_CONFIG_PATH"
 ];
 
 function withEnv(overrides, fn) {
@@ -39,29 +39,29 @@ function withEnv(overrides, fn) {
 }
 
 test("resolveDefaultGatewayModel reflects env changes made after import", () => {
-  withEnv({ MASSA_VAULT_CHAT_MODEL: "custom-model-a" }, () => {
+  withEnv({ MASSA_AI_VAULT_CHAT_MODEL: "custom-model-a" }, () => {
     assert.equal(resolveDefaultGatewayModel(), "custom-model-a");
   });
-  withEnv({ MASSA_VAULT_CHAT_MODEL: "custom-model-b" }, () => {
+  withEnv({ MASSA_AI_VAULT_CHAT_MODEL: "custom-model-b" }, () => {
     assert.equal(resolveDefaultGatewayModel(), "custom-model-b");
   });
 });
 
 test("resolveDefaultGatewayUrl reflects the env override per call", () => {
-  withEnv({ MASSA_VAULT_CHAT_GATEWAY_URL: "http://127.0.0.1:59321" }, () => {
+  withEnv({ MASSA_AI_VAULT_CHAT_GATEWAY_URL: "http://127.0.0.1:59321" }, () => {
     assert.equal(resolveDefaultGatewayUrl(), "http://127.0.0.1:59321");
   });
 });
 
 test("resolveDefaultIdleSyncMs coerces the env override per call", () => {
-  withEnv({ MASSA_VAULT_CHAT_IDLE_SYNC_MS: "12345" }, () => {
+  withEnv({ MASSA_AI_VAULT_CHAT_IDLE_SYNC_MS: "12345" }, () => {
     assert.equal(resolveDefaultIdleSyncMs(), 12345);
   });
 });
 
 test("resolveDefaultConfigPath honors an absolute env override per call", () => {
   const override = path.resolve("/tmp/arch3-notes-config.json");
-  withEnv({ MASSA_VAULT_NOTES_CONFIG_PATH: override }, () => {
+  withEnv({ MASSA_AI_VAULT_NOTES_CONFIG_PATH: override }, () => {
     assert.equal(resolveDefaultConfigPath(), override);
   });
 });

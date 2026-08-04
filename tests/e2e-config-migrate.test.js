@@ -20,8 +20,8 @@ import {
 
 function migrateEnv(workspace) {
   const env = { ...process.env };
-  delete env.MASSA_VAULT_HOME_CONFIG;
-  delete env.MASSA_VAULT_ENV_FILE;
+  delete env.MASSA_AI_VAULT_HOME_CONFIG;
+  delete env.MASSA_AI_VAULT_ENV_FILE;
   delete env.VAULT_PATH;
   env.XDG_CONFIG_HOME = path.join(workspace, "xdg");
   env.HOME = path.join(workspace, "home");
@@ -34,7 +34,7 @@ function migrateFixtures(t) {
   fs.mkdirSync(vaultDir, { recursive: true });
   fs.writeFileSync(
     path.join(workspace, ".env"),
-    "ROUTER_GATEWAY_PORT=4321\nMASSA_VAULT_CHAT_MODEL=e2e-migrated\n",
+    "ROUTER_GATEWAY_PORT=4321\nMASSA_AI_VAULT_CHAT_MODEL=e2e-migrated\n",
     "utf8"
   );
   fs.mkdirSync(path.join(workspace, "config"), { recursive: true });
