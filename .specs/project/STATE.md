@@ -7,7 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `e2e-extended-journeys` | Executing | Plan gated (full Fool pre-mortem, revised); T1 (E2E-12) + T2 (E2E-13) landed with per-task gates; coverage re-measured 92.44/77.77/91.15 | T3 docs closure → final battery → independent verification → PR |
+| `e2e-extended-journeys` | Verified | T1–T3 landed; independent verification PASS (9/9 AC clauses, 4/4 mutants killed); coverage 92.44/77.75/91.15 vs floors 88/72/86 | Open PR — stop for merge approval (merge cuts a minor release) |
 | `e2e-test-suite` | Shipped | — | None — PR #13 merged, released in v1.6.0; P3 deferral (E2E-12/13) closed by `e2e-extended-journeys` |
 | `arch3-runtime-env-loading` | Shipped | — | None — PR #11 merged, released in v1.5.0 |
 | `home-config-store` | Shipped | — | None — PR #9 merged, released in v1.4.0 |
