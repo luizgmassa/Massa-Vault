@@ -68,7 +68,13 @@ export function getFreePort() {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
     probe.unref();
-    probe.on("error", reject);
+    probe.on("error", (error) => {
+      reject(
+        new Error(
+          `[e2e:port] free-port probe failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      );
+    });
     probe.listen(0, "127.0.0.1", () => {
       const { port } = probe.address();
       probe.close(() => resolve(port));

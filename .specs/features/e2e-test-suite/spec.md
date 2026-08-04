@@ -46,7 +46,7 @@ The repo has 64 unit/integration test files, but nearly all exercise modules in-
 
 **Acceptance Criteria:**
 
-1. **[E2E-01]** WHEN a stub OpenAI-compatible backend and the real `tools/router-gateway/src/server.js` are running as child processes on ephemeral ports AND the user runs `node tools/cli.js chat "<msg>"` non-interactively (env: `MASSA_VAULT_CHAT_GATEWAY_URL` → gateway, kill-switches on, cwd = temp workspace) THEN the process SHALL exit 0 and stdout SHALL contain the stub's reply text.
+1. **[E2E-01]** WHEN a stub OpenAI-compatible backend and the real `tools/router-gateway/src/server.js` are running as child processes on ephemeral ports AND the user runs `node tools/cli.js chat "<msg>"` non-interactively (env: `MASSA_VAULT_CHAT_GATEWAY_URL` → gateway, kill-switches on, all state redirected into a temp workspace via `VAULT_PATH`/`MASSA_VAULT_CLI_CONFIG_PATH`) THEN the process SHALL exit 0 and stdout SHALL contain the stub's reply text. *(Mechanism corrected 2026-08-03: the client runs from the repo root — sibling-CLI resolution is cwd-relative by documented contract, and a RAG-off one-shot verifiably writes nothing cwd-relative; only the gateway child uses a temp cwd.)*
 2. **[E2E-02]** WHEN the chat in E2E-01 completes THEN a transcript file SHALL exist under the temp workspace state dir containing the user message, the reply, and decoded routing metadata (lane + resolved model) from the gateway's response headers.
 3. **[E2E-09]** WHEN a request reaches the gateway with `model` ≠ `smart-router` THEN the gateway SHALL respond 400 and the stub backend SHALL receive no request; WHEN `model` = `smart-router` THEN the stub SHALL receive a rewritten concrete model name from the generated-config fixture and the response SHALL carry routing headers. *(P2 tier within this story.)*
 4. WHEN the stub backend is stopped and the user runs the chat one-shot THEN the CLI SHALL exit non-zero with an error on stderr, not hang. *(edge AC, P2)*
@@ -71,7 +71,7 @@ The repo has 64 unit/integration test files, but nearly all exercise modules in-
 
 **Acceptance Criteria:**
 
-1. **[E2E-05]** WHEN a temp vault dir contains a changed note AND notes-automation is configured (env: `VAULT_PATH`, `NOTES_AUTOMATION_GIT_REPO_URL` → local bare repo, gdrive disabled) AND the user runs the one-shot sync CLI THEN the bare remote SHALL contain a new commit with the note, AND a second run with no changes SHALL create no further commit.
+1. **[E2E-05]** WHEN a temp vault dir contains a changed note AND notes-automation is configured for git-only sync with auto-push against a local bare remote AND the user runs the one-shot sync CLI THEN the bare remote SHALL contain a new commit with the note, AND a second run with no changes SHALL create no further commit. *(Mechanism corrected 2026-08-03: configuration travels via a temp-cwd `config/notes-automation.config.json` — `sync_strategy` has no env override — with the vault cloned from the bare remote so `origin/master` is pre-wired.)*
 
 **Independent Test:** run the sync E2E file alone; `git -C bare.git log` shows exactly one sync commit.
 
@@ -138,20 +138,20 @@ The repo has 64 unit/integration test files, but nearly all exercise modules in-
 
 | Requirement ID | Story | Priority | Phase | Status |
 | --- | --- | --- | --- | --- |
-| E2E-01 | P1-A chat | P1 | Design | Pending |
-| E2E-02 | P1-A chat | P1 | Design | Pending |
-| E2E-03 | P1-B lifecycle | P1 | Design | Pending |
-| E2E-04 | P1-B lifecycle | P1 | Design | Pending |
-| E2E-05 | P1-C sync | P1 | Design | Pending |
-| E2E-06 | P1-D hermetic | P1 | Design | Pending |
-| E2E-07 | P1-D gates | P1 | Design | Pending |
-| E2E-14 | P1-D harness | P1 | Design | Pending |
-| E2E-08 | P2-E MCP | P2 | Design | Pending |
-| E2E-09 | P1-A gateway contract | P2 | Design | Pending |
-| E2E-10 | P2-F config | P2 | Design | Pending |
-| E2E-11 | P1-B external detect | P2 | Design | Pending |
-| E2E-12 | P3-G conflicts | P3 | Backlog | Pending |
-| E2E-13 | P3-G gdrive | P3 | Backlog | Pending |
+| E2E-01 | P1-A chat | P1 | Execute | Implemented |
+| E2E-02 | P1-A chat | P1 | Execute | Implemented |
+| E2E-03 | P1-B lifecycle | P1 | Execute | Implemented |
+| E2E-04 | P1-B lifecycle | P1 | Execute | Implemented |
+| E2E-05 | P1-C sync | P1 | Execute | Implemented |
+| E2E-06 | P1-D hermetic | P1 | Execute | Implemented |
+| E2E-07 | P1-D gates | P1 | Execute | Implemented |
+| E2E-14 | P1-D harness | P1 | Execute | Implemented |
+| E2E-08 | P2-E MCP | P2 | Execute | Implemented |
+| E2E-09 | P1-A gateway contract | P2 | Execute | Implemented |
+| E2E-10 | P2-F config | P2 | Execute | Implemented |
+| E2E-11 | P1-B external detect | P2 | Execute | Implemented |
+| E2E-12 | P3-G conflicts | P3 | Backlog | Deferred (P3) |
+| E2E-13 | P3-G gdrive | P3 | Backlog | Deferred (P3) |
 
 **Coverage:** 14 total · 12 in-plan (P1+P2) · 2 backlog (P3, explicitly deferred — recorded here so deferral is a decision, not an omission).
 
