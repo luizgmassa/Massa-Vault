@@ -6,6 +6,13 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
+// Deadline timers must never hold the event loop open: when the raced
+// operation wins, the losing timer would otherwise keep the test process
+// alive for its full duration.
+function deadlineTimer(ms) {
+  return delay(ms, null, { ref: false });
+}
+
 // Why: E2E journeys spawn real subprocesses (gateway, mcp-server, CLIs) that
 //      must stay hermetic on a shared CI runner — ephemeral loopback ports,
 //      per-test temp cwd, config kill-switches, and guaranteed child teardown
@@ -114,7 +121,7 @@ export function spawnChild(t, command, args, { cwd, env, name }) {
   t.after(async () => {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
-      const graceful = await Promise.race([exited, delay(2000).then(() => null)]);
+      const graceful = await Promise.race([exited, deadlineTimer(2000)]);
       if (!graceful) child.kill("SIGKILL");
       await exited;
     }
@@ -126,7 +133,7 @@ export function spawnChild(t, command, args, { cwd, env, name }) {
     stderr: () => stderr,
     diagnostics,
     async waitForExit(deadlineMs = 30_000) {
-      const result = await Promise.race([exited, delay(deadlineMs).then(() => null)]);
+      const result = await Promise.race([exited, deadlineTimer(deadlineMs)]);
       if (!result) {
         throw new Error(
           `[e2e:exit] ${name} still running after ${deadlineMs}ms\n${diagnostics()}`
@@ -143,10 +150,18 @@ export function spawnChild(t, command, args, { cwd, env, name }) {
  * answers, and only failing runs pay the full deadline — the correct trade on
  * a CPU-starved CI runner (design D4 / pre-mortem #1).
  */
-export async function waitForHealth(url, { timeoutMs = 30_000, intervalMs = 100, diagnostics } = {}) {
+export async function waitForHealth(url, { timeoutMs = 30_000, intervalMs = 100, diagnostics, child } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastFailure = "no attempt";
   while (Date.now() < deadline) {
+    if (child && child.exitCode !== null) {
+      // Fast-fail instead of burning the whole deadline when the process is
+      // already gone (e.g. an EADDRINUSE crash the caller wants to retry).
+      const detail = diagnostics ? `\n${diagnostics()}` : "";
+      throw new Error(
+        `[e2e:health] child exited (code ${child.exitCode}) before ${url} became healthy${detail}`
+      );
+    }
     try {
       const response = await fetch(url);
       if (response.ok) return;
@@ -187,6 +202,9 @@ function listenOnFreePort(t, server) {
       t.after(
         () =>
           new Promise((done) => {
+            // Keep-alive sockets from still-running children would park
+            // close() until their timeout; drop them so teardown is instant.
+            server.closeAllConnections?.();
             server.close(() => done());
           })
       );
