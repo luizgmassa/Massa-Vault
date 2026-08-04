@@ -164,6 +164,28 @@ test("start brings services healthy, status reports them, stop reaps them", asyn
   await waitForHealth(`http://127.0.0.1:${gatewayPort}/health`);
   await waitForHealth(`http://127.0.0.1:${mcpPort}/health`);
 
+  // Wait until the daemon itself considers startup complete before stopping.
+  // KNOWN DEFECT (surfaced by this suite, follow-up filed in STATE.md):
+  // runForeground installs its SIGTERM handler only after startAllServices
+  // resolves, so a stop during startup kills the daemon via the default
+  // handler and orphans every service child. This test's AC is the
+  // healthy-then-stop lifecycle, so it waits out the window instead of
+  // asserting through the bug.
+  await waitUntil(
+    () => {
+      try {
+        const current = readStateServices(fixtures.statePath);
+        return (
+          current["router-gateway"]?.status === "running" &&
+          current["mcp-server"]?.status === "running"
+        );
+      } catch {
+        return false;
+      }
+    },
+    { label: "daemon finished startup", diagnostics: start.diagnostics }
+  );
+
   const status = runServerCli(t, ["status", "--json"], { ...fixtures, name: "server-status" });
   const statusExit = await status.waitForExit();
   assert.equal(statusExit.code, 0, status.diagnostics());

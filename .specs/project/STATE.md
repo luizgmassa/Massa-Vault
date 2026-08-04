@@ -23,6 +23,10 @@
 | D15 | Supervisor env-delivery path must be observable: canary port delivered only via the chosen mechanism, asserted end-to-end | Pre-mortem high finding: a silent fallback would let E2E-04/11 pass without proving the config-loader path |
 | D1–D9 | Prior features (`home-config-store`, `arch3-runtime-env-loading`) | Preserved in git history of this file; both features shipped |
 
+## Follow-ups surfaced (not in current scope)
+
+- **Supervisor stop-during-startup orphans services** (found by `e2e-server-lifecycle` flake sampling, 2026-08-03): `runForeground()` installs SIGINT/SIGTERM handlers only after `startAllServices()` resolves (`tools/server/src/services/supervisor.js`), so `massa-vault-server stop` during the startup window kills the daemon via Node's default handler and orphans every already-spawned service child. Fix candidate: install handlers before `startAllServices()` (reentrancy already guarded by `this.stopping`), plus a regression test. Deliberately not fixed inside the `e2e-test-suite` feature — production change outside spec scope.
+
 ## Risks accepted
 
 - SSE fragmentation robustness of the client parser beyond one deliberate mid-line split is out of scope (R10).
