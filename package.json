@@ -1,11 +1,11 @@
 {
-  "name": "massa-vault-tools",
+  "name": "massa-ai-vault-tools",
   "version": "1.7.0",
   "private": true,
   "type": "module",
   "bin": {
-    "massa-vault": "./tools/cli.js",
-    "massa-vault-server": "./tools/server/src/cli.js"
+    "mav": "./tools/cli.js",
+    "mavs": "./tools/server/src/cli.js"
   },
   "engines": {
     "node": ">=25.9.0"

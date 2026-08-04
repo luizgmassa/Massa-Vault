@@ -18,7 +18,7 @@ import path from "node:path";
  * These assertions cannot see the live ruleset (that needs credentials), so
  * they pin the repo side of the contract. The ruleset side stays a documented
  * residual risk, verified with:
- *   gh api repos/luizgmassa/massa-vault/rules/branches/master
+ *   gh api repos/luizgmassa/massa-ai-vault/rules/branches/master
  */
 const REQUIRED_STATUS_CHECKS = Object.freeze(["coverage", "test (25)"]);
 
