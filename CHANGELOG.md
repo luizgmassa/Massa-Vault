@@ -13,6 +13,20 @@ automatically.
 
 ## [Unreleased]
 
+### Added
+
+- End-to-end test suite (`tests/e2e-*.test.js` + `tests/helpers/e2e-harness.js`)
+  that assembles the real system as subprocesses: one-shot chat through the
+  real router-gateway against an OpenAI-compatible LiteLLM stub (streaming,
+  model rewrite, routing headers, transcript persistence), supervisor
+  start/status/stop with daemonized lifecycle, rollback on failed startup and
+  external-service detection, one-shot vault sync against a real git remote,
+  MCP grounded retrieval through a real MCP SDK session, and the
+  `config migrate` journey from a real `.env`. Hermetic by construction:
+  ephemeral loopback ports, per-test temp workspaces, config kill-switches,
+  guaranteed child teardown. CI's test job now also fails if the suite leaves
+  the working tree dirty.
+
 ## [1.5.0] - 2026-08-03
 
 ### Changed

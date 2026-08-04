@@ -105,3 +105,15 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # The E2E suite promises to leave the checkout untouched (temp-dir
+      # state, cwd-redirected children). A hermeticity guarantee nobody
+      # re-checks decays silently, so the tree is asserted clean right after
+      # the suite — automated, on every run, not a manual convention.
+      - name: Working tree still clean after tests
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::npm test dirtied the working tree:"
+            git status --porcelain
+            exit 1
+          fi
