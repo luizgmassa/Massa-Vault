@@ -13,6 +13,8 @@ automatically.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-04
+
 ### Added
 
 - Extended E2E journeys completing the suite's deferred P3 backlog
