@@ -177,6 +177,21 @@ export async function waitForHealth(url, { timeoutMs = 30_000, intervalMs = 100,
   );
 }
 
+/**
+ * Polls an arbitrary condition until it returns truthy or the deadline
+ * passes. For eventually-consistent observations (daemonized start/stop
+ * converge asynchronously; exit codes intentionally carry no startup result).
+ */
+export async function waitUntil(condition, { timeoutMs = 30_000, intervalMs = 100, label = "condition", diagnostics } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await delay(intervalMs);
+  }
+  const detail = diagnostics ? `\n${diagnostics()}` : "";
+  throw new Error(`[e2e:wait] ${label} not reached within ${timeoutMs}ms${detail}`);
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";

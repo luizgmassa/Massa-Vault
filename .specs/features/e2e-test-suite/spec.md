@@ -60,7 +60,7 @@ The repo has 64 unit/integration test files, but nearly all exercise modules in-
 **Acceptance Criteria:**
 
 1. **[E2E-03]** WHEN `server start` runs with a temp config defining Node-spawnable services on ephemeral ports (router-gateway + mcp-server; litellm/notes-automation disabled) THEN it SHALL exit 0 with all services healthy; `status --json` SHALL report `running: true` per service; `stop` SHALL exit 0, the child pids SHALL be dead, and the supervisor pid file SHALL be gone.
-2. **[E2E-04]** WHEN one configured service can never pass health (health URL points at a dead port) THEN `start` SHALL exit non-zero AND services started earlier in config order SHALL be stopped (no orphan processes).
+2. **[E2E-04]** WHEN one configured service can never pass health (health URL points at a dead port) THEN the supervisor daemon SHALL exit after rolling back, services started earlier in config order SHALL be stopped (no orphan processes — including the failing service's own child), and a subsequent `status --json` SHALL report `running: false`. *(SPEC_DEVIATION resolved 2026-08-03: `start` is fire-and-forget by design — it exits 0 once the daemon is spawned, so startup failure is observable through daemon exit + status/state, not through `start`'s exit code. Original AC assumed a synchronous start.)*
 3. **[E2E-11]** WHEN a service's health URL already answers healthy before `start` (pre-bound stub) THEN the supervisor SHALL mark it external and spawn nothing for it, AND `stop` SHALL leave it running. *(P2 tier within this story.)*
 
 **Independent Test:** run the supervisor E2E file alone; verify via `status --json` output and pid liveness checks.
