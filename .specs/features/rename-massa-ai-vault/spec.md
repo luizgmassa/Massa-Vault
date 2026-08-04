@@ -81,16 +81,16 @@ As the project owner, I want docs and the git remote to reference the canonical 
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| REN-01 package name | P1 | Design | Pending |
-| REN-02 bins `mav`/`mavs` | P1 | Design | Pending |
-| REN-03 env prefix `MASSA_AI_VAULT_` (static + dynamic + kill-switches) | P1 | Design | Pending |
-| REN-04 emitted strings (log tag, warnings, TUI, system prompt, MCP name) | P1 | Design | Pending |
-| REN-05 docs + examples | P2 | Design | Pending |
-| REN-06 git remote URL | P2 | Design | Pending |
-| REN-07 package-lock regeneration | P2 | Design | Pending |
-| REN-08 tests updated + suite green + CHANGELOG entry | P1 | Design | Pending |
+| REN-01 package name | P1 | Execute | Verified |
+| REN-02 bins `mav`/`mavs` | P1 | Execute | Verified |
+| REN-03 env prefix `MASSA_AI_VAULT_` (static + dynamic + kill-switches) | P1 | Execute | Verified |
+| REN-04 emitted strings (log tag, warnings, TUI, system prompt, MCP name) | P1 | Execute | Verified |
+| REN-05 docs + examples | P2 | Execute | Verified |
+| REN-06 git remote URL | P2 | Execute | Verified |
+| REN-07 package-lock regeneration | P2 | Execute | Verified |
+| REN-08 tests updated + suite green + CHANGELOG entry | P1 | Execute | Verified |
 
-**Coverage:** 8 total, 0 mapped to tasks yet.
+**Coverage:** 8 total, 8 mapped to tasks (T1-T4), 0 unmapped.
 
 ## Implicit-Requirement Sweep (Large — all dimensions)
 

@@ -5,14 +5,15 @@
     {
       "slug": "rename-massa-ai-vault",
       "title": "Project rename to massa-ai-vault: package/bins (mav/mavs), MASSA_AI_VAULT_ env prefix, emitted strings, docs, remote",
-      "status": "in-progress",
+      "status": "verified",
       "workflow": "spec-driven",
       "size": "large",
       "sessionId": "spec-rename-massa-ai-vault",
       "artifacts": {
         "spec": ".specs/features/rename-massa-ai-vault/spec.md",
         "design": ".specs/features/rename-massa-ai-vault/design.md",
-        "tasks": ".specs/features/rename-massa-ai-vault/tasks.md"
+        "tasks": ".specs/features/rename-massa-ai-vault/tasks.md",
+        "validation": ".specs/features/rename-massa-ai-vault/validation.md"
       },
       "requirements": 8,
       "tasks": 4,

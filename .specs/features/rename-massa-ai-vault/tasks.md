@@ -5,7 +5,7 @@
 Implement these tasks with the `massa-ai` skill: activate it by name and follow its Execute flow and Critical Rules. If the skill cannot be activated, STOP and tell the user.
 
 **Design**: `.specs/features/rename-massa-ai-vault/design.md`
-**Status**: Approved
+**Status**: Done
 
 ---
 
