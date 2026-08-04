@@ -50,6 +50,26 @@ function runVaultCli(args, env) {
   };
 }
 
+test("vault cli emits the exact .env deprecation notice when a legacy .env is present", () => {
+  // Plants a .env in a temp cwd so the notice fires deterministically,
+  // independent of whether the developer's checkout has one -- this is the
+  // content-level sensor on the notice string itself (validation mutant C).
+  withTempDir((tempDir) => {
+    fs.writeFileSync(path.join(tempDir, ".env"), "MASSA_AI_VAULT_CHAT_MODEL=from-env\n", "utf8");
+    const env = { ...process.env, MASSA_AI_VAULT_HOME_CONFIG: "off" };
+    delete env.MASSA_AI_VAULT_ENV_FILE;
+    const result = spawnSync(process.execPath, [VAULT_CLI, "config", "path"], {
+      cwd: tempDir,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    assert.equal(Number(result.status), 0);
+    const stderrLines = String(result.stderr || "").trim().split("\n").filter(Boolean);
+    assert.deepEqual(stderrLines, [ENV_DEPRECATION_NOTICE]);
+  });
+});
+
 test("vault status delegates to mavs status JSON", () => {
   withTempDir((tempDir) => {
     const configPath = path.join(tempDir, "server.config.json");
