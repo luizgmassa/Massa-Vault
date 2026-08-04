@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const VAULT_CLI = path.resolve("tools/cli.js");
 const ENV_DEPRECATION_NOTICE =
-  "massa-vault: loading configuration from .env is deprecated; run `massa-vault config migrate` to move it to the home config.";
+  "mav: loading configuration from .env is deprecated; run `mav config migrate` to move it to the home config.";
 
 // This spawns real subprocesses (tools/cli.js proxying to tools/server/src/cli.js)
 // inheriting this repo's actual cwd and env. When a developer has a real .env
@@ -50,7 +50,7 @@ function runVaultCli(args, env) {
   };
 }
 
-test("vault status delegates to massa-vault-server status JSON", () => {
+test("vault status delegates to mavs status JSON", () => {
   withTempDir((tempDir) => {
     const configPath = path.join(tempDir, "server.config.json");
     const statePath = path.join(tempDir, "server-state.json");

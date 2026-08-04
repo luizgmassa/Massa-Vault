@@ -8,7 +8,7 @@ export { main } from "./commands/runtime.js";
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   assertRepoRootCwd();
   main().catch((error) => {
-    console.error(`[massa-vault-server] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[mavs] ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   });
 }

@@ -104,7 +104,7 @@ test("parseArgs: no argv defaults command to status", async () => {
       () =>
         withCapturedIo(async ({ logs }) => {
           await callMain([], configPath);
-          assert.match(logs[0], /^\[massa-vault-server\] stopped$/);
+          assert.match(logs[0], /^\[mavs\] stopped$/);
         })
     );
   });
@@ -224,7 +224,7 @@ test("command 'start' dispatches to supervisor.startDetached and reports a fresh
           await callMain(["start"], configPath);
           assert.equal(calls.length, 1);
           assert.equal(calls[0].method, "startDetached");
-          assert.deepEqual(logs, ["[massa-vault-server] started with pid 4321"]);
+          assert.deepEqual(logs, ["[mavs] started with pid 4321"]);
         })
     );
   });
@@ -242,7 +242,7 @@ test("command 'start' reports already-running when supervisor.startDetached says
       () =>
         withCapturedIo(async ({ logs }) => {
           await callMain(["start"], configPath);
-          assert.deepEqual(logs, ["[massa-vault-server] already running with pid 555"]);
+          assert.deepEqual(logs, ["[mavs] already running with pid 555"]);
         })
     );
   });
@@ -263,7 +263,7 @@ test("command 'stop' dispatches to supervisor.stopDetached and reports the signa
         withCapturedIo(async ({ logs }) => {
           await callMain(["stop"], configPath);
           assert.deepEqual(calls, ["stopDetached"]);
-          assert.deepEqual(logs, ["[massa-vault-server] stop signal sent to pid 777"]);
+          assert.deepEqual(logs, ["[mavs] stop signal sent to pid 777"]);
         })
     );
   });
@@ -277,7 +277,7 @@ test("command 'stop' reports not-running when supervisor.stopDetached says so", 
       () =>
         withCapturedIo(async ({ logs }) => {
           await callMain(["stop"], configPath);
-          assert.deepEqual(logs, ["[massa-vault-server] not running"]);
+          assert.deepEqual(logs, ["[mavs] not running"]);
         })
     );
   });
@@ -303,8 +303,8 @@ test("command 'restart' dispatches stopDetached then startDetached, in that orde
           await callMain(["restart"], configPath);
           assert.deepEqual(calls, ["stop", "start"]);
           assert.deepEqual(logs, [
-            "[massa-vault-server] stopped",
-            "[massa-vault-server] started with pid 4321"
+            "[mavs] stopped",
+            "[mavs] started with pid 4321"
           ]);
         })
     );
@@ -331,7 +331,7 @@ test("command 'status' without --json prints the human-readable service summary"
         withCapturedIo(async ({ logs }) => {
           await callMain(["status"], configPath);
           assert.deepEqual(logs, [
-            "[massa-vault-server] running pid=4242",
+            "[mavs] running pid=4242",
             "- litellm: running pid=111",
             "- router-gateway: stopped no-pid"
           ]);
@@ -363,7 +363,7 @@ test("an unrecognized command falls into the default branch: usage on stderr and
       await callMain(["bogus-command"], configPath);
       assert.equal(logs.length, 0);
       assert.equal(errors.length, 1);
-      assert.match(errors[0], /Usage: massa-vault-server/);
+      assert.match(errors[0], /Usage: mavs/);
       assert.deepEqual(exitCalls, [1]);
     });
   });

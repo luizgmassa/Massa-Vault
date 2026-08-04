@@ -253,7 +253,7 @@ test("vault cli config migrate refuses to write a document with a missing notes.
       assert.ok(
         calls.logError.some((line) => line.includes("notes.vault_path is missing or empty"))
       );
-      assert.ok(calls.logError.some((line) => line.includes("massa-vault configure")));
+      assert.ok(calls.logError.some((line) => line.includes("mav configure")));
       assert.equal(fs.existsSync(targetPath), false);
     });
   });

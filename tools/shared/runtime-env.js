@@ -7,7 +7,7 @@ function warnDeprecatedEnvFileOnce({ stderr = process.stderr } = {}) {
   if (warned) return;
   warned = true;
   stderr.write(
-    "massa-vault: loading configuration from .env is deprecated; run `massa-vault config migrate` to move it to the home config.\n"
+    "mav: loading configuration from .env is deprecated; run `mav config migrate` to move it to the home config.\n"
   );
 }
 

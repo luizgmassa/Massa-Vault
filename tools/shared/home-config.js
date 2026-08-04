@@ -134,7 +134,7 @@ export function readHomeConfig({
     return { loaded: true, path: configPath, document };
   } catch (error) {
     stderr.write(
-      `massa-vault: ignoring malformed home config at ${configPath}: ${
+      `mav: ignoring malformed home config at ${configPath}: ${
         error instanceof Error ? error.message : String(error)
       }\n`
     );

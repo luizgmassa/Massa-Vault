@@ -140,7 +140,7 @@ test("Ink chat renders compact header/footer format", async (t) => {
 
     await delay(20);
     const frame = app.lastFrame();
-    assert.match(frame, /Massa Vault AI Assistant/);
+    assert.match(frame, /Massa AI Vault Assistant/);
     assert.match(frame, /Gateway: .* \| Model: pending @ unknown via unknown \| Auth: (On|Off)/);
     assert.doesNotMatch(frame, /smart-router/);
     assert.match(frame, /you>/);
@@ -1015,7 +1015,7 @@ test("Ink /usage opens info screen and /back restores conversation", async (t) =
   await driver.submit("/back");
   await delay(20);
   frame = app.lastFrame();
-  assert.match(frame, /massa-vault chat started/i);
+  assert.match(frame, /massa-ai-vault chat started/i);
   app.unmount();
 });
 
@@ -1072,7 +1072,7 @@ test("Ink /sync status switches to sync screen, blocks prompts, and /back restor
     assert.match(frame, /\n Sync status\n/i);
     assert.match(frame, /Refresh every 2s\./i);
     assert.match(frame, /Daemon/i);
-    assert.doesNotMatch(frame, /massa-vault chat started/i);
+    assert.doesNotMatch(frame, /massa-ai-vault chat started/i);
 
     await driver.submit("this should be blocked");
     await delay(20);
@@ -1084,7 +1084,7 @@ test("Ink /sync status switches to sync screen, blocks prompts, and /back restor
     await driver.submit("/back");
     await delay(30);
     frame = app.lastFrame();
-    assert.match(frame, /massa-vault chat started/i);
+    assert.match(frame, /massa-ai-vault chat started/i);
 
     await driver.submit("hello");
     await delay(40);
@@ -1311,7 +1311,7 @@ test("Ink history flow supports /back stack navigation end-to-end", async (t) =>
       await driver.submit("/back");
       await delay(20);
       frame = app.lastFrame();
-      assert.match(frame, /massa-vault chat started/i);
+      assert.match(frame, /massa-ai-vault chat started/i);
 
       await driver.submit("resume chat");
       await delay(30);
