@@ -7,7 +7,8 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `e2e-test-suite` | Verified | T1–T9 landed; independent verification PASS (12/12 requirements, 4/4 mutants killed); two green CI samples | **PR #13 open, CI fully green** — awaiting merge approval; merge cuts v1.6.0 |
+| `e2e-extended-journeys` | Verified | T1–T3 landed; independent verification PASS (9/9 AC clauses, 4/4 mutants killed); coverage 92.44/77.75/91.15 vs floors 88/72/86 | Open PR — stop for merge approval (merge cuts a minor release) |
+| `e2e-test-suite` | Shipped | — | None — PR #13 merged, released in v1.6.0; P3 deferral (E2E-12/13) closed by `e2e-extended-journeys` |
 | `arch3-runtime-env-loading` | Shipped | — | None — PR #11 merged, released in v1.5.0 |
 | `home-config-store` | Shipped | — | None — PR #9 merged, released in v1.4.0 |
 
@@ -25,13 +26,14 @@
 
 ## Follow-ups surfaced (not in current scope)
 
+- **First `both`-mode sync always classifies dangerous via marker self-import** (found by `e2e-extended-journeys` E2E-13, 2026-08-04): `syncToGoogleDrive` writes the first-run marker `<vault>/.automation/gdrive-resync.done` after a successful bisync (`tools/notes-automation/src/infrastructure/gdrive.js:386-390`), but `captureGDriveImportBaseline` snapshotted internal artifacts *before* the bisync — so `classifyGDriveImport` reports `internal_artifact_imported`, classifies the first-ever `both`-mode import `dangerous`, pauses sync, and withholds the post-import push. Real first-run UX: every fresh `both` setup pauses for review on its first sync. Fix candidates: include adapter-written markers in the baseline, or exclude the marker path from `importedInternalPaths`. Deliberately not fixed inside the test-only `e2e-extended-journeys` feature; E2E-13 pins the shipped behavior.
 - **Supervisor stop-during-startup orphans services** (found by `e2e-server-lifecycle` flake sampling, 2026-08-03): `runForeground()` installs SIGINT/SIGTERM handlers only after `startAllServices()` resolves (`tools/server/src/services/supervisor.js`), so `massa-vault-server stop` during the startup window kills the daemon via Node's default handler and orphans every already-spawned service child. Fix candidate: install handlers before `startAllServices()` (reentrancy already guarded by `this.stopping`), plus a regression test. Deliberately not fixed inside the `e2e-test-suite` feature — production change outside spec scope.
 
 ## Risks accepted
 
 - SSE fragmentation robustness of the client parser beyond one deliberate mid-line split is out of scope (R10).
 - Port retry is bounded at one attempt; labeled errors make a residual collision diagnosable (R5/pre-mortem #5).
-- P3 journeys (sync conflicts, fake-gdrive) recorded in spec traceability, deliberately deferred.
+- ~~P3 journeys (sync conflicts, fake-gdrive) recorded in spec traceability, deliberately deferred.~~ Closed 2026-08-04 by `e2e-extended-journeys` (E2E-12/13 implemented).
 
 ## Blockers
 

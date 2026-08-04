@@ -1,11 +1,37 @@
 {
   "version": 1,
-  "active_feature": "e2e-test-suite",
+  "active_feature": "e2e-extended-journeys",
   "features": [
+    {
+      "slug": "e2e-extended-journeys",
+      "title": "E2E extended journeys: sync conflict path (E2E-12) and fake-rclone gdrive both-mode journey (E2E-13)",
+      "status": "verified",
+      "workflow": "spec-driven",
+      "size": "medium",
+      "sessionId": "spec-e2e-extended-journeys",
+      "parent": "e2e-test-suite",
+      "artifacts": {
+        "spec": ".specs/features/e2e-extended-journeys/spec.md",
+        "validation": ".specs/features/e2e-extended-journeys/validation.md"
+      },
+      "requirements": 2,
+      "tasks": 3,
+      "phaseSkips": {
+        "design": "parent design D2/D3 covers harness+wiring; new design facts recorded as Fixture Calibrations in spec.md",
+        "tasks": "3 obvious linear steps, inline in spec.md"
+      },
+      "planChallenge": {
+        "gate": "full",
+        "mode": "pre_mortem",
+        "outcome": "revised",
+        "criticalFindings": 1,
+        "highFindings": 1
+      }
+    },
     {
       "slug": "e2e-test-suite",
       "title": "E2E test suite: real-subprocess journeys for chat, server lifecycle, sync, MCP, config migrate",
-      "status": "verified",
+      "status": "complete",
       "workflow": "spec-driven",
       "size": "large",
       "sessionId": "spec-e2e-test-suite",
