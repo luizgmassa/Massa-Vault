@@ -8,6 +8,7 @@ import {
   getFreePort,
   repoPath,
   spawnChild,
+  startStubHealthServer,
   waitForHealth,
   waitUntil
 } from "./helpers/e2e-harness.js";
@@ -255,4 +256,64 @@ test("start rolls back already-started services when one never gets healthy", as
   const statusExit = await status.waitForExit();
   assert.equal(statusExit.code, 0, status.diagnostics());
   assert.equal(JSON.parse(status.stdout()).running, false);
+});
+
+test("pre-existing healthy service is marked external and survives stop", async (t) => {
+  const fixtures = lifecycleFixtures(t, "e2e-server-external");
+  const external = await startStubHealthServer(t);
+  const gatewayPort = await getFreePort();
+  writeServerConfig({
+    ...fixtures,
+    services: {
+      "router-gateway": gatewayService(gatewayPort),
+      // Health URL answers before start; if the supervisor wrongly spawned
+      // the command anyway, the child would die instantly and startup would
+      // fail — so a green start proves no spawn happened.
+      "mcp-server": {
+        enabled: true,
+        command: "node",
+        args: ["-e", "process.exit(1);"],
+        health_url: `${external.url}/health`
+      }
+    }
+  });
+
+  const start = runServerCli(t, ["start"], { ...fixtures, name: "server-start-external" });
+  const startExit = await start.waitForExit();
+  assert.equal(startExit.code, 0, start.diagnostics());
+
+  // start is fire-and-forget: wait until the daemon finished bringing both
+  // services up before inspecting the recorded state.
+  await waitForHealth(`http://127.0.0.1:${gatewayPort}/health`);
+  await waitUntil(
+    () => {
+      try {
+        const current = readStateServices(fixtures.statePath);
+        return current["router-gateway"]?.status === "running" &&
+          current["mcp-server"]?.running === true;
+      } catch {
+        return false;
+      }
+    },
+    { label: "startup converged", diagnostics: start.diagnostics }
+  );
+
+  // E2E-11: recorded as external, no pid owned.
+  const services = readStateServices(fixtures.statePath);
+  assert.equal(services["mcp-server"].external, true);
+  assert.equal(services["mcp-server"].running, true);
+  assert.equal(services["mcp-server"].pid, null);
+
+  const stop = runServerCli(t, ["stop"], { ...fixtures, name: "server-stop-external" });
+  const stopExit = await stop.waitForExit();
+  assert.equal(stopExit.code, 0, stop.diagnostics());
+  await waitUntil(() => !isPidAlive(services["router-gateway"].pid), {
+    label: "owned gateway reaped on stop",
+    diagnostics: stop.diagnostics
+  });
+
+  // E2E-11: stop never kills what it does not own — the external service
+  // still answers.
+  const response = await fetch(`${external.url}/health`);
+  assert.equal(response.ok, true);
 });
