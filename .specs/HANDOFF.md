@@ -1,26 +1,23 @@
 # Session Handoff
 
-**Updated:** 2026-08-03 · **Session:** `spec-runtime-env-loading` (spec-driven, TLC v3)
+**Updated:** 2026-08-03 · **Session:** `spec-e2e-test-suite` (spec-driven, TLC v3)
 
 ## Where things stand
 
-`arch3-runtime-env-loading` executed T1-T7 on branch `refactor/arch3-runtime-env-loading`:
+`e2e-test-suite` fully executed on branch `feat/e2e-test-suite` (worktree `/Users/luizmassa/Projects/massa-vault-e2e`):
 
-- T1 `c64e734c` — `MASSA_VAULT_ENV_FILE=off` in `loadLocalEnv` + dual-switch test helper + discipline sensor (the falsification-mandated prerequisite).
-- T2 `01a26fa8` / T3 `8d806747` / T4 `5d3a4be4` — router-gateway, mcp-server, notes-automation loads moved into entrypoint guards.
-- T5 `becb4e74` — `tools/cli.js` load moved inside its guard.
-- T6 `716b0f4e` — chat-config frozen consts → `resolveDefault*()` resolvers, 12 consumers updated; sensor caught and fixed a second latent freeze (`transcript-store.js` module-level default store).
-- T7 — CLAUDE.md retires the first-import constraint, CHANGELOG `### Changed` (dry-run derives 1.5.0), poison sensor PASS (627/627 with divergent poison home config + real `.env` present).
+- Plan `372d76cf` — spec (14 reqs) + design + tasks; full Fool pre-mortem gate (1 critical, 2 high → revised).
+- T1 `db4e0306` harness · T2 `209172c2` chat journey · T3 `2645706a` chat contract/edge · T4 `2b1205db` lifecycle+rollback · fix `beae7321` startup-convergence (surfaced real supervisor bug) · T5 `1991b710` external detection · T6 `2733bd93` sync · T7 `cc7a506b` MCP · T8 `05076ed5` config migrate · T9 `df3d657f` docs+CI porcelain guard · validation `3b4e822d`.
+- Independent verification PASS: 12/12 requirements, 4/4 mutants killed, coverage re-measured 92.06/77.62/90.72 vs floors 88/72/86.
 
 ## Next
 
-Verification PASS (validation.md committed, `eb346039`; M2 gap closed by
-`1e415d90`). **PR #11 open with CI fully green** (`test (25)`, `coverage`,
-CodeQL): https://github.com/luizgmassa/massa-ai-vault/pull/11 — awaiting the
-user's merge approval. Merging releases **v1.5.0** automatically.
+**PR #13 open with CI fully green twice** (test (25), coverage, CodeQL — initial + manual rerun, zero flakes): https://github.com/luizgmassa/massa-ai-vault/pull/13 — awaiting the user's merge approval. Merging releases **v1.6.0** automatically (### Added). One final bookkeeping push after verification triggers a fresh CI run; confirm green before merging.
 
 ## Care points
 
-- massa-ai MCP server unreachable three sessions running — memory sync skipped; `.specs/` is canonical.
-- rtk-wrapped `npm run lint` false-fails; use `npx oxlint`.
+- massa-ai MCP server unreachable fourth session running — memory sync skipped; `.specs/` canonical.
+- **Found supervisor defect** (STATE.md Follow-ups): stop during startup orphans service children (`runForeground` installs SIGTERM handler after `startAllServices`). Fix candidate filed; not in this feature's scope.
+- P3 backlog: E2E-12 (sync conflicts), E2E-13 (fake-gdrive journey).
+- rtk-wrapped `npm run lint` false-fails; use `rtk proxy npm run lint`.
 - `audits/`, `SYSTEM-ANALYSIS-REPORT.md`, `.ua/` stay untracked.

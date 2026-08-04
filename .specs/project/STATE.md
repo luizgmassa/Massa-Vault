@@ -7,7 +7,7 @@
 
 | Feature | Status | Phase | Next |
 |---|---|---|---|
-| `e2e-test-suite` | Executing | Specify + Design + Tasks done; pre-mortem gate passed (revised) | Execute T1–T9 on `feat/e2e-test-suite` (worktree `/Users/luizmassa/Projects/massa-vault-e2e`) |
+| `e2e-test-suite` | Verified | T1–T9 landed; independent verification PASS (12/12 requirements, 4/4 mutants killed); two green CI samples | **PR #13 open, CI fully green** — awaiting merge approval; merge cuts v1.6.0 |
 | `arch3-runtime-env-loading` | Shipped | — | None — PR #11 merged, released in v1.5.0 |
 | `home-config-store` | Shipped | — | None — PR #9 merged, released in v1.4.0 |
 

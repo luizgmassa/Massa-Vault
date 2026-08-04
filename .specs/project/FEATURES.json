@@ -5,7 +5,7 @@
     {
       "slug": "e2e-test-suite",
       "title": "E2E test suite: real-subprocess journeys for chat, server lifecycle, sync, MCP, config migrate",
-      "status": "executing",
+      "status": "verified",
       "workflow": "spec-driven",
       "size": "large",
       "sessionId": "spec-e2e-test-suite",

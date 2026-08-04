@@ -201,3 +201,12 @@ No Blocker/Major findings. Two Minor/Cosmetic gaps recorded for optional follow-
 3. Uncommitted `spec.md`/`tasks.md` doc edits sitting in the worktree — should be committed or discarded before merge (not a code defect).
 
 **Next steps**: none required to reach PASS. If the team wants zero follow-up debt before merge, land Finding 1 and Finding 2 as a tiny doc/observability patch, and commit or discard the pending `spec.md`/`tasks.md` edits. Open the PR to obtain the two green CI samples E2E-07 asks for; record them here once available (currently ⏳ PENDING).
+
+## CI calibration evidence (E2E-07, appended post-verification)
+
+Two green CI samples of the full suite on `ubuntu-latest`, same head (`3b4e822d`):
+
+1. PR #13 initial run — `test (25)` SUCCESS, `coverage` SUCCESS (+ CodeQL, Analyze ×2).
+2. Manual rerun of both workflows (CI run 30871988470, Coverage run 30871988395) — `completed:success` / `completed:success`.
+
+Zero E2E flakes in either sample. Local suite delta: 18.7s total vs 17.2s pre-E2E baseline (~1.4s wall-clock cost under default `node --test` concurrency). The new "Working tree still clean after tests" step passed in both samples.
