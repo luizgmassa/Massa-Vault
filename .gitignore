@@ -18,5 +18,10 @@ node_modules/
 # .obsidian/plugins/google-drive-sync/data.json in the initial commit.
 .obsidian/
 
+# understand-anything transient state: analysis scratch + soft-deleted runs.
+# The durable knowledge graph (.ua/*.json, .ua/.understandignore) is tracked.
+.ua/.trash-*/
+.ua/intermediate/
+
 # OS files
 .DS_Store
